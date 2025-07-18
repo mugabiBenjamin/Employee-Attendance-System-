@@ -20,6 +20,16 @@ uvicorn main:app --reload
 ## Project Structure
 
 ```plaintext
+.
+└── backend
+    ├── README.md
+    └── backend/
+        ├── README.md
+        ├── pyproject.toml
+        ├── uv.lock
+        ├── .env.example
+        └── app/
+            └── main.py
 
 ```
 
