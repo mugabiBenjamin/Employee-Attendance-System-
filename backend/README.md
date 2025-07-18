@@ -1,5 +1,10 @@
 # backend
 
+- [Installation](#installation)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [Environment Variables](#environment-variables)
+
 ## Installation
 
 ```bash
@@ -34,18 +39,7 @@ uvicorn main:app --reload
 
 ## Environment Variables
 
-Create a `.env` file and add the following environment variables:
-
-```env
-# JWT Configuration
-SECRET_KEY=your-secret-key
-ALGORITHM=HS256
-
-# Database Configuration
-DATABASE_URL=sqlite:///./dbname.db
-# For PostgreSQL: postgresql://username:password@localhost/dbname
-# For MySQL: mysql://username:password@localhost/dbname
-```
+From `env.example` create an `.env` file
 
 ## Generate a Secret Key
 
@@ -58,21 +52,6 @@ openssl rand -hex 32
 # Both generate a 32-byte hex string. Copy the output and use it as your SECRET_KEY in the auth file.
 ```
 
-## Note -> `bcrypt 4.3.0+` has breaking changes with passlib
+### Note: `bcrypt 4.3.0+` has breaking changes with passlib
 
-```bash
-# Install uv if not already installed
-pip install uv
-
-# Initialize project with uv
-uv init
-
-# Install dependencies
-uv add -r pyproject.toml
-
-# Add all dependencies in one go
-uv add fastapi uvicorn[standard] sqlmodel sqlalchemy asyncpg alembic pydantic pydantic-settings python-jose[cryptography] passlib[bcrypt] python-multipart httpx fastapi-mail python-dateutil pytz aiofiles celery redis openpyxl reportlab structlog python-dotenv fastapi-cors
-
-# Add dev dependencies
-uv add --dev pytest pytest-asyncio pytest-cov httpx black isort flake8 mypy pre-commit ipython
-```
+[Back to Top](#backend)
