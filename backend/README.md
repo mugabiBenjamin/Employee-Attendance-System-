@@ -30,7 +30,6 @@ uvicorn main:app --reload
         ├── .env.example
         └── app/
             └── main.py
-
 ```
 
 ## Environment Variables
