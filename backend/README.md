@@ -70,6 +70,9 @@ uv init
 # Install dependencies
 uv add -r pyproject.toml
 
-# Install dev dependencies
+# Add all dependencies in one go
+uv add fastapi uvicorn[standard] sqlmodel sqlalchemy asyncpg alembic pydantic pydantic-settings python-jose[cryptography] passlib[bcrypt] python-multipart httpx fastapi-mail python-dateutil pytz aiofiles celery redis openpyxl reportlab structlog python-dotenv fastapi-cors
+
+# Add dev dependencies
 uv add --dev pytest pytest-asyncio pytest-cov httpx black isort flake8 mypy pre-commit ipython
 ```
