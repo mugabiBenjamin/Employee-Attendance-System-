@@ -1,7 +1,8 @@
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from typing import List, Optional
-from datetime import date
+from datetime import datetime
 from app.models.leave import LeaveRequest, LeaveBalance
 from app.models.user import User
 from app.schemas.leave import LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut
@@ -30,7 +31,7 @@ async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCrea
         logger.info(f"Leave request created for user_id {leave_request.user_id}, leave_id {db_leave.leave_id}")
         return LeaveRequestOut.from_orm(db_leave)
     except Exception as e:
-        logger.error(f"ソー "Error creating leave request: {str(e)}")
+        logger.error(f"Error creating leave request: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating leave request")
 
 async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: LeaveRequestUpdate, current_user: User) -> LeaveRequestOut:
@@ -39,7 +40,7 @@ async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: Le
         if not db_leave:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave request not found")
         
-        for attr, value in leave_update.dict(exclude_unset=True).items():
+        for attr, value in leave_update.model_dump(exclude_unset=True).items():
             if attr == "status" and value in ["approved", "rejected"]:
                 setattr(db_leave, attr, value)
                 setattr(db_leave, "approved_by", current_user.user_id)

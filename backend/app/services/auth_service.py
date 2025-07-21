@@ -72,7 +72,7 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> User:
     
     hashed_password = get_password_hash(user_create.password)
     db_user = User(
-        **user_create.dict(exclude={"password"}),
+        **user_create.model_dump(exclude={"password"}),
         password_hash=hashed_password,
         employee_id=f"EMP{str(uuid.uuid4())[:6].upper()}"
     )

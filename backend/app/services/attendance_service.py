@@ -17,7 +17,7 @@ async def create_attendance(db: AsyncSession, attendance_create: AttendanceCreat
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attendance already recorded for this date")
     
-    db_attendance = Attendance(**attendance_create.dict())
+    db_attendance = Attendance(**attendance_create.model_dump())
     db.add(db_attendance)
     await db.commit()
     await db.refresh(db_attendance)
@@ -34,7 +34,7 @@ async def update_attendance(db: AsyncSession, attendance_id: int, attendance_upd
     if attendance.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this attendance")
     
-    update_data = attendance_update.dict(exclude_unset=True)
+    update_data = attendance_update.model_dump(exclude_unset=True)
     if "clock_out_time" in update_data and update_data["clock_out_time"]:
         if update_data["clock_out_time"] <= attendance.clock_in_time:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Clock out time must be after clock in time")
