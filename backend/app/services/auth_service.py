@@ -1,11 +1,13 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
+import uuid
 from fastapi import HTTPException, status
+from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token
 from app.models.user import User
-from app.schemas.user import UserAuth, Token
+from app.schemas.user import UserAuth, Token, UserCreate
 from app.core.config import settings
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[User]:
