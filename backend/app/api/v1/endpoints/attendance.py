@@ -6,6 +6,7 @@ from app.schemas.attendance import AttendanceCreate, AttendanceUpdate, Attendanc
 from app.services.attendance_service import create_attendance, update_attendance, get_attendance_by_id, get_user_attendance
 from app.api.deps import get_db_session, get_current_active_user
 from app.models.user import User
+from app.models.roles import UserRoles, Role  # Changed: Import user_roles and roles from app.models.roles
 from app.core.config import settings
 
 router = APIRouter()
@@ -51,10 +52,9 @@ async def get_attendance_history(
 
 async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
     from sqlmodel import select
-    from app.models.user import user_roles, roles
-    query = select(user_roles).join(roles).where(
-        user_roles.user_id == user.user_id,
-        roles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
+    query = select(UserRoles).join(Role).where(
+        UserRoles.user_id == user.user_id,
+        Role.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     return result.first() is not None

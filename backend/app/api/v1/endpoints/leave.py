@@ -6,6 +6,7 @@ from app.schemas.leave import LeaveRequestCreate, LeaveRequestUpdate, LeaveReque
 from app.services.leave_service import create_leave_request, update_leave_request, get_leave_request_by_id, get_user_leave_requests, get_leave_balance
 from app.api.deps import get_db_session, get_current_active_user, get_current_manager_user
 from app.models.user import User
+from app.models.roles import UserRoles, Role
 from app.core.config import settings
 
 router = APIRouter()
@@ -100,10 +101,9 @@ async def reject_leave_request(
 
 async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
     from sqlmodel import select
-    from app.models.user import user_roles, roles
-    query = select(user_roles).join(roles).where(
-        user_roles.user_id == user.user_id,
-        roles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
+    query = select(UserRoles).join(Role).where(
+        UserRoles.user_id == user.user_id,
+        Role.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     return result.first() is not None

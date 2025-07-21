@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.user import User, user_roles, roles
+from app.models.user import User
+from app.models.roles import UserRoles, Role
 from app.core.config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
@@ -23,9 +24,9 @@ async def get_current_admin_user(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session)
 ) -> User:
-    query = select(User).join(user_roles).join(roles).where(
+    query = select(User).join(UserRoles).join(Role).where(
         User.user_id == current_user.user_id,
-        roles.role_name.in_(["Admin", "Super_Admin"])
+        Role.role_name.in_(["Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     if not result.scalar_one_or_none():
@@ -36,9 +37,9 @@ async def get_current_manager_user(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session)
 ) -> User:
-    query = select(User).join(user_roles).join(roles).where(
+    query = select(User).join(UserRoles).join(Role).where(
         User.user_id == current_user.user_id,
-        roles.role_name == "Manager"
+        Role.role_name == "Manager"
     )
     result = await db.execute(query)
     if not result.scalar_one_or_none():
@@ -49,9 +50,9 @@ async def get_current_hr_user(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session)
 ) -> User:
-    query = select(User).join(user_roles).join(roles).where(
+    query = select(User).join(UserRoles).join(Role).where(
         User.user_id == current_user.user_id,
-        roles.role_name == "HR"
+        Role.role_name == "HR"
     )
     result = await db.execute(query)
     if not result.scalar_one_or_none():
