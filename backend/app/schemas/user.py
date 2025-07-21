@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, date
 
 class UserBase(BaseModel):
@@ -9,7 +9,7 @@ class UserBase(BaseModel):
     phone: Optional[str] = None
     employee_type: str = "full_time"
 
-    @validator("phone", allow_reuse=True)
+    @field_validator("phone", allow_reuse=True)
     def validate_phone(cls, v):
         if v is not None and not v:
             raise ValueError("Phone number cannot be empty if provided")
@@ -25,7 +25,7 @@ class UserCreate(UserBase):
     salary: Optional[float] = None
     manager_id: Optional[int] = None
 
-    @validator("password", allow_reuse=True)
+    @field_validator("password", allow_reuse=True)
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")
@@ -38,7 +38,7 @@ class UserUpdate(UserBase):
     manager_id: Optional[int] = None
     is_active: Optional[bool] = None
 
-    @validator("password", allow_reuse=True)
+    @field_validator("password", allow_reuse=True)
     def validate_password(cls, v):
         if v is not None and len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")
@@ -60,7 +60,7 @@ class UserAuth(BaseModel):
     email: EmailStr
     password: str
 
-    @validator("password", allow_reuse=True)
+    @field_validator("password", allow_reuse=True)
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")
