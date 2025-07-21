@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +48,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -
     for key, value in update_data.items():
         setattr(user, key, value)
     
-    user.updated_at = datetime.now(datetime.timezone.utc)()
+    user.updated_at = datetime.now(timezone.utc)()
     await db.commit()
     await db.refresh(user)
     return UserOut.model_validate(user)
@@ -59,7 +59,7 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
     user.is_active = False
-    user.deleted_at = datetime.now(datetime.timezone.utc)()
+    user.deleted_at = datetime.now(timezone.utc)()
     await db.commit()
 
 async def get_users(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[UserOut]:

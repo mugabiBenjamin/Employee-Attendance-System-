@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import uuid
 from fastapi import HTTPException, status
@@ -32,7 +32,7 @@ async def login_for_access_token(db: AsyncSession, user_auth: UserAuth) -> Token
     )
     refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
     
-    user.last_login = datetime.now(datetime.timezone.utc)()
+    user.last_login = datetime.now(timezone.utc)()
     await db.commit()
     
     return Token(

@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 
 class User(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, primary_key=True)
@@ -17,5 +17,5 @@ class User(SQLModel, table=True):
     is_active: bool = Field(default=True)
     deleted_at: Optional[datetime] = Field(default=None)
     last_login: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))

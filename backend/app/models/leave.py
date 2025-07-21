@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 class LeaveRequest(SQLModel, table=True):
     leave_id: Optional[int] = Field(default=None, primary_key=True)
@@ -15,8 +15,8 @@ class LeaveRequest(SQLModel, table=True):
     approved_at: Optional[datetime] = Field(default=None)
     comments: Optional[str] = Field(default=None)
     attachment_url: Optional[str] = Field(default=None, max_length=500)
-    created_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
 
 class LeaveBalance(SQLModel, table=True):
     balance_id: Optional[int] = Field(default=None, primary_key=True)
@@ -26,4 +26,4 @@ class LeaveBalance(SQLModel, table=True):
     used_days: int = Field(default=0, ge=0)
     carried_forward: int = Field(default=0, ge=0)
     year: int = Field(default_factory=lambda: datetime.now().year)
-    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))

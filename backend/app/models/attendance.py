@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
-from datetime import datetime, date as dt
+from datetime import datetime, date as dt, timezone
 
 class Attendance(SQLModel, table=True):
     attendance_id: Optional[int] = Field(default=None, primary_key=True)
@@ -14,5 +14,5 @@ class Attendance(SQLModel, table=True):
     status: str = Field(default="present")
     ip_address: Optional[str] = Field(default=None)
     location: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))

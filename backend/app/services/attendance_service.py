@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from app.models.attendance import Attendance
 from app.models.user import User
 from app.schemas.attendance import AttendanceCreate, AttendanceUpdate, AttendanceOut
@@ -44,7 +44,7 @@ async def update_attendance(db: AsyncSession, attendance_id: int, attendance_upd
     for key, value in update_data.items():
         setattr(attendance, key, value)
     
-    attendance.updated_at = datetime.now(datetime.timezone.utc)()
+    attendance.updated_at = datetime.now(timezone.utc)()
     await db.commit()
     await db.refresh(attendance)
     return AttendanceOut.model_validate(attendance)
