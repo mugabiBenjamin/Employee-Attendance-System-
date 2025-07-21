@@ -10,6 +10,6 @@ class Role(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserRoles(SQLModel, table=True):
-    user_id: int = Field(foreign_key="users.user_id", primary_key=True)
-    role_id: int = Field(foreign_key="roles.id", primary_key=True)
+    user_id: int = Field(foreign_key="user.user_id", primary_key=True)
+    role_id: int = Field(foreign_key="role.id", primary_key=True)
     assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

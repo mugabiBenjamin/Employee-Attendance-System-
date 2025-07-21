@@ -13,7 +13,7 @@ class User(SQLModel, table=True):
     hire_date: datetime = Field(nullable=False)
     employee_type: str = Field(default="full_time")
     salary: Optional[float] = Field(default=None, ge=0)
-    manager_id: Optional[int] = Field(default=None, foreign_key="users.user_id")
+    manager_id: Optional[int] = Field(default=None, foreign_key="user.user_id")
     is_active: bool = Field(default=True)
     deleted_at: Optional[datetime] = Field(default=None)
     last_login: Optional[datetime] = Field(default=None)

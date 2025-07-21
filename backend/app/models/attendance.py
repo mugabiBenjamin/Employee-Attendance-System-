@@ -4,7 +4,7 @@ from datetime import datetime, date as dt, timezone
 
 class Attendance(SQLModel, table=True):
     attendance_id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="users.user_id", nullable=False)
+    user_id: int = Field(foreign_key="user.user_id", nullable=False)
     clock_in_time: datetime = Field(nullable=False)
     clock_out_time: Optional[datetime] = Field(default=None)
     break_duration: int = Field(default=0, ge=0)
