@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import uuid
 from fastapi import HTTPException, status
-from jose import JWTError
+from jose import jwt, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token
