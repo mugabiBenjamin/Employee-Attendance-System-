@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
-from datetime import datetime, date
+from datetime import datetime, date as dt
 
 class Attendance(SQLModel, table=True):
     attendance_id: Optional[int] = Field(default=None, primary_key=True)
@@ -10,7 +10,7 @@ class Attendance(SQLModel, table=True):
     break_duration: int = Field(default=0, ge=0)
     total_hours: Optional[float] = Field(default=None, ge=0)
     overtime_hours: float = Field(default=0, ge=0)
-    date: date = Field(default_factory=date.today)
+    date: dt = Field(default_factory=dt.today)
     status: str = Field(default="present")
     ip_address: Optional[str] = Field(default=None)
     location: Optional[str] = Field(default=None)
