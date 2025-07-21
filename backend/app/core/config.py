@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     
     class Config:
         case_sensitive = True
-        env_file = Path(__file__).parent.parent.parent.parent / ".env"
+        env_file = Path(__file__).parent.parent.parent / ".env"
         env_file_encoding = "utf-8"
         validate_assignment = True
 
