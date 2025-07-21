@@ -2,7 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from typing import List, Optional
-from datetime import datetime
+from datetime import date, datetime
 from app.models.leave import LeaveRequest, LeaveBalance
 from app.models.user import User
 from app.schemas.leave import LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut
