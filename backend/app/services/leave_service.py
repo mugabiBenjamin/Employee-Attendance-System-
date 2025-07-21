@@ -22,8 +22,8 @@ async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCrea
             reason=leave_request.reason,
             status=leave_request.status,
             attachment_url=leave_request.attachment_url,
-            created_at=leave_request.created_at or datetime.utcnow(),
-            updated_at=leave_request.updated_at or datetime.utcnow(),
+            created_at=leave_request.created_at or datetime.now(datetime.timezone.utc)(),
+            updated_at=leave_request.updated_at or datetime.now(datetime.timezone.utc)(),
         )
         db.add(db_leave)
         await db.commit()
@@ -44,11 +44,11 @@ async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: Le
             if attr == "status" and value in ["approved", "rejected"]:
                 setattr(db_leave, attr, value)
                 setattr(db_leave, "approved_by", current_user.user_id)
-                setattr(db_leave, "approved_at", datetime.utcnow())
+                setattr(db_leave, "approved_at", datetime.now(datetime.timezone.utc)())
             else:
                 setattr(db_leave, attr, value)
         
-        db_leave.updated_at = datetime.utcnow()
+        db_leave.updated_at = datetime.now(datetime.timezone.utc)()
         db.add(db_leave)
         await db.commit()
         await db.refresh(db_leave)

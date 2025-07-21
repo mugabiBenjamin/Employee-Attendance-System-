@@ -44,7 +44,7 @@ async def update_attendance(db: AsyncSession, attendance_id: int, attendance_upd
     for key, value in update_data.items():
         setattr(attendance, key, value)
     
-    attendance.updated_at = datetime.utcnow()
+    attendance.updated_at = datetime.now(datetime.timezone.utc)()
     await db.commit()
     await db.refresh(attendance)
     return AttendanceOut.model_validate(attendance)

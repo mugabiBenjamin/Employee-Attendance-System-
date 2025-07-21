@@ -17,5 +17,5 @@ class User(SQLModel, table=True):
     is_active: bool = Field(default=True)
     deleted_at: Optional[datetime] = Field(default=None)
     last_login: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))

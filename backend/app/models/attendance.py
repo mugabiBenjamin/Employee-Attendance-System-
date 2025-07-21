@@ -14,5 +14,5 @@ class Attendance(SQLModel, table=True):
     status: str = Field(default="present")
     ip_address: Optional[str] = Field(default=None)
     location: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
+    updated_at: datetime = Field(default_factory=datetime.now(datetime.timezone.utc))
