@@ -9,7 +9,7 @@ class UserBase(BaseModel):
     phone: Optional[str] = None
     employee_type: str = "full_time"
 
-    @field_validator("phone", allow_reuse=True)
+    @field_validator("phone")
     def validate_phone(cls, v):
         if v is not None and not v:
             raise ValueError("Phone number cannot be empty if provided")
@@ -25,7 +25,7 @@ class UserCreate(UserBase):
     salary: Optional[float] = None
     manager_id: Optional[int] = None
 
-    @field_validator("password", allow_reuse=True)
+    @field_validator("password")
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")
@@ -38,7 +38,7 @@ class UserUpdate(UserBase):
     manager_id: Optional[int] = None
     is_active: Optional[bool] = None
 
-    @field_validator("password", allow_reuse=True)
+    @field_validator("password")
     def validate_password(cls, v):
         if v is not None and len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")
@@ -60,7 +60,7 @@ class UserAuth(BaseModel):
     email: EmailStr
     password: str
 
-    @field_validator("password", allow_reuse=True)
+    @field_validator("password")
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")

@@ -52,9 +52,9 @@ async def get_attendance_history(
 async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
     from sqlmodel import select
     from app.models.user import user_roles, roles
-    query = select(User).join(user_roles).join(roles).where(
-        User.user_id == user.user_id,
+    query = select(user_roles).join(roles).where(
+        user_roles.user_id == user.user_id,
         roles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
     )
     result = await db.execute(query)
-    return result.scalar_one_or_none() is not None
+    return result.first() is not None

@@ -6,9 +6,8 @@ from sqlmodel import select
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.security import get_password_hash
+from app.core.config import settings
 import uuid
-
-from backend.app.core.config import Settings
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
     query = select(User).where(User.user_id == user_id, User.is_active == True, User.deleted_at == None)
@@ -28,21 +27,21 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
     
     hashed_password = get_password_hash(user_create.password)
     db_user = User(
-        **user_create.model_dump(exclude={"password"}),
+        **user_create.model_dump(exclude={"password"}, exclude_none=True),
         password_hash=hashed_password,
         employee_id=f"EMP{str(uuid.uuid4())[:6].upper()}"
     )
     db.add(db_user)
     await db.commit()
     await db.refresh(db_user)
-    return UserOut.from_orm(db_user)
+    return UserOut.model_validate(db_user)
 
 async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -> UserOut:
     user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
-    update_data = user_update.model_dump(exclude_unset=True)
+    update_data = user_update.model_dump(exclude_none=True)
     if "password" in update_data:
         update_data["password_hash"] = get_password_hash(update_data.pop("password"))
     
@@ -52,7 +51,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -
     user.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(user)
-    return UserOut.from_orm(user)
+    return UserOut.model_validate(user)
 
 async def delete_user(db: AsyncSession, user_id: int) -> None:
     user = await get_user_by_id(db, user_id)
@@ -63,8 +62,8 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
     user.deleted_at = datetime.utcnow()
     await db.commit()
 
-async def get_users(db: AsyncSession, skip: int = 0, limit: int = Settings.DEFAULT_PAGE_SIZE) -> List[UserOut]:
+async def get_users(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[UserOut]:
     query = select(User).where(User.is_active == True, User.deleted_at == None).offset(skip).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
-    return [UserOut.from_orm(user) for user in users]
+    return [UserOut.model_validate(user) for user in users]

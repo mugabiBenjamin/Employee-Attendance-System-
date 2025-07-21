@@ -9,7 +9,7 @@ from app.schemas.leave import LeaveRequestCreate, LeaveRequestUpdate, LeaveReque
 from app.core.config import settings
 import logging
 
-logger = logging.getLogger(__name__)  
+logger = logging.getLogger(__name__)
 
 async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCreate, current_user: User) -> LeaveRequestOut:
     try:
@@ -29,7 +29,7 @@ async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCrea
         await db.commit()
         await db.refresh(db_leave)
         logger.info(f"Leave request created for user_id {leave_request.user_id}, leave_id {db_leave.leave_id}")
-        return LeaveRequestOut.from_orm(db_leave)
+        return LeaveRequestOut.model_validate(db_leave)
     except Exception as e:
         logger.error(f"Error creating leave request: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating leave request")
@@ -40,7 +40,7 @@ async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: Le
         if not db_leave:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave request not found")
         
-        for attr, value in leave_update.model_dump(exclude_unset=True).items():
+        for attr, value in leave_update.model_dump(exclude_none=True).items():
             if attr == "status" and value in ["approved", "rejected"]:
                 setattr(db_leave, attr, value)
                 setattr(db_leave, "approved_by", current_user.user_id)
@@ -53,7 +53,7 @@ async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: Le
         await db.commit()
         await db.refresh(db_leave)
         logger.info(f"Leave request updated, leave_id {leave_id}")
-        return LeaveRequestOut.from_orm(db_leave)
+        return LeaveRequestOut.model_validate(db_leave)
     except HTTPException:
         raise
     except Exception as e:
@@ -66,7 +66,7 @@ async def get_leave_request_by_id(db: AsyncSession, leave_id: int, current_user:
         result = await db.execute(query)
         db_leave = result.scalar_one_or_none()
         if db_leave:
-            return LeaveRequestOut.from_orm(db_leave)
+            return LeaveRequestOut.model_validate(db_leave)
         return None
     except Exception as e:
         logger.error(f"Error retrieving leave request: {str(e)}")
@@ -83,7 +83,7 @@ async def get_user_leave_requests(db: AsyncSession, user_id: int, start_date: Op
         result = await db.execute(query)
         leave_requests = result.scalars().all()
         logger.info(f"Retrieved {len(leave_requests)} leave requests for user_id {user_id}")
-        return [LeaveRequestOut.from_orm(lr) for lr in leave_requests]
+        return [LeaveRequestOut.model_validate(lr) for lr in leave_requests]
     except Exception as e:
         logger.error(f"Error retrieving leave requests: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave requests")
@@ -96,7 +96,7 @@ async def get_leave_balance(db: AsyncSession, user_id: int, year: Optional[int])
         result = await db.execute(query)
         balances = result.scalars().all()
         logger.info(f"Retrieved {len(balances)} leave balances for user_id {user_id}")
-        return [LeaveBalanceOut.from_orm(b) for b in balances]
+        return [LeaveBalanceOut.model_validate(b) for b in balances]
     except Exception as e:
         logger.error(f"Error retrieving leave balances: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave balances")

@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import date
 from app.schemas.leave import LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut
 from app.services.leave_service import create_leave_request, update_leave_request, get_leave_request_by_id, get_user_leave_requests, get_leave_balance
-from app.api.deps import get_db_session, get_current_active_user, get_current_manager_user, get_current_hr_user
+from app.api.deps import get_db_session, get_current_active_user, get_current_manager_user
 from app.models.user import User
 from app.core.config import settings
 
@@ -82,7 +82,7 @@ async def approve_leave_request(
     leave_request = await get_leave_request_by_id(db, leave_id, current_user)
     if not leave_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave request not found")
-    leave_update = LeaveRequestUpdate(status="approved", comments=comments)
+    leave_update = LeaveRequestUpdate.model_construct(status="approved", comments=comments)
     return await update_leave_request(db, leave_id, leave_update, current_user)
 
 @router.post("/{leave_id}/reject", response_model=LeaveRequestOut)
@@ -95,7 +95,7 @@ async def reject_leave_request(
     leave_request = await get_leave_request_by_id(db, leave_id, current_user)
     if not leave_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave request not found")
-    leave_update = LeaveRequestUpdate(status="rejected", comments=comments)
+    leave_update = LeaveRequestUpdate.model_construct(status="rejected", comments=comments)
     return await update_leave_request(db, leave_id, leave_update, current_user)
 
 async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:

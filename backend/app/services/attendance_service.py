@@ -21,7 +21,7 @@ async def create_attendance(db: AsyncSession, attendance_create: AttendanceCreat
     db.add(db_attendance)
     await db.commit()
     await db.refresh(db_attendance)
-    return AttendanceOut.from_orm(db_attendance)
+    return AttendanceOut.model_validate(db_attendance)
 
 async def update_attendance(db: AsyncSession, attendance_id: int, attendance_update: AttendanceUpdate, current_user: User) -> AttendanceOut:
     query = select(Attendance).where(Attendance.attendance_id == attendance_id)
@@ -34,7 +34,7 @@ async def update_attendance(db: AsyncSession, attendance_id: int, attendance_upd
     if attendance.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this attendance")
     
-    update_data = attendance_update.model_dump(exclude_unset=True)
+    update_data = attendance_update.model_dump(exclude_none=True)
     if "clock_out_time" in update_data and update_data["clock_out_time"]:
         if update_data["clock_out_time"] <= attendance.clock_in_time:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Clock out time must be after clock in time")
@@ -47,7 +47,7 @@ async def update_attendance(db: AsyncSession, attendance_id: int, attendance_upd
     attendance.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(attendance)
-    return AttendanceOut.from_orm(attendance)
+    return AttendanceOut.model_validate(attendance)
 
 async def get_attendance_by_id(db: AsyncSession, attendance_id: int, current_user: User) -> AttendanceOut:
     query = select(Attendance).where(Attendance.attendance_id == attendance_id)
@@ -60,7 +60,7 @@ async def get_attendance_by_id(db: AsyncSession, attendance_id: int, current_use
     if attendance.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this attendance")
     
-    return AttendanceOut.from_orm(attendance)
+    return AttendanceOut.model_validate(attendance)
 
 async def get_user_attendance(db: AsyncSession, user_id: int, start_date: Optional[date] = None, 
                             end_date: Optional[date] = None, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[AttendanceOut]:
@@ -74,4 +74,4 @@ async def get_user_attendance(db: AsyncSession, user_id: int, start_date: Option
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
     attendances = result.scalars().all()
-    return [AttendanceOut.from_orm(attendance) for attendance in attendances]
+    return [AttendanceOut.model_validate(attendance) for attendance in attendances]

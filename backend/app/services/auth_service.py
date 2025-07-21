@@ -72,11 +72,11 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> User:
     
     hashed_password = get_password_hash(user_create.password)
     db_user = User(
-        **user_create.model_dump(exclude={"password"}),
+        **user_create.model_dump(exclude={"password"}, exclude_none=True),
         password_hash=hashed_password,
         employee_id=f"EMP{str(uuid.uuid4())[:6].upper()}"
     )
     db.add(db_user)
     await db.commit()
     await db.refresh(db_user)
-    return db_user
+    return User.model_validate(db_user)
