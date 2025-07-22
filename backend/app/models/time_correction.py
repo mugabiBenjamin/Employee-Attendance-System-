@@ -1,31 +1,45 @@
 from typing import Optional
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Enum
 from datetime import datetime, timezone
-from sqlalchemy.dialects.postgresql import ENUM
+import enum
 
-# Define the correction_status enum for PostgreSQL
-correction_status = ENUM(
-    'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed',
-    name='correction_status',
-    create_type=True
-)
+class CorrectionStatus(str, enum.Enum):
+    DRAFT = "draft"
+    UNDER_REVIEW = "under_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
 
-class TimeCorrection(SQLModel, table=True):
-    correction_id: Optional[int] = Field(default=None, primary_key=True)
-    attendance_id: int = Field(foreign_key="attendance_records.attendance_id", nullable=False)
-    user_id: int = Field(foreign_key="users.user_id", nullable=False)
+class TimeCorrectionBase(SQLModel):
+    attendance_id: int = Field(foreign_key="attendance_records.attendance_id", index=True)
+    user_id: int = Field(foreign_key="users.user_id", index=True)
     original_clock_in: Optional[datetime] = Field(default=None)
     original_clock_out: Optional[datetime] = Field(default=None)
     corrected_clock_in: Optional[datetime] = Field(default=None)
     corrected_clock_out: Optional[datetime] = Field(default=None)
-    reason: str = Field(nullable=False)
-    status: str = Field(default="draft", sa_type=correction_status)
+    reason: str
+    status: CorrectionStatus = Field(default=CorrectionStatus.DRAFT, sa_type=Enum(CorrectionStatus))
     approved_by: Optional[int] = Field(default=None, foreign_key="users.user_id")
     approved_at: Optional[datetime] = Field(default=None)
+
+class TimeCorrection(TimeCorrectionBase, table=True):
+    correction_id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    __table_args__ = (
-        {"schema": "public", "constraints": [
-            {"name": "correction_required", "check": "corrected_clock_in IS NOT NULL OR corrected_clock_out IS NOT NULL"},
-            {"name": "corrected_times_valid", "check": "corrected_clock_out IS NULL OR corrected_clock_in IS NULL OR corrected_clock_out > corrected_clock_in"}
-        ]},
-    )
+
+class TimeCorrectionCreate(TimeCorrectionBase):
+    pass
+
+class TimeCorrectionUpdate(SQLModel):
+    original_clock_in: Optional[datetime] = None
+    original_clock_out: Optional[datetime] = None
+    corrected_clock_in: Optional[datetime] = None
+    corrected_clock_out: Optional[datetime] = None
+    reason: Optional[str] = None
+    status: Optional[CorrectionStatus] = None
+    approved_by: Optional[int] = None
+    approved_at: Optional[datetime] = None
+
+class TimeCorrectionOut(TimeCorrectionBase):
+    correction_id: int
+    created_at: datetime

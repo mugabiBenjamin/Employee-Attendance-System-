@@ -72,7 +72,7 @@ async def create_new_leave_request(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
                           detail=f"Invalid leave type. Must be one of {valid_leave_types}")
     
-    valid_statuses = ["draft", "under_review"]
+    valid_statuses = ["draft", "under_review", "completed"]
     if leave_request.status not in valid_statuses:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
                           detail=f"Invalid status. Must be one of {valid_statuses}")
@@ -105,7 +105,7 @@ async def update_leave_request(
                           detail="Not authorized to update this leave request")
     
     if leave_update.status:
-        valid_statuses = ["draft", "under_review", "cancelled"]
+        valid_statuses = ["draft", "under_review", "cancelled", "completed"]
         if leave_update.status not in valid_statuses:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
                               detail=f"Invalid status. Must be one of {valid_statuses}")
@@ -236,6 +236,11 @@ async def create_approval_workflow(
     if not await is_manager_or_hr(db, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
                           detail="Not authorized to create approval workflows")
+    
+    valid_statuses = ["under_review", "approved", "rejected", "cancelled", "completed"]
+    if workflow.status not in valid_statuses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
+                          detail=f"Invalid status. Must be one of {valid_statuses}")
     
     return await create_leave_approval_workflow(db, workflow, current_user)
 

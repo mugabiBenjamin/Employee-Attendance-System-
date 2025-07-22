@@ -1,9 +1,11 @@
 from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, refresh
+from sqlalchemy.sql import text
+from sqlmodel import select
 from datetime import datetime, date, timezone
 from app.models.attendance import Attendance
+from app.models.attendance_summary import AttendanceSummary
 from app.models.overtime_record import OvertimeRecord
 from app.models.time_correction import TimeCorrection
 from app.models.user import User
@@ -197,11 +199,26 @@ async def get_time_correction_by_id(db: AsyncSession, correction_id: int, curren
     
     return correction
 
+async def refresh_attendance_summary(db: AsyncSession, current_user: User) -> None:
+    """Refresh the attendance_summary materialized view."""
+    from app.api.deps import is_manager_or_hr
+    if not await is_manager_or_hr(db, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to refresh attendance summary")
+    
+    try:
+        await db.execute(text("REFRESH MATERIALIZED VIEW attendance_summary"))
+        await db.commit()
+        logger.info("Attendance summary materialized view refreshed successfully")
+    except Exception as e:
+        logger.error(f"Failed to refresh attendance summary: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to refresh attendance summary")
+
 async def get_attendance_summary(db: AsyncSession, user_id: Optional[int] = None, 
                                start_date: Optional[date] = None, end_date: Optional[date] = None,
                                department_name: Optional[str] = None, skip: int = 0, 
                                limit: int = settings.DEFAULT_PAGE_SIZE) -> List[dict]:
-    query = select(AttendanceSummary).where(AttendanceSummary.user_id != None)  # Adjust based on materialized view structure
+    """Query the attendance_summary materialized view with optional filters."""
+    query = select(AttendanceSummary)
     
     if user_id:
         query = query.where(AttendanceSummary.user_id == user_id)
@@ -217,7 +234,7 @@ async def get_attendance_summary(db: AsyncSession, user_id: Optional[int] = None
     summaries = result.scalars().all()
     
     logger.info(f"Retrieved {len(summaries)} attendance summary records")
-    return [summary.__dict__ for summary in summaries]
+    return [summary.dict() for summary in summaries]
 
 async def approve_time_correction(db: AsyncSession, correction_id: int, current_user: User, comments: Optional[str] = None) -> TimeCorrection:
     query = select(TimeCorrection).where(TimeCorrection.correction_id == correction_id)

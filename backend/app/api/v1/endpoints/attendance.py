@@ -50,7 +50,7 @@ async def clock_in(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create a new attendance record when employee clocks in."""
-    valid_statuses = ["present", "late", "on_leave", "sick"]
+    valid_statuses = ["present", "late", "on_leave", "sick", "absent"]
     if attendance.status not in valid_statuses:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
                           detail=f"Invalid status. Must be one of {valid_statuses} for clock-in")
@@ -69,7 +69,7 @@ async def clock_out(
 ):
     """Update an attendance record with clock-out time."""
     if attendance_update.status:
-        valid_statuses = ["present", "early_departure", "half_day"]
+        valid_statuses = ["present", "early_departure", "half_day", "absent"]
         if attendance_update.status not in valid_statuses:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
                               detail=f"Invalid status. Must be one of {valid_statuses} for clock-out")
