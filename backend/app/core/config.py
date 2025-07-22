@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", 10485760))
     UPLOAD_FOLDER: str = os.getenv("UPLOAD_FOLDER", "./uploads")
     ALLOWED_EXTENSIONS: List[str] = [
-        x.strip() for x in os.getenv("ALLOWED_EXTENSIONS", "pdf,doc,docx,jpg,jpeg,png").split(",")
+        x.strip() for x in os.getenv("ALLOWED_EXTENSIONS", "pdf,doc,docx,jpg,jpeg,png,txt").split(",")
     ]
     
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
@@ -50,6 +50,36 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = int(os.getenv("MAX_PAGE_SIZE", 100))
     
     DEFAULT_TIMEZONE: str = os.getenv("DEFAULT_TIMEZONE", "UTC")
+    
+    # Enum settings from DDL
+    ATTENDANCE_STATUSES: List[str] = [
+        "present", "absent", "late", "early_departure", "on_leave", "half_day", "sick"
+    ]
+    LEAVE_TYPES: List[str] = [
+        "annual", "sick", "maternity", "paternity", "emergency", "unpaid",
+        "casual", "compensatory", "bereavement", "leave_of_absence", "public_holiday"
+    ]
+    LEAVE_REQUEST_STATUSES: List[str] = [
+        "draft", "under_review", "approved", "rejected", "cancelled", "completed"
+    ]
+    CORRECTION_STATUSES: List[str] = [
+        "draft", "under_review", "approved", "rejected", "cancelled", "completed"
+    ]
+    SYSTEM_ACTIONS: List[str] = [
+        "INSERT", "UPDATE", "DELETE", "LOGIN", "LOGOUT", "CLOCK_IN", "CLOCK_OUT",
+        "password_change", "profile_update", "data_export", "data_import",
+        "assign_role", "revoke_role", "view_report", "approve_leave",
+        "reject_leave", "create_department", "delete_department"
+    ]
+    EMPLOYEE_TYPES: List[str] = [
+        "full_time", "part_time", "contract", "intern", "temporary"
+    ]
+    SHIFT_TYPES: List[str] = [
+        "morning", "afternoon", "night", "flexible", "split"
+    ]
+    
+    # Materialized view refresh interval (in seconds)
+    MATERIALIZED_VIEW_REFRESH_INTERVAL: int = int(os.getenv("MATERIALIZED_VIEW_REFRESH_INTERVAL", 3600))  # Default: 1 hour
     
     class Config:
         case_sensitive = True
