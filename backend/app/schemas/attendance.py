@@ -1,14 +1,15 @@
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import BaseModel
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 
 class AttendanceBase(BaseModel):
     user_id: int
-    clock_in_time: datetime
-    clock_out_time: Optional[datetime] = None
+    clock_in_time: datetime  # Will include timezone info
+    clock_out_time: Optional[datetime] = None  # Will include timezone info
     break_duration: int = 0
     date: date
-    status: str = "present"
+    status: Literal["present", "absent", "late", "early_departure", "on_leave", "half_day", "sick"] = "present"
     ip_address: Optional[str] = None
     location: Optional[str] = None
 
@@ -18,7 +19,7 @@ class AttendanceCreate(AttendanceBase):
 class AttendanceUpdate(BaseModel):
     clock_out_time: Optional[datetime] = None
     break_duration: Optional[int] = None
-    status: Optional[str] = None
+    status: Optional[Literal["present", "absent", "late", "early_departure", "on_leave", "half_day", "sick"]] = None
     ip_address: Optional[str] = None
     location: Optional[str] = None
 
