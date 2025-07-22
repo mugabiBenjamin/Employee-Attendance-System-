@@ -5,7 +5,7 @@ from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.services.user_service import create_user, update_user, delete_user, get_user_by_id, get_users
 from app.api.deps import get_db_session, get_current_active_user, get_current_admin_user
 from app.models.user import User
-from app.models.roles import UserRoles, Role
+from backend.app.models.user_roles import UserRoles, Role
 from app.core.config import settings
 
 async def is_admin(db: AsyncSession, user: User) -> bool:

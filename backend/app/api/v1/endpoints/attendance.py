@@ -9,7 +9,7 @@ from app.api.deps import get_db_session
 from app.api.deps import get_current_active_user
 from app.api.v1.endpoints.leave import is_manager_or_hr
 from app.core.config import settings
-from app.models.roles import Role, UserRoles
+from backend.app.models.user_roles import Role, UserRoles
 
 async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
     from sqlmodel import select

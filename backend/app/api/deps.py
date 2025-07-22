@@ -6,7 +6,7 @@ from sqlmodel import select
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.roles import UserRoles, Role
+from backend.app.models.user_roles import UserRoles, Role
 from app.core.config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")

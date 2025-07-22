@@ -6,7 +6,7 @@ from app.schemas.leave import LeaveRequestCreate, LeaveRequestUpdate, LeaveReque
 from app.services.leave_service import create_leave_request, update_leave_request, get_leave_request_by_id, get_user_leave_requests, get_leave_balance
 from app.api.deps import get_db_session, get_current_active_user, get_current_manager_user
 from app.models.user import User
-from app.models.roles import UserRoles, Role
+from backend.app.models.user_roles import UserRoles, Role
 from app.core.config import settings
 
 router = APIRouter()
