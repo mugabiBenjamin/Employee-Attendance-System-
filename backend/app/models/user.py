@@ -26,8 +26,7 @@ class User(SQLModel, table=True):
     deleted_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"check": "deleted_at IS NULL OR is_active = FALSE"})
     last_login: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    updated_at: Optional[datetime] = Field(
         sa_column_kwargs={"server_default": func.current_timestamp(), "onupdate": func.current_timestamp()}
     )
 

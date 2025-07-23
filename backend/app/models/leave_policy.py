@@ -31,8 +31,7 @@ class LeavePolicy(SQLModel, table=True):
     effective_from: date = Field(default_factory=date.today)
     effective_to: Optional[date] = Field(default=None, sa_column_kwargs={"check": "effective_to IS NULL OR effective_to >= effective_from"})
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    updated_at: Optional[datetime] = Field(
         sa_column_kwargs={"server_default": func.current_timestamp(), "onupdate": func.current_timestamp()}
     )
     __table_args__ = (

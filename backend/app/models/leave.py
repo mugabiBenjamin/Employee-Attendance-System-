@@ -32,8 +32,7 @@ class LeaveRequest(SQLModel, table=True):
     comments: Optional[str] = Field(default=None)
     attachment_url: Optional[str] = Field(default=None, max_length=500)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    updated_at: Optional[datetime] = Field(
         sa_column_kwargs={"server_default": func.current_timestamp(), "onupdate": func.current_timestamp()}
     )
     __table_args__ = (
@@ -53,8 +52,7 @@ class LeaveBalance(SQLModel, table=True):
         default_factory=lambda: datetime.now().year,
         sa_column_kwargs={"check": "year >= 2020 AND year <= 2050"}
     )
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    updated_at: Optional[datetime] = Field(
         sa_column_kwargs={"server_default": func.current_timestamp(), "onupdate": func.current_timestamp()}
     )
     __table_args__ = (

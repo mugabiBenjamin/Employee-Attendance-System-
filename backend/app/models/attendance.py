@@ -24,8 +24,7 @@ class Attendance(SQLModel, table=True):
     ip_address: Optional[str] = Field(default=None, sa_type=func.inet)
     location: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    updated_at: Optional[datetime] = Field(
         sa_column_kwargs={"server_default": func.current_timestamp(), "onupdate": func.current_timestamp()}
     )
     __table_args__ = (
