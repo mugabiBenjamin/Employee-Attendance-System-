@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.sql.schema import CheckConstraint, UniqueConstraint
 
-class Role(SQLModel, table=True):
+class Roles(SQLModel, table=True):
     role_id: Optional[int] = Field(default=None, primary_key=True)
     role_name: str = Field(unique=True, nullable=False)
     description: Optional[str] = Field(default=None)

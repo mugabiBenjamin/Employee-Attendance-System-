@@ -12,7 +12,7 @@ employee_type = ENUM(
     create_type=True
 )
 
-class User(SQLModel, table=True):
+class Users(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, primary_key=True)
     employee_id: Optional[str] = Field(
         default=None,
