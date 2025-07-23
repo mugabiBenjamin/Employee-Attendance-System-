@@ -78,6 +78,15 @@ class Settings(BaseSettings):
         "morning", "afternoon", "night", "flexible", "split"
     ]
     
+    # Permission keys aligned with DDL roles table
+    PERMISSION_KEYS: List[str] = [
+        "clock_in", "clock_out", "view_own_attendance", "request_leave", "view_leave_balance",
+        "approve_leave", "view_team_attendance", "generate_reports", "manage_overtime",
+        "manage_employees", "generate_compliance_reports", "view_all_attendance", "manage_leave_policies",
+        "manage_users", "manage_roles", "system_configuration", "view_logs", "manage_departments",
+        "all_permissions"
+    ]
+    
     # Materialized view refresh interval (in seconds)
     MATERIALIZED_VIEW_REFRESH_INTERVAL: int = int(os.getenv("MATERIALIZED_VIEW_REFRESH_INTERVAL", 3600))  # Default: 1 hour
     

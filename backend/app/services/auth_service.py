@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import HTTPException, status
 from jose import jwt, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func  # Added func import here
+from sqlalchemy import select, func
 from sqlmodel import select
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token
 from app.models.user import User
@@ -14,8 +14,6 @@ from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
-
-# ... (keep all other existing functions the same until create_user)
 
 async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
     try:
@@ -32,10 +30,10 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
                               detail=f"Invalid employee type. Must be one of {valid_employee_types}")
         
         # Generate employee_id using sequence with func.lpad
-        query = select(func.nextval('employee_id_seq'))  # Get next sequence value
+        query = select(func.nextval('employee_id_seq'))
         result = await db.execute(query)
         sequence_value = result.scalar_one()
-        employee_id = f"EMP{func.lpad(sequence_value, 6, '0')}"  # Using SQL's LPAD via func
+        employee_id = f"EMP{func.lpad(sequence_value, 6, '0')}"
         
         hashed_password = get_password_hash(user_create.password)
         db_user = User(
@@ -73,18 +71,27 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                           detail="Error creating user")
 
-# ... (keep all other existing functions the same)
-
 async def check_user_permission(db: AsyncSession, user_id: int, required_permission: str) -> bool:
     try:
+        # Validate permission key against defined permissions
+        if required_permission not in settings.PERMISSION_KEYS:
+            logger.warning(f"Invalid permission requested: {required_permission}")
+            return False
+            
         query = select(Role.permissions).join(UserRole).where(
             UserRole.user_id == user_id,
             UserRole.is_active == True,
             Role.role_id == UserRole.role_id
         )
         result = await db.execute(query)
-        permissions = [perm for role in result.scalars().all() for perm in role]
         
+        # Collect all permissions from user's active roles
+        permissions = []
+        for role_perms in result.scalars().all():
+            if isinstance(role_perms, dict):
+                permissions.extend([k for k, v in role_perms.items() if v is True])
+        
+        # Check for super admin access or specific permission
         if "all_permissions" in permissions:
             return True
         return required_permission in permissions
