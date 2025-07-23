@@ -17,7 +17,7 @@ from app.services.attendance_service import (
     approve_time_correction, 
     reject_time_correction
 )
-from app.models.user import User
+from app.models.users import Users
 from app.api.deps import get_db_session, get_current_active_user
 from app.services.auth_service import check_user_permission
 from app.core.config import settings
@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
+async def is_manager_or_hr(db: AsyncSession, user: Users) -> bool:
     from sqlmodel import select
     from app.models.user_roles import UserRoles
-    from app.models.user_roles import Role
-    query = select(UserRoles).join(Role).where(
+    from app.models.user_roles import Roles
+    query = select(UserRoles).join(Roles).where(
         UserRoles.user_id == user.user_id,
         UserRoles.is_active == True,
-        Role.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
+        Roles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     return result.first() is not None
@@ -48,7 +48,7 @@ async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
 async def clock_in(
     attendance: AttendanceCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new attendance record when employee clocks in."""
     valid_statuses = ["present", "late", "on_leave", "sick", "absent"]
@@ -66,7 +66,7 @@ async def clock_out(
     attendance_id: int,
     attendance_update: AttendanceUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Update an attendance record with clock-out time."""
     if attendance_update.status:
@@ -84,7 +84,7 @@ async def clock_out(
 async def get_attendance(
     attendance_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific attendance record by its ID."""
     return await get_attendance_by_id(db, attendance_id, current_user)
@@ -101,7 +101,7 @@ async def get_attendance_history(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get attendance history for a specific user with optional date range filtering."""
     if user_id != current_user.user_id and not await is_manager_or_hr(db, current_user):
@@ -118,7 +118,7 @@ async def get_attendance_history(
 async def create_time_correction_request(
     correction: TimeCorrectionCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new time correction request."""
     valid_statuses = ["draft", "under_review"]
@@ -136,7 +136,7 @@ async def update_time_correction_request(
     correction_id: int,
     correction_update: TimeCorrectionUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Update a time correction request."""
     if correction_update.status:
@@ -154,7 +154,7 @@ async def update_time_correction_request(
 async def get_time_correction(
     correction_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific time correction by its ID."""
     correction = await get_time_correction_by_id(db, correction_id, current_user)
@@ -169,7 +169,7 @@ async def approve_time_correction_request(
     correction_id: int,
     comments: Optional[str] = None,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Approve a time correction request."""
     if not await is_manager_or_hr(db, current_user):
@@ -186,7 +186,7 @@ async def reject_time_correction_request(
     correction_id: int,
     comments: Optional[str] = None,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Reject a time correction request."""
     if not await is_manager_or_hr(db, current_user):
@@ -197,7 +197,7 @@ async def reject_time_correction_request(
 @router.post("/refresh-summary", status_code=status.HTTP_204_NO_CONTENT, summary="Refresh attendance summary", description="Refresh the attendance_summary materialized view")
 async def refresh_attendance_summary_endpoint(
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Refresh the attendance summary materialized view."""
     await refresh_attendance_summary(db, current_user)
@@ -216,7 +216,7 @@ async def get_attendance_summary_report(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get attendance summary report from materialized view."""
     has_permission = await check_user_permission(db, current_user.user_id, "view_attendance_reports")
@@ -240,7 +240,7 @@ async def get_overtime_records(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get overtime records for a specific user."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_overtime")

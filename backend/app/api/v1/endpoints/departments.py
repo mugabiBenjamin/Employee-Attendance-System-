@@ -11,7 +11,7 @@ from app.services.department_service import (
 )
 from app.api.deps import get_db_session, get_current_active_user
 from app.services.auth_service import check_user_permission
-from app.models.user import User
+from app.models.users import Users
 from app.core.config import settings
 import logging
 
@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def is_admin_or_manager(db: AsyncSession, user: User) -> bool:
+async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
     from sqlmodel import select
     from app.models.user_roles import UserRoles 
-    from app.models.user_roles import Role
-    query = select(UserRoles).join(Role).where(
+    from app.models.user_roles import Roles
+    query = select(UserRoles).join(Roles).where(
         UserRoles.user_id == user.user_id,
         UserRoles.is_active == True,
-        Role.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
+        Roles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     return result.first() is not None
@@ -40,7 +40,7 @@ async def is_admin_or_manager(db: AsyncSession, user: User) -> bool:
 async def create_new_department(
     department: DepartmentCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new department in the system."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")
@@ -58,7 +58,7 @@ async def create_new_department(
 async def read_department(
     department_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific department by its ID."""
     has_permission = await check_user_permission(db, current_user.user_id, "view_departments")
@@ -82,7 +82,7 @@ async def read_departments(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a paginated list of all departments."""
     has_permission = await check_user_permission(db, current_user.user_id, "view_departments")
@@ -101,7 +101,7 @@ async def update_existing_department(
     department_id: int,
     department_update: DepartmentUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Update an existing department's information."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")
@@ -119,7 +119,7 @@ async def update_existing_department(
 async def delete_existing_department(
     department_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Delete a department from the system."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")

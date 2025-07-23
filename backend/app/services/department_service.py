@@ -3,18 +3,18 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from datetime import datetime, timezone
-from app.models.departments import Department
-from app.models.user import User
+from app.models.departments import Departments
+from app.models.users import Users
 from app.schemas.user import DepartmentCreate, DepartmentUpdate, DepartmentOut
 from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_department(db: AsyncSession, department_create: DepartmentCreate, current_user: User) -> DepartmentOut:
+async def create_department(db: AsyncSession, department_create: DepartmentCreate, current_user: Users) -> DepartmentOut:
     try:
         # Check if department already exists
-        query = select(Department).where(Department.department_name == department_create.department_name)
+        query = select().where(Departments.department_name == department_create.department_name)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
@@ -23,9 +23,9 @@ async def create_department(db: AsyncSession, department_create: DepartmentCreat
         # Validate manager_id if provided
         if department_create.manager_id:
             manager = await db.execute(
-                select(User).where(User.user_id == department_create.manager_id, 
-                                 User.is_active == True, 
-                                 User.deleted_at == None)
+                select(Users).where(Users.user_id == department_create.manager_id, 
+                                 Users.is_active == True, 
+                                 Users.deleted_at == None)
             )
             if not manager.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
@@ -36,7 +36,7 @@ async def create_department(db: AsyncSession, department_create: DepartmentCreat
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
                               detail="Budget cannot be negative")
         
-        db_department = Department(
+        db_department = Departments(
             **department_create.model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
@@ -56,9 +56,9 @@ async def create_department(db: AsyncSession, department_create: DepartmentCreat
 
 async def get_department_by_id(db: AsyncSession, department_id: int) -> Optional[DepartmentOut]:
     try:
-        query = select(Department).where(Department.department_id == department_id, 
-                                      Department.is_active == True, 
-                                      Department.deleted_at == None)
+        query = select(Departments).where(Departments.department_id == department_id, 
+                                      Departments.is_active == True, 
+                                      Departments.deleted_at == None)
         result = await db.execute(query)
         department = result.scalar_one_or_none()
         
@@ -73,8 +73,8 @@ async def get_department_by_id(db: AsyncSession, department_id: int) -> Optional
 
 async def get_departments(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[DepartmentOut]:
     try:
-        query = select(Department).where(Department.is_active == True, 
-                                      Department.deleted_at == None).offset(skip).limit(limit)
+        query = select(Departments).where(Departments.is_active == True, 
+                                      Departments.deleted_at == None).offset(skip).limit(limit)
         result = await db.execute(query)
         departments = result.scalars().all()
         
@@ -86,11 +86,11 @@ async def get_departments(db: AsyncSession, skip: int = 0, limit: int = settings
                           detail="Error retrieving departments")
 
 async def update_department(db: AsyncSession, department_id: int, department_update: DepartmentUpdate, 
-                          current_user: User) -> DepartmentOut:
+                          current_user: Users) -> DepartmentOut:
     try:
-        query = select(Department).where(Department.department_id == department_id, 
-                                      Department.is_active == True, 
-                                      Department.deleted_at == None)
+        query = select(Departments).where(Departments.department_id == department_id, 
+                                      Departments.is_active == True, 
+                                      Departments.deleted_at == None)
         result = await db.execute(query)
         department = result.scalar_one_or_none()
         
@@ -102,9 +102,9 @@ async def update_department(db: AsyncSession, department_id: int, department_upd
         
         # Validate department_name if provided
         if "department_name" in update_data:
-            query = select(Department).where(
-                Department.department_name == update_data["department_name"],
-                Department.department_id != department_id
+            query = select(Departments).where(
+                Departments.department_name == update_data["department_name"],
+                Departments.department_id != department_id
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
@@ -114,9 +114,9 @@ async def update_department(db: AsyncSession, department_id: int, department_upd
         # Validate manager_id if provided
         if "manager_id" in update_data and update_data["manager_id"]:
             manager = await db.execute(
-                select(User).where(User.user_id == update_data["manager_id"], 
-                                 User.is_active == True, 
-                                 User.deleted_at == None)
+                select(Users).where(Users.user_id == update_data["manager_id"], 
+                                 Users.is_active == True, 
+                                 Users.deleted_at == None)
             )
             if not manager.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
@@ -146,9 +146,9 @@ async def update_department(db: AsyncSession, department_id: int, department_upd
 
 async def delete_department(db: AsyncSession, department_id: int) -> None:
     try:
-        query = select(Department).where(Department.department_id == department_id, 
-                                      Department.is_active == True, 
-                                      Department.deleted_at == None)
+        query = select(Departments).where(Departments.department_id == department_id, 
+                                      Departments.is_active == True, 
+                                      Departments.deleted_at == None)
         result = await db.execute(query)
         department = result.scalar_one_or_none()
         

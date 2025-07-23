@@ -4,14 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from datetime import datetime, timezone
 from app.models.system_logs import SystemLog
-from app.models.user import User
+from app.models.users import Users
 from app.schemas.user import SystemLogCreate, SystemLogOut
 from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_system_log(db: AsyncSession, log_create: SystemLogCreate, current_user: Optional[User] = None) -> SystemLogOut:
+async def create_system_log(db: AsyncSession, log_create: SystemLogCreate, current_user: Optional[Users] = None) -> SystemLogOut:
     try:
         # Validate action
         valid_actions = [
@@ -26,9 +26,9 @@ async def create_system_log(db: AsyncSession, log_create: SystemLogCreate, curre
         
         # Validate user_id if provided
         if log_create.user_id:
-            query = select(User).where(User.user_id == log_create.user_id, 
-                                    User.is_active == True, 
-                                    User.deleted_at == None)
+            query = select(Users).where(Users.user_id == log_create.user_id, 
+                                    Users.is_active == True, 
+                                    Users.deleted_at == None)
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
@@ -51,7 +51,7 @@ async def create_system_log(db: AsyncSession, log_create: SystemLogCreate, curre
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                           detail="Error creating system log")
 
-async def get_system_log_by_id(db: AsyncSession, log_id: int, current_user: User) -> Optional[SystemLogOut]:
+async def get_system_log_by_id(db: AsyncSession, log_id: int, current_user: Users) -> Optional[SystemLogOut]:
     try:
         query = select(SystemLog).where(SystemLog.log_id == log_id)
         result = await db.execute(query)
@@ -81,7 +81,7 @@ async def get_system_logs(db: AsyncSession, user_id: Optional[int] = None,
                         end_date: Optional[datetime] = None, 
                         skip: int = 0, 
                         limit: int = settings.DEFAULT_PAGE_SIZE, 
-                        current_user: Optional[User] = None) -> List[SystemLogOut]:
+                        current_user: Optional[Users] = None) -> List[SystemLogOut]:
     try:
         # Check permission to view logs
         from app.services.auth_service import check_user_permission

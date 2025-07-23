@@ -8,7 +8,7 @@ from app.models.attendance import Attendance
 from app.models.attendance_summary import AttendanceSummary
 from app.models.overtime_record import OvertimeRecord
 from app.models.time_correction import TimeCorrection
-from app.models.user import User
+from app.models.users import Users
 from app.schemas.attendance import AttendanceCreate, AttendanceUpdate, AttendanceOut
 from app.schemas.user import TimeCorrectionUpdate, UserOut
 from app.core.config import settings
@@ -16,7 +16,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_attendance(db: AsyncSession, attendance_create: AttendanceCreate, current_user: User) -> AttendanceOut:
+async def create_attendance(db: AsyncSession, attendance_create: AttendanceCreate, current_user: Users) -> AttendanceOut:
     if attendance_create.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to clock in for another user")
     
@@ -39,7 +39,7 @@ async def create_attendance(db: AsyncSession, attendance_create: AttendanceCreat
     logger.info(f"Attendance created for user_id {attendance_create.user_id}, attendance_id {db_attendance.attendance_id}")
     return AttendanceOut.model_validate(db_attendance)
 
-async def update_attendance(db: AsyncSession, attendance_id: int, attendance_update: AttendanceUpdate, current_user: User) -> AttendanceOut:
+async def update_attendance(db: AsyncSession, attendance_id: int, attendance_update: AttendanceUpdate, current_user: Users) -> AttendanceOut:
     query = select(Attendance).where(Attendance.attendance_id == attendance_id)
     result = await db.execute(query)
     attendance = result.scalar_one_or_none()
@@ -92,7 +92,7 @@ async def update_attendance(db: AsyncSession, attendance_id: int, attendance_upd
     logger.info(f"Attendance updated, attendance_id {attendance_id}")
     return AttendanceOut.model_validate(attendance)
 
-async def get_attendance_by_id(db: AsyncSession, attendance_id: int, current_user: User) -> AttendanceOut:
+async def get_attendance_by_id(db: AsyncSession, attendance_id: int, current_user: Users) -> AttendanceOut:
     query = select(Attendance).where(Attendance.attendance_id == attendance_id)
     result = await db.execute(query)
     attendance = result.scalar_one_or_none()
@@ -121,7 +121,7 @@ async def get_user_attendance(db: AsyncSession, user_id: int, start_date: Option
     logger.info(f"Retrieved {len(attendances)} attendance records for user_id {user_id}")
     return [AttendanceOut.model_validate(attendance) for attendance in attendances]
 
-async def create_time_correction(db: AsyncSession, correction: TimeCorrection, current_user: User) -> TimeCorrection:
+async def create_time_correction(db: AsyncSession, correction: TimeCorrection, current_user: Users) -> TimeCorrection:
     if correction.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create time correction for another user")
     
@@ -147,7 +147,7 @@ async def create_time_correction(db: AsyncSession, correction: TimeCorrection, c
     logger.info(f"Time correction created for user_id {correction.user_id}, correction_id {db_correction.correction_id}")
     return db_correction
 
-async def update_time_correction(db: AsyncSession, correction_id: int, correction_update: TimeCorrectionUpdate, current_user: User) -> TimeCorrection:
+async def update_time_correction(db: AsyncSession, correction_id: int, correction_update: TimeCorrectionUpdate, current_user: Users) -> TimeCorrection:
     query = select(TimeCorrection).where(TimeCorrection.correction_id == correction_id)
     result = await db.execute(query)
     correction = result.scalar_one_or_none()
@@ -186,7 +186,7 @@ async def update_time_correction(db: AsyncSession, correction_id: int, correctio
     logger.info(f"Time correction updated, correction_id {correction_id}")
     return correction
 
-async def get_time_correction_by_id(db: AsyncSession, correction_id: int, current_user: User) -> TimeCorrection:
+async def get_time_correction_by_id(db: AsyncSession, correction_id: int, current_user: Users) -> TimeCorrection:
     query = select(TimeCorrection).where(TimeCorrection.correction_id == correction_id)
     result = await db.execute(query)
     correction = result.scalar_one_or_none()
@@ -199,7 +199,7 @@ async def get_time_correction_by_id(db: AsyncSession, correction_id: int, curren
     
     return correction
 
-async def refresh_attendance_summary(db: AsyncSession, current_user: User) -> None:
+async def refresh_attendance_summary(db: AsyncSession, current_user: Users) -> None:
     """Refresh the attendance_summary materialized view."""
     from app.api.deps import is_manager_or_hr
     if not await is_manager_or_hr(db, current_user):
@@ -236,7 +236,7 @@ async def get_attendance_summary(db: AsyncSession, user_id: Optional[int] = None
     logger.info(f"Retrieved {len(summaries)} attendance summary records")
     return [summary.dict() for summary in summaries]
 
-async def approve_time_correction(db: AsyncSession, correction_id: int, current_user: User, comments: Optional[str] = None) -> TimeCorrection:
+async def approve_time_correction(db: AsyncSession, correction_id: int, current_user: Users, comments: Optional[str] = None) -> TimeCorrection:
     query = select(TimeCorrection).where(TimeCorrection.correction_id == correction_id)
     result = await db.execute(query)
     correction = result.scalar_one_or_none()
@@ -290,7 +290,7 @@ async def approve_time_correction(db: AsyncSession, correction_id: int, current_
     logger.info(f"Time correction approved, correction_id {correction_id}")
     return correction
 
-async def reject_time_correction(db: AsyncSession, correction_id: int, current_user: User, comments: Optional[str] = None) -> TimeCorrection:
+async def reject_time_correction(db: AsyncSession, correction_id: int, current_user: Users, comments: Optional[str] = None) -> TimeCorrection:
     query = select(TimeCorrection).where(TimeCorrection.correction_id == correction_id)
     result = await db.execute(query)
     correction = result.scalar_one_or_none()

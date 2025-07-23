@@ -3,7 +3,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-from app.models.user import User
+from app.models.users import Users
 from app.models.user_departments import UserDepartment
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.employee_emergency_contacts import EmployeeEmergencyContact
@@ -14,20 +14,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
-    query = select(User).where(User.user_id == user_id, User.is_active == True, User.deleted_at == None)
+async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[Users]:
+    query = select(Users).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at == None)
     result = await db.execute(query)
     return result.scalar_one_or_none()
 
-async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    query = select(User).where(User.email == email, User.is_active == True, User.deleted_at == None)
+async def get_user_by_email(db: AsyncSession, email: str) -> Optional[Users]:
+    query = select(Users).where(Users.email == email, Users.is_active == True, Users.deleted_at == None)
     result = await db.execute(query)
     return result.scalar_one_or_none()
 
 async def create_user(db: AsyncSession, user_create: UserCreate, department_id: Optional[int] = None, manager_id: Optional[int] = None) -> UserOut:
     try:
         # Check for existing email
-        query = select(User).where(User.email == user_create.email)
+        query = select(Users).where(Users.email == user_create.email)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
@@ -45,7 +45,7 @@ async def create_user(db: AsyncSession, user_create: UserCreate, department_id: 
         employee_id = f"EMP{str(sequence_value).zfill(6)}"
         
         hashed_password = get_password_hash(user_create.password)
-        db_user = User(
+        db_user = Users(
             **user_create.model_dump(exclude={"password"}, exclude_none=True),
             password_hash=hashed_password,
             employee_id=employee_id,
@@ -203,7 +203,7 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
 
 async def get_users(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[UserOut]:
     try:
-        query = select(User).where(User.is_active == True, User.deleted_at == None).offset(skip).limit(limit)
+        query = select(Users).where(Users.is_active == True, Users.deleted_at == None).offset(skip).limit(limit)
         result = await db.execute(query)
         users = result.scalars().all()
         

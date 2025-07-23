@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy.sql import func
 from sqlalchemy.sql.schema import CheckConstraint
 
-class Department(SQLModel, table=True):
+class Departments(SQLModel, table=True):
     department_id: Optional[int] = Field(default=None, primary_key=True)
     department_name: str = Field(unique=True, nullable=False)
     description: Optional[str] = Field(default=None)

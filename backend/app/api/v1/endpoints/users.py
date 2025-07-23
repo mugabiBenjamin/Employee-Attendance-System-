@@ -15,7 +15,7 @@ from app.services.user_service import (
 )
 from app.api.deps import get_db_session, get_current_active_user
 from app.services.auth_service import check_user_permission
-from app.models.user import User
+from app.models.users import Users
 from app.core.config import settings
 import logging
 
@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def is_admin(db: AsyncSession, user: User) -> bool:
+async def is_admin(db: AsyncSession, user: Users) -> bool:
     from sqlmodel import select
     from app.models.user_roles import UserRoles
-    query = select(User).join(UserRoles).join(UserRoles).where(
-        User.user_id == user.user_id,
+    query = select(Users).join(UserRoles).join(UserRoles).where(
+        Users.user_id == user.user_id,
         UserRoles.is_active == True,
         UserRoles.role_name.in_(["Admin", "Super_Admin"])
     )
@@ -45,7 +45,7 @@ async def create_new_user(
     department_id: Optional[int] = None,
     manager_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new user in the system."""
     has_permission = await check_user_permission(db, current_user.user_id, "create_user")
@@ -68,7 +68,7 @@ async def create_new_user(
 async def read_user(
     user_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific user by their ID."""
     has_permission = await check_user_permission(db, current_user.user_id, "view_users")
@@ -92,7 +92,7 @@ async def read_users(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a paginated list of all users."""
     has_permission = await check_user_permission(db, current_user.user_id, "view_users")
@@ -113,7 +113,7 @@ async def update_existing_user(
     department_id: Optional[int] = None,
     manager_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Update an existing user's information."""
     has_permission = await check_user_permission(db, current_user.user_id, "update_users")
@@ -137,7 +137,7 @@ async def update_existing_user(
 async def delete_existing_user(
     user_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Delete a user from the system."""
     has_permission = await check_user_permission(db, current_user.user_id, "delete_users")
@@ -157,7 +157,7 @@ async def delete_existing_user(
 async def assign_user_department(
     user_department: UserDepartmentCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Assign a user to a department."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")
@@ -176,7 +176,7 @@ async def assign_user_department(
 async def create_hierarchy(
     hierarchy: EmployeeHierarchyCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create an employee hierarchy entry."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_hierarchy")
@@ -195,7 +195,7 @@ async def create_hierarchy(
 async def create_emergency_contact(
     contact: EmployeeEmergencyContactCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create an emergency contact for a user."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_emergency_contacts")

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from datetime import datetime, timezone
 from app.models.holiday_calendar import HolidayCalendar
-from app.models.user import User
+from app.models.users import Users
 from app.models.user_departments import UserDepartment
 from app.schemas.leave import HolidayCalendarCreate, HolidayCalendarUpdate, HolidayCalendarOut
 from app.core.config import settings
@@ -12,7 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_holiday(db: AsyncSession, holiday_create: HolidayCalendarCreate, current_user: User) -> HolidayCalendarOut:
+async def create_holiday(db: AsyncSession, holiday_create: HolidayCalendarCreate, current_user: Users) -> HolidayCalendarOut:
     try:
         # Validate department_id if provided
         if holiday_create.department_id:
@@ -63,7 +63,7 @@ async def create_holiday(db: AsyncSession, holiday_create: HolidayCalendarCreate
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                           detail="Error creating holiday")
 
-async def get_holiday_by_id(db: AsyncSession, holiday_id: int, current_user: User) -> Optional[HolidayCalendarOut]:
+async def get_holiday_by_id(db: AsyncSession, holiday_id: int, current_user: Users) -> Optional[HolidayCalendarOut]:
     try:
         query = select(HolidayCalendar).where(HolidayCalendar.holiday_id == holiday_id)
         result = await db.execute(query)
@@ -96,7 +96,7 @@ async def get_holiday_by_id(db: AsyncSession, holiday_id: int, current_user: Use
 
 async def get_holidays(db: AsyncSession, year: Optional[int] = None, 
                       department_id: Optional[int] = None, 
-                      current_user: Optional[User] = None, 
+                      current_user: Optional[Users] = None, 
                       skip: int = 0, 
                       limit: int = settings.DEFAULT_PAGE_SIZE) -> List[HolidayCalendarOut]:
     try:
@@ -140,7 +140,7 @@ async def get_holidays(db: AsyncSession, year: Optional[int] = None,
                           detail="Error retrieving holidays")
 
 async def update_holiday(db: AsyncSession, holiday_id: int, holiday_update: HolidayCalendarUpdate, 
-                       current_user: User) -> HolidayCalendarOut:
+                       current_user: Users) -> HolidayCalendarOut:
     try:
         query = select(HolidayCalendar).where(HolidayCalendar.holiday_id == holiday_id)
         result = await db.execute(query)
@@ -211,7 +211,7 @@ async def update_holiday(db: AsyncSession, holiday_id: int, holiday_update: Holi
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                           detail="Error updating holiday")
 
-async def delete_holiday(db: AsyncSession, holiday_id: int, current_user: User) -> None:
+async def delete_holiday(db: AsyncSession, holiday_id: int, current_user: Users) -> None:
     try:
         query = select(HolidayCalendar).where(HolidayCalendar.holiday_id == holiday_id)
         result = await db.execute(query)

@@ -10,7 +10,7 @@ from app.models.system_logs import SystemLog
 from app.services.auth_service import check_user_permission
 from app.schemas.system_logs import SystemLogResponse
 from app.core.security import get_current_user
-from app.models.user import User
+from app.models.users import Users
 
 router = APIRouter()
 
@@ -26,7 +26,7 @@ class SystemLogFilter(BaseModel):
 async def get_system_logs(
     filters: SystemLogFilter = Depends(),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user)
 ):
     """Retrieve system logs with optional filters, accessible only to Admin or Super_Admin."""
     # Check if user has Admin or Super_Admin role
@@ -68,7 +68,7 @@ async def get_system_logs(
 async def get_system_log(
     log_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user)
 ):
     """Retrieve a specific system log by ID, accessible only to Admin or Super_Admin."""
     # Check if user has Admin or Super_Admin role

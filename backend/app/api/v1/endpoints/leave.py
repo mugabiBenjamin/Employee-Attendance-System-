@@ -16,7 +16,7 @@ from app.services.leave_service import (
 from app.services.holiday_service import (
     create_holiday, update_holiday, get_holiday_by_id, delete_holiday
 )
-from app.models.user import User
+from app.models.users import Users
 from app.models.leave import LeavePolicy, LeaveRequest
 from app.api.deps import get_db_session, get_current_active_user
 from app.services.auth_service import check_user_permission
@@ -27,19 +27,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
+async def is_manager_or_hr(db: AsyncSession, user: Users) -> bool:
     from sqlmodel import select
     from app.models.user_roles import UserRoles
-    from app.models.user_roles import Role
-    query = select(UserRoles).join(Role).where(
+    from app.models.user_roles import Roles
+    query = select(UserRoles).join(Roles).where(
         UserRoles.user_id == user.user_id,
         UserRoles.is_active == True,
-        Role.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
+        Roles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     return result.first() is not None
 
-async def check_approval_level_permission(db: AsyncSession, user: User, leave_id: int) -> bool:
+async def check_approval_level_permission(db: AsyncSession, user: Users, leave_id: int) -> bool:
     from sqlmodel import select
     query = select(LeavePolicy).join(LeaveRequest).where(
         LeaveRequest.leave_id == leave_id
@@ -63,7 +63,7 @@ async def check_approval_level_permission(db: AsyncSession, user: User, leave_id
 async def create_new_leave_request(
     leave_request: LeaveRequestCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new leave request."""
     valid_leave_types = ["annual", "sick", "maternity", "paternity", "emergency", "unpaid", 
@@ -92,7 +92,7 @@ async def update_leave_request(
     leave_id: int,
     leave_update: LeaveRequestUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Update an existing leave request."""
     leave_request = await get_leave_request_by_id(db, leave_id, current_user)
@@ -120,7 +120,7 @@ async def update_leave_request(
 async def get_leave_request(
     leave_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific leave request by its ID."""
     leave_request = await get_leave_request_by_id(db, leave_id, current_user)
@@ -146,7 +146,7 @@ async def get_leave_request_history(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get leave request history for a specific user."""
     if user_id != current_user.user_id and not await is_manager_or_hr(db, current_user):
@@ -164,7 +164,7 @@ async def get_user_leave_balance(
     user_id: int,
     year: Optional[int] = None,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get leave balance for a specific user."""
     if user_id != current_user.user_id and not await is_manager_or_hr(db, current_user):
@@ -182,7 +182,7 @@ async def approve_leave_request(
     leave_id: int,
     comments: Optional[str] = None,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Approve a leave request."""
     if not await check_approval_level_permission(db, current_user, leave_id):
@@ -206,7 +206,7 @@ async def reject_leave_request(
     leave_id: int,
     comments: Optional[str] = None,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Reject a leave request."""
     if not await check_approval_level_permission(db, current_user, leave_id):
@@ -230,7 +230,7 @@ async def reject_leave_request(
 async def create_approval_workflow(
     workflow: LeaveApprovalWorkflowCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new leave approval workflow."""
     if not await is_manager_or_hr(db, current_user):
@@ -253,7 +253,7 @@ async def create_approval_workflow(
 async def create_leave_policy(
     policy: LeavePolicyCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new leave policy."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_leave_policies")
@@ -288,7 +288,7 @@ async def update_leave_policy(
     policy_id: int,
     policy_update: LeavePolicyUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Update an existing leave policy."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_leave_policies")
@@ -339,7 +339,7 @@ async def update_leave_policy(
 async def create_holiday_calendar(
     holiday: HolidayCalendarCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Create a new holiday in the calendar."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_holidays")
@@ -358,7 +358,7 @@ async def update_holiday_calendar(
     holiday_id: int,
     holiday_update: HolidayCalendarUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Update an existing holiday in the calendar."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_holidays")
@@ -376,7 +376,7 @@ async def update_holiday_calendar(
 async def get_holiday(
     holiday_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific holiday by its ID."""
     holiday = await get_holiday_by_id(db, holiday_id, current_user)
@@ -394,7 +394,7 @@ async def get_holiday(
 async def delete_holiday_calendar(
     holiday_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user)
 ):
     """Delete a holiday from the calendar."""
     has_permission = await check_user_permission(db, current_user.user_id, "manage_holidays")

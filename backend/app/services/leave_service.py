@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from datetime import date, datetime, timezone
 from app.models.leave import LeaveRequest, LeaveBalance, LeavePolicy
-from app.models.user import User
+from app.models.users import Users
 from app.schemas.leave import LeaveApprovalWorkflowCreate, LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut, LeavePolicyOut, LeaveApprovalWorkflowOut, HolidayCalendarOut
 from app.core.config import settings
 import logging
@@ -14,7 +14,7 @@ from app.models.leave_approval_workflow import LeaveApprovalWorkflow
 
 logger = logging.getLogger(__name__)
 
-async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCreate, current_user: User) -> LeaveRequestOut:
+async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCreate, current_user: Users) -> LeaveRequestOut:
     try:
         # Validate leave_type
         valid_leave_types = ["annual", "sick", "maternity", "paternity", "emergency", "unpaid", "casual", 
@@ -84,7 +84,7 @@ async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCrea
                           detail="Error creating leave request")
 
 async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: LeaveRequestUpdate, 
-                            current_user: User) -> LeaveRequestOut:
+                            current_user: Users) -> LeaveRequestOut:
     try:
         db_leave = await get_leave_request_by_id(db, leave_id, current_user)
         if not db_leave:
@@ -163,7 +163,7 @@ async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: Le
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                           detail="Error updating leave request")
 
-async def get_leave_request_by_id(db: AsyncSession, leave_id: int, current_user: User) -> Optional[LeaveRequestOut]:
+async def get_leave_request_by_id(db: AsyncSession, leave_id: int, current_user: Users) -> Optional[LeaveRequestOut]:
     try:
         query = select(LeaveRequest).where(LeaveRequest.leave_id == leave_id)
         result = await db.execute(query)
@@ -224,7 +224,7 @@ async def get_leave_balance(db: AsyncSession, user_id: int, year: Optional[int])
 async def validate_leave_policy(db: AsyncSession, user_id: int, leave_type: str, start_date: date, 
                              days_requested: int) -> LeavePolicy:
     try:
-        query = select(User).where(User.user_id == user_id)
+        query = select(Users).where(Users.user_id == user_id)
         result = await db.execute(query)
         user = result.scalar_one_or_none()
         
@@ -316,7 +316,7 @@ async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, 
 
 async def check_holiday_conflicts(db: AsyncSession, start_date: date, end_date: date, user_id: int) -> None:
     try:
-        query = select(User).where(User.user_id == user_id)
+        query = select(Users).where(Users.user_id == user_id)
         result = await db.execute(query)
         user = result.scalar_one_or_none()
         
@@ -346,7 +346,7 @@ async def check_holiday_conflicts(db: AsyncSession, start_date: date, end_date: 
                           detail="Error checking holiday conflicts")
 
 async def create_leave_approval_workflow(db: AsyncSession, workflow: LeaveApprovalWorkflowCreate, 
-                                      current_user: User) -> LeaveApprovalWorkflowOut:
+                                      current_user: Users) -> LeaveApprovalWorkflowOut:
     try:
         query = select(LeaveRequest).where(LeaveRequest.leave_id == workflow.leave_id)
         result = await db.execute(query)

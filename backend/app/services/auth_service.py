@@ -6,9 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlmodel import select
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token
-from app.models.user import User
+from app.models.users import Users
 from app.models.user_roles import UserRoles
-from app.models.user_roles import Role
+from app.models.user_roles import Roles
 from app.schemas.user import UserAuth, Token, UserCreate, UserOut
 from app.core.config import settings
 import logging
@@ -16,8 +16,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[User]:
-    query = select(User).where(User.email == email, User.is_active == True, User.deleted_at == None)
+async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[Users]:
+    query = select(Users).where(Users.email == email, Users.is_active == True, Users.deleted_at == None)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
     if not user or not verify_password(password, user.password_hash):
@@ -57,7 +57,7 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> Token:
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
-    query = select(User).where(User.user_id == user_id, User.is_active == True, User.deleted_at == None)
+    query = select(Users).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at == None)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
 
@@ -76,7 +76,7 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> Token:
 async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
     try:
         # Check for existing email
-        query = select(User).where(User.email == user_create.email)
+        query = select(Users).where(Users.email == user_create.email)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
@@ -94,7 +94,7 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
         employee_id = f"EMP{str(sequence_value).zfill(6)}"
 
         hashed_password = get_password_hash(user_create.password)
-        db_user = User(
+        db_user = Users(
             **user_create.model_dump(exclude={"password"}, exclude_none=True),
             password_hash=hashed_password,
             employee_id=employee_id,
@@ -107,7 +107,7 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
         await db.refresh(db_user)
 
         # Assign default role
-        query = select(Role).where(Role.role_name == "Employee")
+        query = select(Roles).where(Roles.role_name == "Employee")
         result = await db.execute(query)
         role = result.scalar_one_or_none()
         if role:
@@ -138,10 +138,10 @@ async def check_user_permission(db: AsyncSession, user_id: int, required_permiss
             logger.warning(f"Invalid permission requested: {required_permission}")
             return False
 
-        query = select(Role.permissions).join(UserRoles).where(
+        query = select(Roles.permissions).join(UserRoles).where(
             UserRoles.user_id == user_id,
             UserRoles.is_active == True,
-            Role.role_id == UserRoles.role_id
+            Roles.role_id == UserRoles.role_id
         )
         result = await db.execute(query)
 

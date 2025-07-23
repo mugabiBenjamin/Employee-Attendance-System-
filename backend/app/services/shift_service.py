@@ -5,14 +5,14 @@ from sqlmodel import select
 from datetime import datetime, timezone, time
 from app.models.shift_patterns import ShiftPattern
 from app.models.shift_assignments import ShiftAssignment
-from app.models.user import User
+from app.models.users import Users
 from app.schemas.user import ShiftPatternCreate, ShiftPatternUpdate, ShiftPatternOut, ShiftAssignmentCreate, ShiftAssignmentUpdate, ShiftAssignmentOut
 from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_shift_pattern(db: AsyncSession, shift_pattern: ShiftPatternCreate, current_user: User) -> ShiftPatternOut:
+async def create_shift_pattern(db: AsyncSession, shift_pattern: ShiftPatternCreate, current_user: Users) -> ShiftPatternOut:
     try:
         # Validate shift_type
         valid_shift_types = ["morning", "afternoon", "night", "flexible", "split"]
@@ -83,7 +83,7 @@ async def get_shift_patterns(db: AsyncSession, skip: int = 0, limit: int = setti
                           detail="Error retrieving shift patterns")
 
 async def update_shift_pattern(db: AsyncSession, pattern_id: int, shift_update: ShiftPatternUpdate, 
-                             current_user: User) -> ShiftPatternOut:
+                             current_user: Users) -> ShiftPatternOut:
     try:
         query = select(ShiftPattern).where(ShiftPattern.pattern_id == pattern_id, 
                                         ShiftPattern.is_active == True)
@@ -179,12 +179,12 @@ async def delete_shift_pattern(db: AsyncSession, pattern_id: int) -> None:
                           detail="Error deleting shift pattern")
 
 async def create_shift_assignment(db: AsyncSession, shift_assignment: ShiftAssignmentCreate, 
-                                current_user: User) -> ShiftAssignmentOut:
+                                current_user: Users) -> ShiftAssignmentOut:
     try:
         # Validate user
-        query = select(User).where(User.user_id == shift_assignment.user_id, 
-                                User.is_active == True, 
-                                User.deleted_at == None)
+        query = select(Users).where(Users.user_id == shift_assignment.user_id, 
+                                Users.is_active == True, 
+                                Users.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
@@ -266,7 +266,7 @@ async def get_shift_assignments(db: AsyncSession, user_id: Optional[int] = None,
                           detail="Error retrieving shift assignments")
 
 async def update_shift_assignment(db: AsyncSession, assignment_id: int, 
-                                shift_update: ShiftAssignmentUpdate, current_user: User) -> ShiftAssignmentOut:
+                                shift_update: ShiftAssignmentUpdate, current_user: Users) -> ShiftAssignmentOut:
     try:
         query = select(ShiftAssignment).where(ShiftAssignment.assignment_id == assignment_id, 
                                            ShiftAssignment.is_active == True)
