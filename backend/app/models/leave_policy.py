@@ -3,6 +3,7 @@ from sqlmodel import SQLModel, Field
 from datetime import datetime, date, timezone
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.sql import func
+from sqlalchemy import UniqueConstraint
 
 # Define the employee_type and leave_type enums for PostgreSQL
 employee_type = ENUM(
@@ -34,8 +35,7 @@ class LeavePolicy(SQLModel, table=True):
     updated_at: Optional[datetime] = Field(
         sa_column_kwargs={"server_default": func.current_timestamp(), "onupdate": func.current_timestamp()}
     )
+    
     __table_args__ = (
-        {"schema": "public", "constraints": [
-            {"name": "unique_policy_type", "unique": ["employee_type", "leave_type", "effective_from"]}
-        ]},
+        UniqueConstraint("employee_type", "leave_type", "effective_from", name="unique_policy_type"),
     )

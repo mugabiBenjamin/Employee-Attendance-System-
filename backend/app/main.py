@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import init_db, start_materialized_view_refresh
 from app.api.v1.api import router as api_router
-from app.models import SystemLog
+from app.models.system_logs import SystemLog
 from app.core.enums import SystemAction
 import asyncio
 import logging

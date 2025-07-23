@@ -3,12 +3,14 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from datetime import date, datetime, timezone
-from app.models.leave import LeaveRequest, LeaveBalance, LeavePolicy, LeaveApprovalWorkflow, HolidayCalendar
+from app.models.leave import LeaveRequest, LeaveBalance, LeavePolicy
 from app.models.user import User
 from app.schemas.leave import LeaveApprovalWorkflowCreate, LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut, LeavePolicyOut, LeaveApprovalWorkflowOut, HolidayCalendarOut
 from app.core.config import settings
 import logging
-from backend.app.models.user_departments import UserDepartment
+from app.models.user_departments import UserDepartment
+from app.models.holiday_calendar import HolidayCalendar
+from app.models.leave_approval_workflow import LeaveApprovalWorkflow
 
 logger = logging.getLogger(__name__)
 

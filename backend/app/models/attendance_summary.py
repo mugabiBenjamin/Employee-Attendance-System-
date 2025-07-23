@@ -1,7 +1,7 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
 from datetime import datetime, date
-from app.models.attendance import AttendanceStatus
+from app.core.enums import AttendanceStatus
 
 class AttendanceSummary(SQLModel, table=True):
     __tablename__ = "attendance_summary"

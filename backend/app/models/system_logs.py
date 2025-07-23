@@ -1,7 +1,7 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
-from sqlalchemy.dialects.postgresql import ENUM, JSONB
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, INET
 from sqlalchemy.sql import func
 
 # Define the system_action enum for PostgreSQL
@@ -22,7 +22,7 @@ class SystemLog(SQLModel, table=True):
     record_id: Optional[int] = Field(default=None)
     old_values: Optional[dict] = Field(default=None, sa_type=JSONB)
     new_values: Optional[dict] = Field(default=None, sa_type=JSONB)
-    ip_address: Optional[str] = Field(default=None, sa_type=func.inet)
+    ip_address: Optional[str] = Field(default=None, sa_type=INET)
     user_agent: Optional[str] = Field(default=None)
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
