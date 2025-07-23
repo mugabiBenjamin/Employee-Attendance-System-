@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.attendance import AttendanceCreate, AttendanceUpdate, AttendanceOut
 from app.schemas.user import TimeCorrectionCreate, TimeCorrectionUpdate, TimeCorrectionOut
 from app.services.attendance_service import (
-    create_attendance, 
+    create_attendance,
+    refresh_attendance_summary, 
     update_attendance, 
     get_attendance_by_id, 
     get_user_attendance, 
@@ -192,6 +193,15 @@ async def reject_time_correction_request(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
                           detail="Not authorized to reject time corrections")
     return await reject_time_correction(db, correction_id, current_user, comments)
+
+@router.post("/refresh-summary", status_code=status.HTTP_204_NO_CONTENT, summary="Refresh attendance summary", description="Refresh the attendance_summary materialized view")
+async def refresh_attendance_summary_endpoint(
+    db: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Refresh the attendance summary materialized view."""
+    await refresh_attendance_summary(db, current_user)
+    return None
 
 @router.get("/summary", 
     response_model=List[dict],
