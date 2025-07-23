@@ -1,15 +1,14 @@
 from typing import Optional
-from sqlmodel import SQLModel, Field, Enum
+from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
-import enum
+from sqlalchemy.dialects.postgresql import ENUM
 
-class CorrectionStatus(str, enum.Enum):
-    DRAFT = "draft"
-    UNDER_REVIEW = "under_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
+# Define the correction_status enum for PostgreSQL
+correction_status = ENUM(
+    'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed',
+    name='correction_status',
+    create_type=True
+)
 
 class TimeCorrectionBase(SQLModel):
     attendance_id: int = Field(foreign_key="attendance_records.attendance_id", index=True)
@@ -19,7 +18,7 @@ class TimeCorrectionBase(SQLModel):
     corrected_clock_in: Optional[datetime] = Field(default=None)
     corrected_clock_out: Optional[datetime] = Field(default=None)
     reason: str
-    status: CorrectionStatus = Field(default=CorrectionStatus.DRAFT, sa_type=Enum(CorrectionStatus))
+    status: str = Field(default="draft", sa_type=correction_status)
     approved_by: Optional[int] = Field(default=None, foreign_key="users.user_id", nullable=True)
     approved_at: Optional[datetime] = Field(default=None)
 
@@ -36,7 +35,7 @@ class TimeCorrectionUpdate(SQLModel):
     corrected_clock_in: Optional[datetime] = None
     corrected_clock_out: Optional[datetime] = None
     reason: Optional[str] = None
-    status: Optional[CorrectionStatus] = None
+    status: Optional[str] = None
     approved_by: Optional[int] = None
     approved_at: Optional[datetime] = None
 
