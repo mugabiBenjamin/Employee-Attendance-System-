@@ -25,12 +25,11 @@ router = APIRouter()
 
 async def is_admin(db: AsyncSession, user: User) -> bool:
     from sqlmodel import select
-    from app.models.user_roles import UserRole
-    from app.models.user_roles import Role
-    query = select(User).join(UserRole).join(Role).where(
+    from app.models.user_roles import UserRoles
+    query = select(User).join(UserRoles).join(UserRoles).where(
         User.user_id == user.user_id,
-        UserRole.is_active == True,
-        Role.role_name.in_(["Admin", "Super_Admin"])
+        UserRoles.is_active == True,
+        UserRoles.role_name.in_(["Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     return result.scalar_one_or_none() is not None

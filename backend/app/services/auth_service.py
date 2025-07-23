@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from sqlmodel import select
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token
 from app.models.user import User
-from app.models.user_roles import UserRole
+from app.models.user_roles import UserRoles
 from app.models.user_roles import Role
 from app.schemas.user import UserAuth, Token, UserCreate, UserOut
 from app.core.config import settings
@@ -111,7 +111,7 @@ async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
         result = await db.execute(query)
         role = result.scalar_one_or_none()
         if role:
-            user_role = UserRole(
+            user_role = UserRoles(
                 user_id=db_user.user_id,
                 role_id=role.role_id,
                 assigned_at=datetime.now(timezone.utc),
@@ -138,10 +138,10 @@ async def check_user_permission(db: AsyncSession, user_id: int, required_permiss
             logger.warning(f"Invalid permission requested: {required_permission}")
             return False
 
-        query = select(Role.permissions).join(UserRole).where(
-            UserRole.user_id == user_id,
-            UserRole.is_active == True,
-            Role.role_id == UserRole.role_id
+        query = select(Role.permissions).join(UserRoles).where(
+            UserRoles.user_id == user_id,
+            UserRoles.is_active == True,
+            Role.role_id == UserRoles.role_id
         )
         result = await db.execute(query)
 

@@ -29,12 +29,11 @@ router = APIRouter()
 
 async def is_manager_or_hr(db: AsyncSession, user: User) -> bool:
     from sqlmodel import select
-    from app.models.user_roles import UserRole
-    from app.models.user_roles import Role
-    query = select(UserRole).join(Role).where(
-        UserRole.user_id == user.user_id,
-        UserRole.is_active == True,
-        Role.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
+    from app.models.user_roles import UserRoles
+    query = select(UserRoles).join(UserRoles).where(
+        UserRoles.user_id == user.user_id,
+        UserRoles.is_active == True,
+        UserRoles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"])
     )
     result = await db.execute(query)
     return result.first() is not None
