@@ -27,7 +27,7 @@ class LeaveRequest(SQLModel, table=True):
     days_requested: int = Field(nullable=False, gt=0, sa_column_kwargs={"check": "days_requested > 0"})
     reason: Optional[str] = Field(default=None)
     status: str = Field(default="draft", sa_type=leave_request_status)
-    approved_by: Optional[int] = Field(default=None, foreign_key="users.user_id")
+    approved_by: Optional[int] = Field(default=None, foreign_key="users.user_id", nullable=True)
     approved_at: Optional[datetime] = Field(default=None)
     comments: Optional[str] = Field(default=None)
     attachment_url: Optional[str] = Field(default=None, max_length=500)

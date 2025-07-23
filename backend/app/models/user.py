@@ -21,7 +21,7 @@ class User(SQLModel, table=True):
     hire_date: date = Field(nullable=False, sa_column_kwargs={"check": "hire_date <= CURRENT_DATE"})
     employee_type: str = Field(default="full_time")
     salary: Optional[float] = Field(default=None, ge=0, sa_column_kwargs={"check": "salary IS NULL OR salary >= 0"})
-    manager_id: Optional[int] = Field(default=None, foreign_key="users.user_id")
+    manager_id: Optional[int] = Field(default=None, foreign_key="users.user_id", nullable=True)
     is_active: bool = Field(default=True)
     deleted_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"check": "deleted_at IS NULL OR is_active = FALSE"})
     last_login: Optional[datetime] = Field(default=None)

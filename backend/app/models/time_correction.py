@@ -20,7 +20,7 @@ class TimeCorrectionBase(SQLModel):
     corrected_clock_out: Optional[datetime] = Field(default=None)
     reason: str
     status: CorrectionStatus = Field(default=CorrectionStatus.DRAFT, sa_type=Enum(CorrectionStatus))
-    approved_by: Optional[int] = Field(default=None, foreign_key="users.user_id")
+    approved_by: Optional[int] = Field(default=None, foreign_key="users.user_id", nullable=True)
     approved_at: Optional[datetime] = Field(default=None)
 
 class TimeCorrection(TimeCorrectionBase, table=True):

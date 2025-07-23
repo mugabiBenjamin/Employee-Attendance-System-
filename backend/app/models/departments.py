@@ -7,7 +7,7 @@ class Department(SQLModel, table=True):
     department_id: Optional[int] = Field(default=None, primary_key=True)
     department_name: str = Field(unique=True, nullable=False)
     description: Optional[str] = Field(default=None)
-    manager_id: Optional[int] = Field(default=None, foreign_key="users.user_id")
+    manager_id: Optional[int] = Field(default=None, foreign_key="users.user_id", nullable=True)
     budget: Optional[float] = Field(default=None, sa_column_kwargs={"check": "budget IS NULL OR budget >= 0"})
     location: Optional[str] = Field(default=None)
     is_active: bool = Field(default=True)

@@ -14,8 +14,7 @@ class Role(SQLModel, table=True):
     description: Optional[str] = Field(default=None)
     permissions: dict = Field(default_factory=dict, sa_type=JSONB)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    updated_at: Optional[datetime] = Field(
         sa_column_kwargs={"server_default": func.current_timestamp(), "onupdate": func.current_timestamp()}
     )
 
@@ -24,7 +23,7 @@ class UserRoles(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.user_id", nullable=False)
     role_id: int = Field(foreign_key="roles.role_id", nullable=False)
     assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    assigned_by: Optional[int] = Field(default=None, foreign_key="users.user_id")
+    assigned_by: Optional[int] = Field(default=None, foreign_key="users.user_id", nullable=True)
     is_active: bool = Field(default=True)
     __table_args__ = (
         {"schema": "public", "constraints": [{"name": "unique_user_role", "unique": ["user_id", "role_id"]}]},
