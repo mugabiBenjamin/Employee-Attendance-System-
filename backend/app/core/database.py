@@ -36,54 +36,62 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-# Enum creation SQL statements
-ENUM_CREATION_SQL = """
-DO $$ BEGIN
-    CREATE TYPE attendance_status AS ENUM (
-        'present', 'absent', 'late', 'early_departure', 'on_leave', 'half_day', 'sick'
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE leave_request_status AS ENUM (
-        'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE leave_type AS ENUM (
-        'annual', 'sick', 'maternity', 'paternity', 'emergency', 'unpaid',
-        'casual', 'compensatory', 'bereavement', 'leave_of_absence', 'public_holiday'
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE correction_status AS ENUM (
-        'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE system_action AS ENUM (
-        'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'CLOCK_IN', 'CLOCK_OUT',
-        'password_change', 'profile_update', 'data_export', 'data_import',
-        'assign_role', 'revoke_role', 'view_report', 'approve_leave',
-        'reject_leave', 'create_department', 'delete_department'
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE employee_type AS ENUM (
-        'full_time', 'part_time', 'contract', 'intern', 'temporary'
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE shift_type AS ENUM (
-        'morning', 'afternoon', 'night', 'flexible', 'split'
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-"""
+# Individual enum creation SQL statements
+ENUM_CREATION_SQLS = [
+    """
+    DO $$ BEGIN
+        CREATE TYPE attendance_status AS ENUM (
+            'present', 'absent', 'late', 'early_departure', 'on_leave', 'half_day', 'sick'
+        );
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """,
+    """
+    DO $$ BEGIN
+        CREATE TYPE leave_request_status AS ENUM (
+            'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
+        );
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """,
+    """
+    DO $$ BEGIN
+        CREATE TYPE leave_type AS ENUM (
+            'annual', 'sick', 'maternity', 'paternity', 'emergency', 'unpaid',
+            'casual', 'compensatory', 'bereavement', 'leave_of_absence', 'public_holiday'
+        );
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """,
+    """
+    DO $$ BEGIN
+        CREATE TYPE correction_status AS ENUM (
+            'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
+        );
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """,
+    """
+    DO $$ BEGIN
+        CREATE TYPE system_action AS ENUM (
+            'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'CLOCK_IN', 'CLOCK_OUT',
+            'password_change', 'profile_update', 'data_export', 'data_import',
+            'assign_role', 'revoke_role', 'view_report', 'approve_leave',
+            'reject_leave', 'create_department', 'delete_department'
+        );
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """,
+    """
+    DO $$ BEGIN
+        CREATE TYPE employee_type AS ENUM (
+            'full_time', 'part_time', 'contract', 'intern', 'temporary'
+        );
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """,
+    """
+    DO $$ BEGIN
+        CREATE TYPE shift_type AS ENUM (
+            'morning', 'afternoon', 'night', 'flexible', 'split'
+        );
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    """
+]
 
 # Materialized view creation SQL
 MATERIALIZED_VIEW_SQL = """
@@ -111,8 +119,9 @@ CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summa
 # Initialize database tables and enums
 async def init_db():
     async with engine.begin() as conn:
-        # Create enums first
-        await conn.execute(text(ENUM_CREATION_SQL))
+        # Create enums individually
+        for enum_sql in ENUM_CREATION_SQLS:
+            await conn.execute(text(enum_sql))
         # Create tables
         await conn.run_sync(SQLModel.metadata.create_all)
         # Create materialized view
