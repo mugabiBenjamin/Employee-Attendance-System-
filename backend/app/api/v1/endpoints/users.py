@@ -1,206 +1,344 @@
-from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.user import (
-    UserCreate, UserUpdate, UserOut, 
-    UserDepartmentCreate, UserDepartmentOut, 
-    EmployeeHierarchyCreate, EmployeeHierarchyOut, 
-    EmployeeEmergencyContactCreate, EmployeeEmergencyContactOut
-)
-from app.services.user_service import (
-    create_user, update_user, delete_user, 
-    get_user_by_id, get_users, 
-    create_user_department, create_employee_hierarchy, 
-    create_employee_emergency_contact
-)
-from app.api.deps import get_db_session, get_current_active_user
-from app.services.auth_service import check_user_permission
+from sqlalchemy import select, update
+from typing import List, Optional
+from pydantic import BaseModel, ConfigDict, EmailStr
+from datetime import datetime, timezone
+from app.core.database import AsyncSessionLocal
 from app.models.users import Users
+from app.models.user_roles import UserRoles
+from app.models.roles import Roles
+from app.core.security import check_user_permission, hash_password
 from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/users", tags=["Users"])
 
-async def is_admin(db: AsyncSession, user: Users) -> bool:
-    from sqlmodel import select
-    from app.models.user_roles import UserRoles
-    query = select(Users).join(UserRoles).join(UserRoles).where(
-        Users.user_id == user.user_id,
-        UserRoles.is_active == True,
-        UserRoles.role_name.in_(["Admin", "Super_Admin"])
-    )
+class UserCreate(BaseModel):
+    """Schema for creating a new user."""
+    email: EmailStr
+    password: str
+    first_name: str
+    last_name: str
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+class UserUpdate(BaseModel):
+    """Schema for updating an existing user."""
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class UserOut(BaseModel):
+    """Schema for user output."""
+    user_id: int
+    email: EmailStr
+    first_name: str
+    last_name: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+async def get_db() -> AsyncSession:
+    """Dependency to provide an async database session."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception as e:
+            logger.error(f"Database session error: {str(e)}")
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
+    """Dependency to get the current active user."""
+    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
     result = await db.execute(query)
-    return result.scalar_one_or_none() is not None
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
+    return user
 
-@router.post("/", 
-    response_model=UserOut, 
-    status_code=status.HTTP_201_CREATED,
-    summary="Create new user",
-    description="Create a new user account with department assignment and employee type validation."
-)
+async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
+    """
+    Check if the user has HR, Admin, or Super_Admin role.
+
+    Args:
+        db: Async database session.
+        user: Current user object.
+
+    Returns:
+        bool: True if user has required role, False otherwise.
+    """
+    try:
+        query = select(UserRoles).join(Roles).where(
+            UserRoles.user_id == user.user_id,
+            UserRoles.is_active == True,
+            Roles.role_name.in_(["HR", "Admin", "Super_Admin"]),
+            Roles.is_active == True
+        )
+        result = await db.execute(query)
+        return result.scalar_one_or_none() is not None
+    except Exception as e:
+        logger.error(f"Error checking admin/hr role for user_id {user.user_id}: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
+
+@router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED, summary="Create new user", description="Create a new user. Requires manage_users permission or HR/admin access.")
 async def create_new_user(
     user: UserCreate,
-    department_id: Optional[int] = None,
-    manager_id: Optional[int] = None,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
-):
-    """Create a new user in the system."""
-    has_permission = await check_user_permission(db, current_user.user_id, "create_user")
-    if not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to create users")
-    
-    valid_employee_types = ["full_time", "part_time", "contract", "intern", "temporary"]
-    if user.employee_type not in valid_employee_types:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
-                          detail=f"Invalid employee type. Must be one of {valid_employee_types}")
-    
-    return await create_user(db, user, department_id, manager_id)
+) -> UserOut:
+    """
+    Create a new user in the system.
 
-@router.get("/{user_id}", 
-    response_model=UserOut,
-    summary="Get user by ID",
-    description="Retrieve user details. Users can view their own profile, admins or those with view_users permission can view any user."
-)
+    Args:
+        user: User creation data.
+        db: Async database session.
+        current_user: Current authenticated user.
+
+    Returns:
+        UserOut: Created user details.
+
+    Raises:
+        HTTPException: If user lacks permission or email already exists.
+    """
+    try:
+        has_permission = await check_user_permission(db, current_user.user_id, "manage_users")
+        if not has_permission and not await is_admin_or_hr(db, current_user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create users")
+
+        query = select(Users).where(Users.email == user.email, Users.is_active == True)
+        result = await db.execute(query)
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
+
+        db_user = Users(
+            email=user.email,
+            password_hash=hash_password(user.password),
+            first_name=user.first_name,
+            last_name=user.last_name,
+            is_active=user.is_active,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(db_user)
+        await db.commit()
+        await db.refresh(db_user)
+
+        logger.info(f"User created, user_id: {db_user.user_id}, email: {db_user.email}")
+        return UserOut.model_validate(db_user)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating user: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating user")
+
+@router.get("/{user_id}", response_model=UserOut, summary="Get user by ID", description="Retrieve user details. Requires view_users permission or HR/admin access.")
 async def read_user(
     user_id: int,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
-):
-    """Get a specific user by their ID."""
-    has_permission = await check_user_permission(db, current_user.user_id, "view_users")
-    if current_user.user_id != user_id and not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to view this user")
-    
-    user = await get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
-                          detail="User not found")
-    
-    return UserOut.model_validate(user)
+) -> UserOut:
+    """
+    Get a specific user by their ID.
 
-@router.get("/", 
-    response_model=List[UserOut],
-    summary="List all users",
-    description="Retrieve all users with pagination. Requires view_users permission or admin access."
-)
+    Args:
+        user_id: ID of the user to retrieve.
+        db: Async database session.
+        current_user: Current authenticated user.
+
+    Returns:
+        UserOut: User details.
+
+    Raises:
+        HTTPException: If user lacks permission or user not found.
+    """
+    try:
+        has_permission = await check_user_permission(db, current_user.user_id, "view_users")
+        if not has_permission and not await is_admin_or_hr(db, current_user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view users")
+
+        query = select(Users).where(
+            Users.user_id == user_id,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        logger.info(f"Retrieved user, user_id: {user_id}")
+        return UserOut.model_validate(user)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving user {user_id}: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving user")
+
+@router.get("/", response_model=List[UserOut], summary="List all users", description="Retrieve all users with pagination. Requires view_users permission or HR/admin access.")
 async def read_users(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
-):
-    """Get a paginated list of all users."""
-    has_permission = await check_user_permission(db, current_user.user_id, "view_users")
-    if not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to view users")
-    
-    return await get_users(db, skip, limit)
+) -> List[UserOut]:
+    """
+    Get a paginated list of all users.
 
-@router.put("/{user_id}", 
-    response_model=UserOut,
-    summary="Update user",
-    description="Update user information including department and hierarchy. Requires update_users permission or admin access."
-)
+    Args:
+        skip: Number of records to skip (for pagination).
+        limit: Maximum number of records to return.
+        db: Async database session.
+        current_user: Current authenticated user.
+
+    Returns:
+        List[UserOut]: List of user details.
+
+    Raises:
+        HTTPException: If user lacks permission.
+    """
+    try:
+        has_permission = await check_user_permission(db, current_user.user_id, "view_users")
+        if not has_permission and not await is_admin_or_hr(db, current_user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view users")
+
+        query = select(Users).where(
+            Users.is_active == True,
+            Users.deleted_at == None
+        ).offset(skip).limit(limit)
+        result = await db.execute(query)
+        users = result.scalars().all()
+
+        logger.info(f"Retrieved {len(users)} users")
+        return [UserOut.model_validate(user) for user in users]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving users: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving users")
+
+@router.put("/{user_id}", response_model=UserOut, summary="Update user", description="Update user information. Requires manage_users permission or HR/admin access.")
 async def update_existing_user(
     user_id: int,
     user_update: UserUpdate,
-    department_id: Optional[int] = None,
-    manager_id: Optional[int] = None,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
-):
-    """Update an existing user's information."""
-    has_permission = await check_user_permission(db, current_user.user_id, "update_users")
-    if current_user.user_id != user_id and not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to update this user")
-    
-    if user_update.employee_type:
-        valid_employee_types = ["full_time", "part_time", "contract", "intern", "temporary"]
-        if user_update.employee_type not in valid_employee_types:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
-                              detail=f"Invalid employee type. Must be one of {valid_employee_types}")
-    
-    return await update_user(db, user_id, user_update, department_id, manager_id)
+) -> UserOut:
+    """
+    Update an existing user's information.
 
-@router.delete("/{user_id}", 
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete user",
-    description="Soft delete a user account. Requires delete_users permission or admin access."
-)
+    Args:
+        user_id: ID of the user to update.
+        user_update: Updated user data.
+        db: Async database session.
+        current_user: Current authenticated user.
+
+    Returns:
+        UserOut: Updated user details.
+
+    Raises:
+        HTTPException: If user lacks permission, user not found, or email already exists.
+    """
+    try:
+        has_permission = await check_user_permission(db, current_user.user_id, "manage_users")
+        if not has_permission and not await is_admin_or_hr(db, current_user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update users")
+
+        query = select(Users).where(
+            Users.user_id == user_id,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        update_data = user_update.model_dump(exclude_none=True)
+        if "email" in update_data and update_data["email"] != user.email:
+            query = select(Users).where(Users.email == update_data["email"], Users.is_active == True)
+            result = await db.execute(query)
+            if result.scalar_one_or_none():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
+
+        if "password" in update_data:
+            update_data["password_hash"] = hash_password(update_data.pop("password"))
+
+        for key, value in update_data.items():
+            setattr(user, key, value)
+
+        user.updated_at = datetime.now(timezone.utc)
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+        logger.info(f"User updated, user_id: {user_id}")
+        return UserOut.model_validate(user)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user {user_id}: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating user")
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete user", description="Soft delete a user. Requires manage_users permission or HR/admin access.")
 async def delete_existing_user(
     user_id: int,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
-):
-    """Delete a user from the system."""
-    has_permission = await check_user_permission(db, current_user.user_id, "delete_users")
-    if not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to delete users")
-    
-    await delete_user(db, user_id)
-    return None
+) -> None:
+    """
+    Soft delete a user from the system.
 
-@router.post("/department", 
-    response_model=UserDepartmentOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Assign user to department",
-    description="Assign a user to a department. Requires manage_departments permission."
-)
-async def assign_user_department(
-    user_department: UserDepartmentCreate,
-    db: AsyncSession = Depends(get_db_session),
-    current_user: Users = Depends(get_current_active_user)
-):
-    """Assign a user to a department."""
-    has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")
-    if not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to assign departments")
-    
-    return await create_user_department(db, user_department)
+    Args:
+        user_id: ID of the user to delete.
+        db: Async database session.
+        current_user: Current authenticated user.
 
-@router.post("/hierarchy", 
-    response_model=EmployeeHierarchyOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create employee hierarchy",
-    description="Create an employee hierarchy entry. Requires manage_hierarchy permission."
-)
-async def create_hierarchy(
-    hierarchy: EmployeeHierarchyCreate,
-    db: AsyncSession = Depends(get_db_session),
-    current_user: Users = Depends(get_current_active_user)
-):
-    """Create an employee hierarchy entry."""
-    has_permission = await check_user_permission(db, current_user.user_id, "manage_hierarchy")
-    if not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to manage hierarchy")
-    
-    return await create_employee_hierarchy(db, hierarchy)
+    Raises:
+        HTTPException: If user lacks permission or user not found.
+    """
+    try:
+        has_permission = await check_user_permission(db, current_user.user_id, "manage_users")
+        if not has_permission and not await is_admin_or_hr(db, current_user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete users")
 
-@router.post("/emergency-contact", 
-    response_model=EmployeeEmergencyContactOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create emergency contact",
-    description="Create an emergency contact for a user. Users can create their own contacts, admins or those with manage_emergency_contacts permission can create for others."
-)
-async def create_emergency_contact(
-    contact: EmployeeEmergencyContactCreate,
-    db: AsyncSession = Depends(get_db_session),
-    current_user: Users = Depends(get_current_active_user)
-):
-    """Create an emergency contact for a user."""
-    has_permission = await check_user_permission(db, current_user.user_id, "manage_emergency_contacts")
-    if contact.user_id != current_user.user_id and not has_permission and not await is_admin(db, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                          detail="Not authorized to create emergency contacts for this user")
-    
-    return await create_employee_emergency_contact(db, contact)
+        query = select(Users).where(
+            Users.user_id == user_id,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        user.is_active = False
+        user.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        logger.info(f"User soft deleted, user_id: {user_id}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting user")
