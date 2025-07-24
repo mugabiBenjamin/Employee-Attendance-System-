@@ -2,12 +2,15 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
-from sqlmodel import SQLModel
+from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
 import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Create SQLAlchemy Base
+Base = declarative_base()
 
 # Create async engine
 engine = create_async_engine(
@@ -122,8 +125,8 @@ async def init_db():
         # Create enums individually
         for enum_sql in ENUM_CREATION_SQLS:
             await conn.execute(text(enum_sql))
-        # Create tables
-        await conn.run_sync(SQLModel.metadata.create_all)
+        # Create tables using SQLAlchemy Base
+        await conn.run_sync(Base.metadata.create_all)
         # Create materialized view
         await conn.execute(text(MATERIALIZED_VIEW_SQL))
         logger.info("Database initialized with enums, tables, and materialized view")

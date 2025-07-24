@@ -1,9 +1,9 @@
 import os
 from typing import List
-from pydantic_settings import BaseSettings
+from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 
-class Settings(BaseSettings):
+class Settings(BaseModel):
     APP_NAME: str = os.getenv("APP_NAME", "Employee Management System")
     APP_VERSION: str = os.getenv("APP_VERSION", "0.1.0")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str
     
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", 10485760))
-    UPLOAD_FOLDER: str = os.getenv("UPLOAD_FOLDER", "./uploads")
+    UPLOAD_FOLDER: str = os.getenv("UPLOAD_FOLDER", "./Uploads")
     ALLOWED_EXTENSIONS: List[str] = [
         x.strip() for x in os.getenv("ALLOWED_EXTENSIONS", "pdf,doc,docx,jpg,jpeg,png,txt").split(",")
     ]
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     
     DEFAULT_TIMEZONE: str = os.getenv("DEFAULT_TIMEZONE", "UTC")
     
-    # Enum settings from DDL
+    # Enum settings aligned with SQLAlchemy models
     ATTENDANCE_STATUSES: List[str] = [
         "present", "absent", "late", "early_departure", "on_leave", "half_day", "sick"
     ]
@@ -78,7 +78,7 @@ class Settings(BaseSettings):
         "morning", "afternoon", "night", "flexible", "split"
     ]
     
-    # Permission keys aligned with DDL roles table
+    # Permission keys aligned with SQLAlchemy roles model
     PERMISSION_KEYS: List[str] = [
         "clock_in", "clock_out", "view_own_attendance", "request_leave", "view_leave_balance",
         "approve_leave", "view_team_attendance", "generate_reports", "manage_overtime",
@@ -90,10 +90,11 @@ class Settings(BaseSettings):
     # Materialized view refresh interval (in seconds)
     MATERIALIZED_VIEW_REFRESH_INTERVAL: int = int(os.getenv("MATERIALIZED_VIEW_REFRESH_INTERVAL", 3600))  # Default: 1 hour
     
-    class Config:
-        case_sensitive = True
-        env_file = Path(__file__).parent.parent.parent / ".env"
-        env_file_encoding = "utf-8"
-        validate_assignment = True
+    model_config = ConfigDict(
+        case_sensitive=True,
+        env_file=Path(__file__).parent.parent.parent / ".env",
+        env_file_encoding="utf-8",
+        validate_assignment=True
+    )
 
 settings = Settings()
