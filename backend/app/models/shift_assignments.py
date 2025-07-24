@@ -1,15 +1,18 @@
-from typing import Optional
-from sqlmodel import SQLModel, Field
-from datetime import date, datetime, timezone
+from sqlalchemy import Column, Integer, Boolean, DateTime, Date, ForeignKey, CheckConstraint
+from sqlalchemy.sql import func
 
-class ShiftAssignment(SQLModel, table=True):
+class ShiftAssignments(Base):
     __tablename__ = "shift_assignments"
-
-    assignment_id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="users.user_id", index=True)
-    pattern_id: int = Field(foreign_key="shift_patterns.pattern_id", index=True)
-    effective_from: date = Field(index=True)
-    effective_to: Optional[date] = Field(default=None)
-    is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    assignment_id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    pattern_id = Column(Integer, ForeignKey('shift_patterns.pattern_id', ondelete='CASCADE'), nullable=False)
+    effective_from = Column(Date, nullable=False, server_default=func.current_date())
+    effective_to = Column(Date)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
+    updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+    
+    __table_args__ = (
+        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="assignment_dates_valid"),
+    )

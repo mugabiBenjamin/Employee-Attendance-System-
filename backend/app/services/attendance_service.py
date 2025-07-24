@@ -6,10 +6,10 @@ from sqlmodel import select
 from datetime import datetime, date, timezone
 from app.models.attendance_records import AttendanceRecords
 from app.models.attendance_summary import AttendanceSummary
-from app.models.overtime_record import OvertimeRecord
-from app.models.time_correction import TimeCorrection
+from backend.app.models.overtime_records import OvertimeRecord
+from backend.app.models.time_corrections import TimeCorrection
 from app.models.users import Users
-from app.schemas.attendance import AttendanceCreate, AttendanceUpdate, AttendanceOut
+from backend.app.schemas.attendance_record import AttendanceCreate, AttendanceUpdate, AttendanceOut
 from app.schemas.user import TimeCorrectionUpdate, UserOut
 from app.core.config import settings
 import logging

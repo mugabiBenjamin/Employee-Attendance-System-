@@ -1,19 +1,18 @@
-from typing import Optional
-from sqlalchemy import CheckConstraint
-from sqlmodel import SQLModel, Field
-from datetime import datetime, date as dt, timezone
-
-class EmployeeHierarchy(SQLModel, table=True):
-    hierarchy_id: Optional[int] = Field(default=None, primary_key=True)
-    employee_id: int = Field(foreign_key="users.user_id", nullable=False)
-    manager_id: int = Field(foreign_key="users.user_id", nullable=False)
-    level: int = Field(default=1)
-    effective_from: dt = Field(default_factory=dt.today)
-    effective_to: Optional[dt] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+from sqlalchemy import Column, Integer, DateTime, Date, ForeignKey, CheckConstraint
+from sqlalchemy.sql import func
+class EmployeeHierarchy(Base):
+    __tablename__ = "employee_hierarchy"
+    
+    hierarchy_id = Column(Integer, primary_key=True)
+    employee_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    manager_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    level = Column(Integer, nullable=False, default=1)
+    effective_from = Column(Date, nullable=False, server_default=func.current_date())
+    effective_to = Column(Date)
+    created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     
     __table_args__ = (
-        CheckConstraint("level >= 1 AND level <= 10", name="level_range"),
-        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="date_range_valid"),
+        CheckConstraint("level >= 1 AND level <= 10", name="level_valid"),
+        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="hierarchy_dates_valid"),
         CheckConstraint("employee_id != manager_id", name="no_self_reporting"),
     )

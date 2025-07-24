@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from app.api.deps import get_db
 from app.models.system_logs import SystemLog
 from app.services.auth_service import check_user_permission
-from app.schemas.system_logs import SystemLogResponse
+from backend.app.schemas.system_log import SystemLogResponse
 from app.core.security import get_current_user
 from app.models.users import Users
 

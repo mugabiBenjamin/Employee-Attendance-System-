@@ -2,7 +2,7 @@ from typing import List, Optional
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.attendance import AttendanceCreate, AttendanceUpdate, AttendanceOut
+from backend.app.schemas.attendance_record import AttendanceCreate, AttendanceUpdate, AttendanceOut
 from app.schemas.user import TimeCorrectionCreate, TimeCorrectionUpdate, TimeCorrectionOut
 from app.services.attendance_service import (
     create_attendance,

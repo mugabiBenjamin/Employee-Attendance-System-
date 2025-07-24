@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.models.holiday_calendar import HolidayCalendar
 from app.models.users import Users
 from app.models.user_departments import UserDepartment
-from app.schemas.leave import HolidayCalendarCreate, HolidayCalendarUpdate, HolidayCalendarOut
+from backend.app.schemas.leave_policy import HolidayCalendarCreate, HolidayCalendarUpdate, HolidayCalendarOut
 from app.core.config import settings
 import logging
 

@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, timezone
-from app.schemas.leave import (
+from backend.app.schemas.leave_policy import (
     LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, 
     LeaveBalanceOut, LeavePolicyCreate, LeavePolicyUpdate, 
     LeavePolicyOut, LeaveApprovalWorkflowCreate, LeaveApprovalWorkflowOut, 

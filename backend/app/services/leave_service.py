@@ -5,7 +5,7 @@ from sqlmodel import select
 from datetime import date, datetime, timezone
 from app.models.leave_requests import LeaveRequests, LeaveBalance, LeavePolicy
 from app.models.users import Users
-from app.schemas.leave import LeaveApprovalWorkflowCreate, LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut, LeavePolicyOut, LeaveApprovalWorkflowOut, HolidayCalendarOut
+from backend.app.schemas.leave_policy import LeaveApprovalWorkflowCreate, LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut, LeavePolicyOut, LeaveApprovalWorkflowOut, HolidayCalendarOut
 from app.core.config import settings
 import logging
 from app.models.user_departments import UserDepartment

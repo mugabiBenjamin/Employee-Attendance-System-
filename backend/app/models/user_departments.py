@@ -1,15 +1,15 @@
-from typing import Optional
-from sqlmodel import SQLModel, Field
-from datetime import datetime, timezone
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy.sql import func
 
-class UserDepartment(SQLModel, table=True):
-    user_department_id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="users.user_id", nullable=False)
-    department_id: int = Field(foreign_key="departments.department_id", nullable=False)
-    assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    is_primary: bool = Field(default=False)
+class UserDepartments(Base):
+    __tablename__ = "user_departments"
+    
+    user_department_id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    department_id = Column(Integer, ForeignKey('departments.department_id', ondelete='CASCADE'), nullable=False)
+    assigned_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
+    is_primary = Column(Boolean, default=False)
     
     __table_args__ = (
-        UniqueConstraint("user_id", "department_id", name="unique_user_department"),
+        UniqueConstraint('user_id', 'department_id', name='unique_user_department'),
     )
