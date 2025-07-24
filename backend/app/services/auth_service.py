@@ -1,160 +1,159 @@
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException, status
-from jose import jwt, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from sqlmodel import select
-from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token
+from sqlalchemy import select
+from datetime import datetime, timezone
+from pydantic import BaseModel, ConfigDict, EmailStr
+from jose import JWTError, jwt
 from app.models.users import Users
-from app.models.user_roles import UserRoles
-from app.models.user_roles import Roles
-from app.schemas.user import UserAuth, Token, UserCreate, UserOut
+from app.models.system_logs import SystemLogs
+from app.core.security import verify_password, create_access_token, create_refresh_token
 from app.core.config import settings
+from app.core.enums import SystemAction
+from app.core.exceptions import AuthenticationError
 import logging
 
 logger = logging.getLogger(__name__)
 
+class LoginCredentials(BaseModel):
+    email: EmailStr
+    password: str
 
-async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[Users]:
-    query = select(Users).where(Users.email == email, Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user or not verify_password(password, user.password_hash):
-        return None
-    return user
+    model_config = ConfigDict(from_attributes=True)
 
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
 
-async def login_for_access_token(db: AsyncSession, user_auth: UserAuth) -> Token:
-    user = await authenticate_user(db, user_auth.email, user_auth.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token = create_access_token(
-        data={"sub": str(user.user_id)},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
+    model_config = ConfigDict(from_attributes=True)
 
-    user.last_login = datetime.now(timezone.utc)
-    await db.commit()
-
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token
-    )
-
-
-async def refresh_access_token(db: AsyncSession, refresh_token: str) -> Token:
+async def login_user(db: AsyncSession, credentials: LoginCredentials, ip_address: str) -> TokenResponse:
+    """
+    Authenticate user and generate access/refresh tokens, logging the login action.
+    """
     try:
-        payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id: int = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-
-    query = select(Users).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-
-    access_token = create_access_token(data={"sub": str(user.user_id)})
-    new_refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
-
-    return Token(
-        access_token=access_token,
-        refresh_token=new_refresh_token
-    )
-
-
-async def create_user(db: AsyncSession, user_create: UserCreate) -> UserOut:
-    try:
-        # Check for existing email
-        query = select(Users).where(Users.email == user_create.email)
-        result = await db.execute(query)
-        if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
-
-        # Validate employee_type
-        valid_employee_types = settings.EMPLOYEE_TYPES
-        if user_create.employee_type not in valid_employee_types:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"Invalid employee type. Must be one of {valid_employee_types}")
-
-        # Generate employee_id from sequence
-        query = select(func.nextval('employee_id_seq'))
-        result = await db.execute(query)
-        sequence_value = result.scalar_one()
-        employee_id = f"EMP{str(sequence_value).zfill(6)}"
-
-        hashed_password = get_password_hash(user_create.password)
-        db_user = Users(
-            **user_create.model_dump(exclude={"password"}, exclude_none=True),
-            password_hash=hashed_password,
-            employee_id=employee_id,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+        # Find user by email
+        query = select(Users).where(
+            Users.email == credentials.email,
+            Users.is_active == True,
+            Users.deleted_at == None
         )
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
 
-        db.add(db_user)
+        if not user or not verify_password(credentials.password, user.password_hash):
+            raise AuthenticationError(detail="Invalid email or password")
+
+        # Generate tokens
+        access_token = create_access_token(data={"sub": str(user.user_id)})
+        refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
+
+        # Log login action
+        system_log = SystemLogs(
+            user_id=user.user_id,
+            action=SystemAction.LOGIN,
+            table_affected=None,
+            record_id=None,
+            old_values=None,
+            new_values=None,
+            ip_address=ip_address,
+            timestamp=datetime.now(timezone.utc)
+        )
+        db.add(system_log)
         await db.commit()
-        await db.refresh(db_user)
 
-        # Assign default role
-        query = select(Roles).where(Roles.role_name == "Employee")
-        result = await db.execute(query)
-        role = result.scalar_one_or_none()
-        if role:
-            user_role = UserRoles(
-                user_id=db_user.user_id,
-                role_id=role.role_id,
-                assigned_at=datetime.now(timezone.utc),
-                is_active=True
-            )
-            db.add(user_role)
-            await db.commit()
+        logger.info(f"User logged in, user_id: {user.user_id}")
+        return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
-        logger.info(f"User created, user_id={db_user.user_id}, employee_id={db_user.employee_id}")
-        return UserOut.model_validate(db_user)
-
-    except HTTPException:
+    except AuthenticationError:
         raise
     except Exception as e:
-        logger.error(f"Error creating user: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Error creating user")
-
-
-async def check_user_permission(db: AsyncSession, user_id: int, required_permission: str) -> bool:
-    try:
-        # Validate permission key against known settings
-        if required_permission not in settings.PERMISSION_KEYS:
-            logger.warning(f"Invalid permission requested: {required_permission}")
-            return False
-
-        query = select(Roles.permissions).join(UserRoles).where(
-            UserRoles.user_id == user_id,
-            UserRoles.is_active == True,
-            Roles.role_id == UserRoles.role_id
+        logger.error(f"Error during login for email {credentials.email}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing login"
         )
-        result = await db.execute(query)
 
-        permissions = []
-        for role_perms in result.scalars().all():
-            if isinstance(role_perms, dict):
-                permissions.extend([k for k, v in role_perms.items() if v is True])
+async def logout_user(db: AsyncSession, user: Users, ip_address: str) -> None:
+    """
+    Log user logout action.
+    """
+    try:
+        # Log logout action
+        system_log = SystemLogs(
+            user_id=user.user_id,
+            action=SystemAction.LOGOUT,
+            table_affected=None,
+            record_id=None,
+            old_values=None,
+            new_values=None,
+            ip_address=ip_address,
+            timestamp=datetime.now(timezone.utc)
+        )
+        db.add(system_log)
+        await db.commit()
 
-        if "all_permissions" in permissions:
-            return True
-        return required_permission in permissions
+        logger.info(f"User logged out, user_id: {user.user_id}")
 
     except Exception as e:
-        logger.error(f"Error checking user permissions: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Error checking permissions")
+        logger.error(f"Error during logout for user_id {user.user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing logout"
+        )
+
+async def refresh_token(db: AsyncSession, refresh_token: str, ip_address: str) -> TokenResponse:
+    """
+    Refresh access token using a valid refresh token.
+    """
+    try:
+        # Decode refresh token
+        try:
+            payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            user_id: str = payload.get("sub")
+            if user_id is None:
+                raise AuthenticationError(detail="Invalid refresh token")
+        except JWTError:
+            raise AuthenticationError(detail="Invalid refresh token")
+
+        # Verify user
+        query = select(Users).where(
+            Users.user_id == int(user_id),
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+        if not user:
+            raise AuthenticationError(detail="User not found")
+
+        # Generate new access token
+        access_token = create_access_token(data={"sub": str(user.user_id)})
+        new_refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
+
+        # Log token refresh action
+        system_log = SystemLogs(
+            user_id=user.user_id,
+            action=SystemAction.TOKEN_REFRESH,
+            table_affected=None,
+            record_id=None,
+            old_values=None,
+            new_values=None,
+            ip_address=ip_address,
+            timestamp=datetime.now(timezone.utc)
+        )
+        db.add(system_log)
+        await db.commit()
+
+        logger.info(f"Token refreshed for user_id: {user.user_id}")
+        return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
+
+    except AuthenticationError:
+        raise
+    except Exception as e:
+        logger.error(f"Error refreshing token: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing token refresh"
+        )
