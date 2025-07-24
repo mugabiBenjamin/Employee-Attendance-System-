@@ -6,7 +6,7 @@ from datetime import datetime, timezone, date
 from pydantic import BaseModel, ConfigDict
 from app.models.holiday_calendar import HolidayCalendar
 from app.models.users import Users
-from app.schemas.holiday import HolidayCreate, HolidayUpdate, HolidayOut
+from app.schemas.holiday_calender import HolidayCreate, HolidayUpdate, HolidayOut
 from app.core.config import settings
 import logging
 
