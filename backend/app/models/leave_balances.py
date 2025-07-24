@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, DateTime, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import ENUM
+from app.core.database import Base
 
 leave_type_enum = ENUM('annual', 'sick', 'maternity', 'paternity', 'emergency', 'unpaid', 'casual', 'compensatory', 'bereavement', 'leave_of_absence', 'public_holiday', name='leave_type')
 

@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, DateTime, DECIMAL, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
+from app.core.database import Base
 
 class OvertimeRecords(Base):
     __tablename__ = "overtime_records"

@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, CheckConstraint, Time
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import ENUM
+from app.core.database import Base
 
 shift_type_enum = ENUM('morning', 'afternoon', 'night', 'flexible', 'split', name='shift_type')
 

@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
+from app.core.database import Base
 
 class HolidayCalendar(Base):
     __tablename__ = "holiday_calendar"

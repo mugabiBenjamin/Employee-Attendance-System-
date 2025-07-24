@@ -2,6 +2,7 @@
 from sqlalchemy import Column, Integer, Boolean, DateTime, Date, DECIMAL, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import ENUM
+from app.core.database import Base
 
 employee_type_enum = ENUM('full_time', 'part_time', 'contract', 'intern', 'temporary', name='employee_type')
 

@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Date
+from app.core.database import Base
 
 class AttendanceSummary(Base):
     __tablename__ = "attendance_summary"

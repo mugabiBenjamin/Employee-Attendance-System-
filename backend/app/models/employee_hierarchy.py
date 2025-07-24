@@ -1,5 +1,7 @@
 from sqlalchemy import Column, Integer, DateTime, Date, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
+from app.core.database import Base
+
 class EmployeeHierarchy(Base):
     __tablename__ = "employee_hierarchy"
     

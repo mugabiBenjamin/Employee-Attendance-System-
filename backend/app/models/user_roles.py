@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint
+from app.core.database import Base
 from sqlalchemy.sql import func
 
 class UserRoles(Base):

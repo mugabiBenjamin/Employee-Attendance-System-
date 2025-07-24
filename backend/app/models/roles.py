@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, CheckConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
+from app.core.database import Base
 
 class Roles(Base):
     __tablename__ = "roles"

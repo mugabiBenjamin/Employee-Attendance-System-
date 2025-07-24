@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, DECIMAL, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
+from app.core.database import Base
 
 class Departments(Base):
     __tablename__ = "departments"

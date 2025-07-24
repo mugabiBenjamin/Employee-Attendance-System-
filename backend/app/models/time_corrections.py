@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, DateTime, Text, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import ENUM
+from app.core.database import Base
 
 correction_status_enum = ENUM('draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed', name='correction_status')
 

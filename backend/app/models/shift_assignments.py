@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, Boolean, DateTime, Date, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
+from app.core.database import Base
 
 class ShiftAssignments(Base):
     __tablename__ = "shift_assignments"

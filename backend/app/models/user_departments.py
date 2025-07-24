@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.sql import func
+from app.core.database import Base
 
 class UserDepartments(Base):
     __tablename__ = "user_departments"
