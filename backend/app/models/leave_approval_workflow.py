@@ -13,7 +13,7 @@ leave_request_status = ENUM(
 
 class LeaveApprovalWorkflow(SQLModel, table=True):
     workflow_id: Optional[int] = Field(default=None, primary_key=True)
-    leave_id: int = Field(foreign_key="leave_requests.leave_id", nullable=False)
+    leave_id: int = Field(foreign_key="leaverequests.leave_id", nullable=False)
     approver_id: int = Field(foreign_key="users.user_id", nullable=False)
     level: int = Field(nullable=False)
     status: str = Field(default="under_review", sa_type=leave_request_status)

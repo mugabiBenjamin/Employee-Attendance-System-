@@ -3,7 +3,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from datetime import date, datetime, timezone
-from app.models.leave import LeaveRequest, LeaveBalance, LeavePolicy
+from app.models.leave_requests import LeaveRequests, LeaveBalance, LeavePolicy
 from app.models.users import Users
 from app.schemas.leave import LeaveApprovalWorkflowCreate, LeaveRequestCreate, LeaveRequestUpdate, LeaveRequestOut, LeaveBalanceOut, LeavePolicyOut, LeaveApprovalWorkflowOut, HolidayCalendarOut
 from app.core.config import settings
@@ -46,7 +46,7 @@ async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCrea
         balance = await check_leave_balance(db, leave_request.user_id, leave_request.leave_type, 
                                          leave_request.days_requested, leave_request.start_date.year)
         
-        db_leave = LeaveRequest(
+        db_leave = LeaveRequests(
             user_id=leave_request.user_id,
             leave_type=leave_request.leave_type,
             start_date=leave_request.start_date,
@@ -165,7 +165,7 @@ async def update_leave_request(db: AsyncSession, leave_id: int, leave_update: Le
 
 async def get_leave_request_by_id(db: AsyncSession, leave_id: int, current_user: Users) -> Optional[LeaveRequestOut]:
     try:
-        query = select(LeaveRequest).where(LeaveRequest.leave_id == leave_id)
+        query = select(LeaveRequests).where(LeaveRequests.leave_id == leave_id)
         result = await db.execute(query)
         db_leave = result.scalar_one_or_none()
         
@@ -190,11 +190,11 @@ async def get_user_leave_requests(db: AsyncSession, user_id: int, start_date: Op
                                end_date: Optional[date], skip: int = 0, 
                                limit: int = settings.DEFAULT_PAGE_SIZE) -> List[LeaveRequestOut]:
     try:
-        query = select(LeaveRequest).where(LeaveRequest.user_id == user_id)
+        query = select(LeaveRequests).where(LeaveRequests.user_id == user_id)
         if start_date:
-            query = query.where(LeaveRequest.start_date >= start_date)
+            query = query.where(LeaveRequests.start_date >= start_date)
         if end_date:
-            query = query.where(LeaveRequest.end_date <= end_date)
+            query = query.where(LeaveRequests.end_date <= end_date)
         query = query.offset(skip).limit(limit)
         result = await db.execute(query)
         leave_requests = result.scalars().all()
@@ -348,7 +348,7 @@ async def check_holiday_conflicts(db: AsyncSession, start_date: date, end_date: 
 async def create_leave_approval_workflow(db: AsyncSession, workflow: LeaveApprovalWorkflowCreate, 
                                       current_user: Users) -> LeaveApprovalWorkflowOut:
     try:
-        query = select(LeaveRequest).where(LeaveRequest.leave_id == workflow.leave_id)
+        query = select(LeaveRequests).where(LeaveRequests.leave_id == workflow.leave_id)
         result = await db.execute(query)
         leave = result.scalar_one_or_none()
         

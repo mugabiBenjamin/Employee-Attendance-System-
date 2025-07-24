@@ -9,7 +9,7 @@ from app.core.security import get_current_user
 from app.models.users import Users
 from app.models.user_roles import UserRoles, Roles
 from app.models.shift_assignments import ShiftAssignment
-from app.models.leave import LeavePolicy
+from app.models.leave_requests import LeavePolicy
 from app.core.config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")

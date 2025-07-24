@@ -19,7 +19,7 @@ leave_request_status = ENUM(
     create_type=True
 )
 
-class LeaveRequest(SQLModel, table=True):
+class LeaveRequests(SQLModel, table=True):
     leave_id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.user_id", nullable=False)
     leave_type: str = Field(sa_type=leave_type, nullable=False)

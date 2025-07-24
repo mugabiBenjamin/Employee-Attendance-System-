@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import text
 from sqlmodel import select
 from datetime import datetime, date, timezone
-from app.models.attendance import Attendance
+from app.models.attendance_records import AttendanceRecords
 from app.models.attendance_summary import AttendanceSummary
 from app.models.overtime_record import OvertimeRecord
 from app.models.time_correction import TimeCorrection
@@ -26,12 +26,12 @@ async def create_attendance(db: AsyncSession, attendance_create: AttendanceCreat
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status. Must be one of {valid_statuses}")
     
     # Check for existing attendance record
-    query = select(Attendance).where(Attendance.user_id == attendance_create.user_id, Attendance.date == attendance_create.date)
+    query = select(AttendanceRecords).where(AttendanceRecords.user_id == attendance_create.user_id, AttendanceRecords.date == attendance_create.date)
     result = await db.execute(query)
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attendance already recorded for this date")
     
-    db_attendance = Attendance(**attendance_create.model_dump())
+    db_attendance = AttendanceRecords(**attendance_create.model_dump())
     db.add(db_attendance)
     await db.commit()
     await db.refresh(db_attendance)
@@ -40,7 +40,7 @@ async def create_attendance(db: AsyncSession, attendance_create: AttendanceCreat
     return AttendanceOut.model_validate(db_attendance)
 
 async def update_attendance(db: AsyncSession, attendance_id: int, attendance_update: AttendanceUpdate, current_user: Users) -> AttendanceOut:
-    query = select(Attendance).where(Attendance.attendance_id == attendance_id)
+    query = select(AttendanceRecords).where(AttendanceRecords.attendance_id == attendance_id)
     result = await db.execute(query)
     attendance = result.scalar_one_or_none()
     
@@ -93,7 +93,7 @@ async def update_attendance(db: AsyncSession, attendance_id: int, attendance_upd
     return AttendanceOut.model_validate(attendance)
 
 async def get_attendance_by_id(db: AsyncSession, attendance_id: int, current_user: Users) -> AttendanceOut:
-    query = select(Attendance).where(Attendance.attendance_id == attendance_id)
+    query = select(AttendanceRecords).where(AttendanceRecords.attendance_id == attendance_id)
     result = await db.execute(query)
     attendance = result.scalar_one_or_none()
     
@@ -107,12 +107,12 @@ async def get_attendance_by_id(db: AsyncSession, attendance_id: int, current_use
 
 async def get_user_attendance(db: AsyncSession, user_id: int, start_date: Optional[date] = None, 
                             end_date: Optional[date] = None, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[AttendanceOut]:
-    query = select(Attendance).where(Attendance.user_id == user_id)
+    query = select(AttendanceRecords).where(AttendanceRecords.user_id == user_id)
     
     if start_date:
-        query = query.where(Attendance.date >= start_date)
+        query = query.where(AttendanceRecords.date >= start_date)
     if end_date:
-        query = query.where(Attendance.date <= end_date)
+        query = query.where(AttendanceRecords.date <= end_date)
     
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
@@ -256,7 +256,7 @@ async def approve_time_correction(db: AsyncSession, correction_id: int, current_
     
     # Update related attendance record if approved
     if correction.corrected_clock_in or correction.corrected_clock_out:
-        query = select(Attendance).where(Attendance.attendance_id == correction.attendance_id)
+        query = select(AttendanceRecords).where(AttendanceRecords.attendance_id == correction.attendance_id)
         result = await db.execute(query)
         attendance = result.scalar_one_or_none()
         

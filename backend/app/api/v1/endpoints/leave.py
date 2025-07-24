@@ -17,7 +17,7 @@ from app.services.holiday_service import (
     create_holiday, update_holiday, get_holiday_by_id, delete_holiday
 )
 from app.models.users import Users
-from app.models.leave import LeavePolicy, LeaveRequest
+from app.models.leave_requests import LeavePolicy, LeaveRequests
 from app.api.deps import get_db_session, get_current_active_user
 from app.services.auth_service import check_user_permission
 from app.core.config import settings
@@ -41,8 +41,8 @@ async def is_manager_or_hr(db: AsyncSession, user: Users) -> bool:
 
 async def check_approval_level_permission(db: AsyncSession, user: Users, leave_id: int) -> bool:
     from sqlmodel import select
-    query = select(LeavePolicy).join(LeaveRequest).where(
-        LeaveRequest.leave_id == leave_id
+    query = select(LeavePolicy).join(LeaveRequests).where(
+        LeaveRequests.leave_id == leave_id
     )
     result = await db.execute(query)
     policy = result.scalar_one_or_none()

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 class OvertimeRecord(SQLModel, table=True):
     overtime_id: Optional[int] = Field(default=None, primary_key=True)
-    attendance_id: int = Field(foreign_key="attendance_records.attendance_id", nullable=False)
+    attendance_id: int = Field(foreign_key="attendancerecords.attendance_id", nullable=False)
     user_id: int = Field(foreign_key="users.user_id", nullable=False)
     overtime_hours: float = Field(nullable=False)
     overtime_rate: float = Field(default=1.5)

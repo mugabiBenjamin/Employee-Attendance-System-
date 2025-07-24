@@ -11,7 +11,7 @@ correction_status = ENUM(
 )
 
 class TimeCorrectionBase(SQLModel):
-    attendance_id: int = Field(foreign_key="attendance_records.attendance_id", index=True)
+    attendance_id: int = Field(foreign_key="attendancerecords.attendance_id", index=True)
     user_id: int = Field(foreign_key="users.user_id", index=True)
     original_clock_in: Optional[datetime] = Field(default=None)
     original_clock_out: Optional[datetime] = Field(default=None)
