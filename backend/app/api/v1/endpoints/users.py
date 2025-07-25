@@ -1,15 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr
 from datetime import datetime, timezone
 from app.core.database import AsyncSessionLocal
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
-from app.core.security import check_user_permission, hash_password
+from app.core.security import get_password_hash, get_current_active_user
+from app.core.permissions import check_permissions
 from app.core.config import settings
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,7 +50,7 @@ class UserOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency to provide an async database session."""
     async with AsyncSessionLocal() as session:
         try:
@@ -59,15 +61,6 @@ async def get_db() -> AsyncSession:
             raise
         finally:
             await session.close()
-
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
 
 async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
     """
@@ -114,7 +107,7 @@ async def create_new_user(
         HTTPException: If user lacks permission or email already exists.
     """
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_users")
+        has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create users")
 
@@ -125,7 +118,7 @@ async def create_new_user(
 
         db_user = Users(
             email=user.email,
-            password_hash=hash_password(user.password),
+            password_hash=get_password_hash(user.password),
             first_name=user.first_name,
             last_name=user.last_name,
             is_active=user.is_active,
@@ -166,7 +159,7 @@ async def read_user(
         HTTPException: If user lacks permission or user not found.
     """
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_users")
+        has_permission = await check_permissions([Permission.VIEW_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view users")
 
@@ -213,7 +206,7 @@ async def read_users(
         HTTPException: If user lacks permission.
     """
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_users")
+        has_permission = await check_permissions([Permission.VIEW_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view users")
 
@@ -256,7 +249,7 @@ async def update_existing_user(
         HTTPException: If user lacks permission, user not found, or email already exists.
     """
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_users")
+        has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update users")
 
@@ -279,7 +272,7 @@ async def update_existing_user(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
 
         if "password" in update_data:
-            update_data["password_hash"] = hash_password(update_data.pop("password"))
+            update_data["password_hash"] = get_password_hash(update_data.pop("password"))
 
         for key, value in update_data.items():
             setattr(user, key, value)
@@ -316,7 +309,7 @@ async def delete_existing_user(
         HTTPException: If user lacks permission or user not found.
     """
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_users")
+        has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete users")
 

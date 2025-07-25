@@ -9,11 +9,11 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.models.users import Users
 from app.core.database import get_db
+import logging
 
-# Password hashing context
+logger = logging.getLogger(__name__)
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -52,11 +52,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
+
     query = select(Users).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at == None)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
-    
+
     if user is None:
         raise credentials_exception
     return user
@@ -65,3 +65,14 @@ async def get_current_active_user(current_user: Users = Depends(get_current_user
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+def decode_refresh_token(refresh_token: str) -> dict:
+    try:
+        payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )

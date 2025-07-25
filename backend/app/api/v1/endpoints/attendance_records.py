@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone, date
 from app.core.database import AsyncSessionLocal
@@ -11,8 +11,10 @@ from app.models.overtime_records import OvertimeRecords
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
-from app.core.security import check_user_permission
+from app.core.permissions import check_permissions
+from app.core.security import get_current_active_user
 from app.core.config import settings
+from app.core.enums import Permission
 import logging
 from fastapi.responses import FileResponse
 import csv
@@ -78,7 +80,7 @@ class AttendanceSummary(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency to provide an async database session."""
     async with AsyncSessionLocal() as session:
         try:
@@ -89,15 +91,6 @@ async def get_db() -> AsyncSession:
             raise
         finally:
             await session.close()
-
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
 
 async def is_manager_or_hr_or_admin(db: AsyncSession, user: Users) -> bool:
     """
@@ -355,7 +348,7 @@ async def approve_reject_time_correction(
         HTTPException: If user lacks permission, correction not found, or invalid status.
     """
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "approve_time_corrections")
+        has_permission = await check_permissions([Permission.APPROVE_TIME_CORRECTIONS.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to approve/reject corrections")
 

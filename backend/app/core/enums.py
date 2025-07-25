@@ -71,3 +71,13 @@ class ShiftType(str, Enum):
     NIGHT = "night"
     FLEXIBLE = "flexible"
     SPLIT = "split"
+
+class Permission(str, Enum):
+    MANAGE_DEPARTMENTS = "manage_departments"
+    VIEW_DEPARTMENTS = "view_departments"
+    APPROVE_TIME_CORRECTIONS = "approve_time_corrections"
+    MANAGE_EMERGENCY_CONTACTS = "manage_emergency_contacts"
+    VIEW_EMERGENCY_CONTACTS = "view_emergency_contacts"
+    MANAGE_USERS = "manage_users"
+    VIEW_USERS = "view_users"
+    ALL_PERMISSIONS = "all_permissions"

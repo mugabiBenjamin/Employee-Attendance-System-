@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone, time
 from app.core.database import AsyncSessionLocal
@@ -48,7 +48,7 @@ class ShiftPatternOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency to provide an async database session."""
     async with AsyncSessionLocal() as session:
         try:

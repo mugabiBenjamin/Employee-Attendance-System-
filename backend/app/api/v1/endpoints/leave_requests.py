@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone, date
 from app.core.database import AsyncSessionLocal
@@ -122,7 +122,7 @@ class LeaveApprovalOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency to provide an async database session."""
     async with AsyncSessionLocal() as session:
         try:

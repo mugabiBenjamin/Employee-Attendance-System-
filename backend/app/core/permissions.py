@@ -9,6 +9,7 @@ from app.core.exceptions import AuthorizationError
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
+from app.core.security import get_current_user, oauth2_scheme
 
 class PermissionCheck(BaseModel):
     user_id: int
@@ -54,14 +55,6 @@ async def check_permissions(
     except Exception as e:
         raise AuthorizationError(detail=f"Permission check failed: {str(e)}")
 
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db)
-) -> Users:
-    """Retrieve the current user from JWT token (imported from security.py for dependency)."""
-    from app.core.security import get_current_user
-    return await get_current_user(token, db)
-
 def require_permissions(required_permissions: List[str]):
     """Decorator to enforce permission checks for FastAPI routes."""
     def decorator(func):
@@ -70,8 +63,3 @@ def require_permissions(required_permissions: List[str]):
             return await func(*args, current_user=current_user, db=db, **kwargs)
         return wrapper
     return decorator
-
-# Example usage in routes (not executed, for reference):
-# @router.get("/protected", dependencies=[Depends(require_permissions(["view_reports"]))])
-# async def protected_route():
-#     return {"message": "Access granted"}
