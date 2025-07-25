@@ -96,28 +96,33 @@ ENUM_CREATION_SQLS = [
     """
 ]
 
-# Materialized view creation SQL
-MATERIALIZED_VIEW_SQL = """
-CREATE MATERIALIZED VIEW IF NOT EXISTS attendance_summary AS
-SELECT u.user_id,
-    u.employee_id,
-    CONCAT(u.first_name, ' ', u.last_name) AS full_name,
-    d.department_name,
-    ar.date,
-    ar.status,
-    ar.total_hours,
-    ar.overtime_hours,
-    ar.clock_in_time,
-    ar.clock_out_time
-FROM users u
-    JOIN user_departments ud ON u.user_id = ud.user_id AND ud.is_primary = TRUE
-    JOIN departments d ON ud.department_id = d.department_id
-    LEFT JOIN attendance_records ar ON u.user_id = ar.user_id
-WHERE u.is_active = TRUE AND u.deleted_at IS NULL;
-
-CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, date);
-CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name);
-"""
+# Materialized view and index creation SQL statements
+MATERIALIZED_VIEW_SQLS = [
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS attendance_summary AS
+    SELECT u.user_id,
+        u.employee_id,
+        CONCAT(u.first_name, ' ', u.last_name) AS full_name,
+        d.department_name,
+        ar.date,
+        ar.status,
+        ar.total_hours,
+        ar.overtime_hours,
+        ar.clock_in_time,
+        ar.clock_out_time
+    FROM users u
+        JOIN user_departments ud ON u.user_id = ud.user_id AND ud.is_primary = TRUE
+        JOIN departments d ON ud.department_id = d.department_id
+        LEFT JOIN attendance_records ar ON u.user_id = ar.user_id
+    WHERE u.is_active = TRUE AND u.deleted_at IS NULL
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, date)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name)
+    """
+]
 
 # Initialize database tables and enums
 async def init_db():
@@ -125,10 +130,14 @@ async def init_db():
         # Create enums individually
         for enum_sql in ENUM_CREATION_SQLS:
             await conn.execute(text(enum_sql))
+        
         # Create tables using SQLAlchemy Base
         await conn.run_sync(Base.metadata.create_all)
-        # Create materialized view
-        await conn.execute(text(MATERIALIZED_VIEW_SQL))
+        
+        # Create materialized view and indexes individually
+        for view_sql in MATERIALIZED_VIEW_SQLS:
+            await conn.execute(text(view_sql))
+        
         logger.info("Database initialized with enums, tables, and materialized view")
 
 # Periodically refresh materialized view
