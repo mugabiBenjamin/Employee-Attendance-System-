@@ -9,8 +9,10 @@ from app.models.employee_emergency_contacts import EmployeeEmergencyContacts
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
-from app.core.security import check_user_permission
+from app.core.permissions import check_permissions
+from app.core.security import get_current_active_user
 from app.core.config import settings
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -65,26 +67,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
-
 async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if the user has HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -104,22 +88,9 @@ async def create_emergency_contact(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmergencyContactOut:
-    """
-    Create a new emergency contact for an employee.
-
-    Args:
-        contact: Emergency contact creation data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        EmergencyContactOut: Created emergency contact details.
-
-    Raises:
-        HTTPException: If user lacks permission or user not found.
-    """
+    """Create a new emergency contact for an employee."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_emergency_contacts")
+        has_permission = await check_permissions([Permission.MANAGE_EMERGENCY_CONTACTS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create emergency contacts")
 
@@ -158,22 +129,9 @@ async def read_emergency_contact(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmergencyContactOut:
-    """
-    Get a specific emergency contact by its ID.
-
-    Args:
-        contact_id: ID of the emergency contact to retrieve.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        EmergencyContactOut: Emergency contact details.
-
-    Raises:
-        HTTPException: If user lacks permission or contact not found.
-    """
+    """Get a specific emergency contact by its ID."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_emergency_contacts")
+        has_permission = await check_permissions([Permission.VIEW_EMERGENCY_CONTACTS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view emergency contacts")
 
@@ -205,24 +163,9 @@ async def read_emergency_contacts(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[EmergencyContactOut]:
-    """
-    Get a paginated list of emergency contacts, optionally filtered by user ID.
-
-    Args:
-        user_id: Optional user ID to filter contacts.
-        skip: Number of records to skip (for pagination).
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[EmergencyContactOut]: List of emergency contact details.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get a paginated list of emergency contacts, optionally filtered by user ID."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_emergency_contacts")
+        has_permission = await check_permissions([Permission.VIEW_EMERGENCY_CONTACTS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view emergency contacts")
 
@@ -257,23 +200,9 @@ async def update_emergency_contact(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmergencyContactOut:
-    """
-    Update an existing emergency contact's information.
-
-    Args:
-        contact_id: ID of the emergency contact to update.
-        contact_update: Updated emergency contact data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        EmergencyContactOut: Updated emergency contact details.
-
-    Raises:
-        HTTPException: If user lacks permission or contact not found.
-    """
+    """Update an existing emergency contact's information."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_emergency_contacts")
+        has_permission = await check_permissions([Permission.MANAGE_EMERGENCY_CONTACTS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update emergency contacts")
 
@@ -315,19 +244,9 @@ async def delete_emergency_contact(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """
-    Soft delete an emergency contact from the system.
-
-    Args:
-        contact_id: ID of the emergency contact to delete.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Raises:
-        HTTPException: If user lacks permission or contact not found.
-    """
+    """Soft delete an emergency contact from the system."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_emergency_contacts")
+        has_permission = await check_permissions([Permission.MANAGE_EMERGENCY_CONTACTS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete emergency contacts")
 

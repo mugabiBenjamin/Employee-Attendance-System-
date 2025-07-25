@@ -9,8 +9,10 @@ from app.models.shift_patterns import ShiftPatterns
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
-from app.core.security import check_user_permission
+from app.core.permissions import check_permissions
+from app.core.security import get_current_active_user
 from app.core.config import settings
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,6 @@ class ShiftPatternCreate(BaseModel):
     start_time: time
     end_time: time
     description: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class ShiftPatternUpdate(BaseModel):
@@ -32,7 +33,6 @@ class ShiftPatternUpdate(BaseModel):
     start_time: Optional[time] = None
     end_time: Optional[time] = None
     description: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class ShiftPatternOut(BaseModel):
@@ -45,7 +45,6 @@ class ShiftPatternOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_active: bool
-
     model_config = ConfigDict(from_attributes=True)
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -60,26 +59,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
-
 async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has Manager, HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -93,35 +74,19 @@ async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
         logger.error(f"Error checking admin/manager role for user_id {user.user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
 
-@router.post("/", response_model=ShiftPatternOut, status_code=status.HTTP_201_CREATED, summary="Create new shift pattern", description="Create a new shift pattern. Requires manage_shift_patterns permission or manager/admin access.")
+@router.post("/", response_model=ShiftPatternOut, status_code=status.HTTP_201_CREATED, summary="Create new shift pattern")
 async def create_shift_pattern(
     shift_pattern: ShiftPatternCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftPatternOut:
-    """
-    Create a new shift pattern in the system.
-
-    Args:
-        shift_pattern: Shift pattern creation data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        ShiftPatternOut: Created shift pattern details.
-
-    Raises:
-        HTTPException: If user lacks permission or shift pattern name already exists.
-    """
+    """Create a new shift pattern."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_shift_patterns")
+        has_permission = await check_permissions([Permission.MANAGE_SHIFT_PATTERNS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create shift patterns")
 
-        query = select(ShiftPatterns).where(
-            ShiftPatterns.name == shift_pattern.name,
-            ShiftPatterns.is_active == True
-        )
+        query = select(ShiftPatterns).where(ShiftPatterns.name == shift_pattern.name, ShiftPatterns.is_active == True)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shift pattern name already exists")
@@ -145,36 +110,19 @@ async def create_shift_pattern(
         logger.error(f"Error creating shift pattern: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating shift pattern")
 
-@router.get("/{shift_pattern_id}", response_model=ShiftPatternOut, summary="Get shift pattern by ID", description="Retrieve shift pattern details. Requires view_shift_patterns permission or manager/admin access.")
+@router.get("/{shift_pattern_id}", response_model=ShiftPatternOut, summary="Get shift pattern by ID")
 async def read_shift_pattern(
     shift_pattern_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftPatternOut:
-    """
-    Get a specific shift pattern by its ID.
-
-    Args:
-        shift_pattern_id: ID of the shift pattern to retrieve.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        ShiftPatternOut: Shift pattern details.
-
-    Raises:
-        HTTPException: If user lacks permission or shift pattern not found.
-    """
+    """Get a specific shift pattern by ID."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_shift_patterns")
+        has_permission = await check_permissions([Permission.VIEW_SHIFT_PATTERNS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view shift patterns")
 
-        query = select(ShiftPatterns).where(
-            ShiftPatterns.shift_pattern_id == shift_pattern_id,
-            ShiftPatterns.is_active == True,
-            ShiftPatterns.deleted_at == None
-        )
+        query = select(ShiftPatterns).where(ShiftPatterns.shift_pattern_id == shift_pattern_id, ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
         result = await db.execute(query)
         shift_pattern = result.scalar_one_or_none()
 
@@ -190,37 +138,20 @@ async def read_shift_pattern(
         logger.error(f"Error retrieving shift pattern {shift_pattern_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving shift pattern")
 
-@router.get("/", response_model=List[ShiftPatternOut], summary="List all shift patterns", description="Retrieve all shift patterns with pagination. Requires view_shift_patterns permission or manager/admin access.")
+@router.get("/", response_model=List[ShiftPatternOut], summary="List all shift patterns")
 async def read_shift_patterns(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[ShiftPatternOut]:
-    """
-    Get a paginated list of all shift patterns.
-
-    Args:
-        skip: Number of records to skip (for pagination).
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[ShiftPatternOut]: List of shift pattern details.
-
-    Raises:
-        HTTPException: If user lacks permission.
-    """
+    """Get a paginated list of all shift patterns."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_shift_patterns")
+        has_permission = await check_permissions([Permission.VIEW_SHIFT_PATTERNS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view shift patterns")
 
-        query = select(ShiftPatterns).where(
-            ShiftPatterns.is_active == True,
-            ShiftPatterns.deleted_at == None
-        ).offset(skip).limit(limit)
+        query = select(ShiftPatterns).where(ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None).offset(skip).limit(limit)
         result = await db.execute(query)
         shift_patterns = result.scalars().all()
 
@@ -233,38 +164,20 @@ async def read_shift_patterns(
         logger.error(f"Error retrieving shift patterns: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving shift patterns")
 
-@router.put("/{shift_pattern_id}", response_model=ShiftPatternOut, summary="Update shift pattern", description="Update shift pattern information. Requires manage_shift_patterns permission or manager/admin access.")
+@router.put("/{shift_pattern_id}", response_model=ShiftPatternOut, summary="Update shift pattern")
 async def update_shift_pattern(
     shift_pattern_id: int,
     shift_pattern_update: ShiftPatternUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftPatternOut:
-    """
-    Update an existing shift pattern's information.
-
-    Args:
-        shift_pattern_id: ID of the shift pattern to update.
-        shift_pattern_update: Updated shift pattern data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        ShiftPatternOut: Updated shift pattern details.
-
-    Raises:
-        HTTPException: If user lacks permission, shift pattern not found, or name already exists.
-    """
+    """Update an existing shift pattern."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_shift_patterns")
+        has_permission = await check_permissions([Permission.MANAGE_SHIFT_PATTERNS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update shift patterns")
 
-        query = select(ShiftPatterns).where(
-            ShiftPatterns.shift_pattern_id == shift_pattern_id,
-            ShiftPatterns.is_active == True,
-            ShiftPatterns.deleted_at == None
-        )
+        query = select(ShiftPatterns).where(ShiftPatterns.shift_pattern_id == shift_pattern_id, ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
         result = await db.execute(query)
         shift_pattern = result.scalar_one_or_none()
 
@@ -273,10 +186,7 @@ async def update_shift_pattern(
 
         update_data = shift_pattern_update.model_dump(exclude_none=True)
         if "name" in update_data and update_data["name"] != shift_pattern.name:
-            query = select(ShiftPatterns).where(
-                ShiftPatterns.name == update_data["name"],
-                ShiftPatterns.is_active == True
-            )
+            query = select(ShiftPatterns).where(ShiftPatterns.name == update_data["name"], ShiftPatterns.is_active == True)
             result = await db.execute(query)
             if result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shift pattern name already exists")
@@ -298,33 +208,19 @@ async def update_shift_pattern(
         logger.error(f"Error updating shift pattern {shift_pattern_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating shift pattern")
 
-@router.delete("/{shift_pattern_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete shift pattern", description="Soft delete a shift pattern. Requires manage_shift_patterns permission or manager/admin access.")
+@router.delete("/{shift_pattern_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete shift pattern")
 async def delete_shift_pattern(
     shift_pattern_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """
-    Soft delete a shift pattern from the system.
-
-    Args:
-        shift_pattern_id: ID of the shift pattern to delete.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Raises:
-        HTTPException: If user lacks permission or shift pattern not found.
-    """
+    """Soft delete a shift pattern."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_shift_patterns")
+        has_permission = await check_permissions([Permission.MANAGE_SHIFT_PATTERNS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete shift patterns")
 
-        query = select(ShiftPatterns).where(
-            ShiftPatterns.shift_pattern_id == shift_pattern_id,
-            ShiftPatterns.is_active == True,
-            ShiftPatterns.deleted_at == None
-        )
+        query = select(ShiftPatterns).where(ShiftPatterns.shift_pattern_id == shift_pattern_id, ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
         result = await db.execute(query)
         shift_pattern = result.scalar_one_or_none()
 

@@ -10,8 +10,10 @@ from app.models.shift_patterns import ShiftPatterns
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
-from app.core.security import check_user_permission
+from app.core.permissions import check_permissions
+from app.core.security import get_current_active_user
 from app.core.config import settings
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,6 @@ class ShiftAssignmentCreate(BaseModel):
     shift_pattern_id: int
     start_date: date
     end_date: Optional[date] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class ShiftAssignmentUpdate(BaseModel):
@@ -33,7 +34,6 @@ class ShiftAssignmentUpdate(BaseModel):
     shift_pattern_id: Optional[int] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class ShiftAssignmentOut(BaseModel):
@@ -46,7 +46,6 @@ class ShiftAssignmentOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_active: bool
-
     model_config = ConfigDict(from_attributes=True)
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -61,26 +60,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
-
 async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has Manager, HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -94,47 +75,26 @@ async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
         logger.error(f"Error checking admin/manager role for user_id {user.user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
 
-@router.post("/", response_model=ShiftAssignmentOut, status_code=status.HTTP_201_CREATED, summary="Create new shift assignment", description="Create a new shift assignment. Requires manage_shift_assignments permission or manager/admin access.")
+@router.post("/", response_model=ShiftAssignmentOut, status_code=status.HTTP_201_CREATED, summary="Create new shift assignment")
 async def create_shift_assignment(
     shift_assignment: ShiftAssignmentCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftAssignmentOut:
-    """
-    Create a new shift assignment in the system.
-
-    Args:
-        shift_assignment: Shift assignment creation data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        ShiftAssignmentOut: Created shift assignment details.
-
-    Raises:
-        HTTPException: If user lacks permission, user or shift pattern not found, or assignment conflicts.
-    """
+    """Create a new shift assignment."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_shift_assignments")
+        has_permission = await check_permissions([Permission.MANAGE_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create shift assignments")
 
         # Verify user exists
-        query = select(Users).where(
-            Users.user_id == shift_assignment.user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
+        query = select(Users).where(Users.user_id == shift_assignment.user_id, Users.is_active == True, Users.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Verify shift pattern exists
-        query = select(ShiftPatterns).where(
-            ShiftPatterns.shift_pattern_id == shift_assignment.shift_pattern_id,
-            ShiftPatterns.is_active == True,
-            ShiftPatterns.deleted_at == None
-        )
+        query = select(ShiftPatterns).where(ShiftPatterns.shift_pattern_id == shift_assignment.shift_pattern_id, ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift pattern not found")
@@ -169,36 +129,19 @@ async def create_shift_assignment(
         logger.error(f"Error creating shift assignment: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating shift assignment")
 
-@router.get("/{assignment_id}", response_model=ShiftAssignmentOut, summary="Get shift assignment by ID", description="Retrieve shift assignment details. Requires view_shift_assignments permission or manager/admin access.")
+@router.get("/{assignment_id}", response_model=ShiftAssignmentOut, summary="Get shift assignment by ID")
 async def read_shift_assignment(
     assignment_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftAssignmentOut:
-    """
-    Get a specific shift assignment by its ID.
-
-    Args:
-        assignment_id: ID of the shift assignment to retrieve.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        ShiftAssignmentOut: Shift assignment details.
-
-    Raises:
-        HTTPException: If user lacks permission or shift assignment not found.
-    """
+    """Get a specific shift assignment by ID."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_shift_assignments")
+        has_permission = await check_permissions([Permission.VIEW_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view shift assignments")
 
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.assignment_id == assignment_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
+        query = select(ShiftAssignments).where(ShiftAssignments.assignment_id == assignment_id, ShiftAssignments.is_active == True, ShiftAssignments.deleted_at == None)
         result = await db.execute(query)
         assignment = result.scalar_one_or_none()
 
@@ -214,7 +157,7 @@ async def read_shift_assignment(
         logger.error(f"Error retrieving shift assignment {assignment_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving shift assignment")
 
-@router.get("/", response_model=List[ShiftAssignmentOut], summary="List all shift assignments", description="Retrieve all shift assignments with pagination. Requires view_shift_assignments permission or manager/admin access.")
+@router.get("/", response_model=List[ShiftAssignmentOut], summary="List all shift assignments")
 async def read_shift_assignments(
     user_id: Optional[int] = None,
     skip: int = 0,
@@ -222,31 +165,13 @@ async def read_shift_assignments(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[ShiftAssignmentOut]:
-    """
-    Get a paginated list of shift assignments, optionally filtered by user.
-
-    Args:
-        user_id: Optional user ID to filter assignments.
-        skip: Number of records to skip (for pagination).
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[ShiftAssignmentOut]: List of shift assignment details.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get a paginated list of shift assignments."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_shift_assignments")
+        has_permission = await check_permissions([Permission.VIEW_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view shift assignments")
 
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
+        query = select(ShiftAssignments).where(ShiftAssignments.is_active == True, ShiftAssignments.deleted_at == None)
         if user_id:
             query = query.where(ShiftAssignments.user_id == user_id)
         query = query.offset(skip).limit(limit)
@@ -262,38 +187,20 @@ async def read_shift_assignments(
         logger.error(f"Error retrieving shift assignments: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving shift assignments")
 
-@router.put("/{assignment_id}", response_model=ShiftAssignmentOut, summary="Update shift assignment", description="Update shift assignment information. Requires manage_shift_assignments permission or manager/admin access.")
+@router.put("/{assignment_id}", response_model=ShiftAssignmentOut, summary="Update shift assignment")
 async def update_shift_assignment(
     assignment_id: int,
     shift_assignment_update: ShiftAssignmentUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftAssignmentOut:
-    """
-    Update an existing shift assignment's information.
-
-    Args:
-        assignment_id: ID of the shift assignment to update.
-        shift_assignment_update: Updated shift assignment data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        ShiftAssignmentOut: Updated shift assignment details.
-
-    Raises:
-        HTTPException: If user lacks permission, assignment not found, or conflicts exist.
-    """
+    """Update an existing shift assignment."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_shift_assignments")
+        has_permission = await check_permissions([Permission.MANAGE_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update shift assignments")
 
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.assignment_id == assignment_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
+        query = select(ShiftAssignments).where(ShiftAssignments.assignment_id == assignment_id, ShiftAssignments.is_active == True, ShiftAssignments.deleted_at == None)
         result = await db.execute(query)
         assignment = result.scalar_one_or_none()
 
@@ -302,21 +209,13 @@ async def update_shift_assignment(
 
         update_data = shift_assignment_update.model_dump(exclude_none=True)
         if "user_id" in update_data:
-            query = select(Users).where(
-                Users.user_id == update_data["user_id"],
-                Users.is_active == True,
-                Users.deleted_at == None
-            )
+            query = select(Users).where(Users.user_id == update_data["user_id"], Users.is_active == True, Users.deleted_at == None)
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         if "shift_pattern_id" in update_data:
-            query = select(ShiftPatterns).where(
-                ShiftPatterns.shift_pattern_id == update_data["shift_pattern_id"],
-                ShiftPatterns.is_active == True,
-                ShiftPatterns.deleted_at == None
-            )
+            query = select(ShiftPatterns).where(ShiftPatterns.shift_pattern_id == update_data["shift_pattern_id"], ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift pattern not found")
@@ -350,33 +249,19 @@ async def update_shift_assignment(
         logger.error(f"Error updating shift assignment {assignment_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating shift assignment")
 
-@router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete shift assignment", description="Soft delete a shift assignment. Requires manage_shift_assignments permission or manager/admin access.")
+@router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete shift assignment")
 async def delete_shift_assignment(
     assignment_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """
-    Soft delete a shift assignment from the system.
-
-    Args:
-        assignment_id: ID of the shift assignment to delete.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Raises:
-        HTTPException: If user lacks permission or shift assignment not found.
-    """
+    """Soft delete a shift assignment."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_shift_assignments")
+        has_permission = await check_permissions([Permission.MANAGE_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete shift assignments")
 
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.assignment_id == assignment_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
+        query = select(ShiftAssignments).where(ShiftAssignments.assignment_id == assignment_id, ShiftAssignments.is_active == True, ShiftAssignments.deleted_at == None)
         result = await db.execute(query)
         assignment = result.scalar_one_or_none()
 

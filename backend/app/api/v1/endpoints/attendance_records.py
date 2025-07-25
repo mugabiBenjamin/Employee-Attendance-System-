@@ -93,16 +93,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 async def is_manager_or_hr_or_admin(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has Manager, HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if the user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -122,20 +113,7 @@ async def clock_in_out(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> AttendanceRecordOut:
-    """
-    Record a clock-in or clock-out action for the current user.
-
-    Args:
-        clock_data: Clock-in or clock-out action.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        AttendanceRecordOut: Created or updated attendance record.
-
-    Raises:
-        HTTPException: If action is invalid or record conflicts exist.
-    """
+    """Record a clock-in or clock-out action for the current user."""
     try:
         if clock_data.action not in ["clock_in", "clock_out"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action")
@@ -193,21 +171,7 @@ async def get_attendance_history(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[AttendanceRecordOut]:
-    """
-    Get paginated attendance history for the current user.
-
-    Args:
-        skip: Number of records to skip.
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[AttendanceRecordOut]: List of attendance records.
-
-    Raises:
-        HTTPException: If an error occurs.
-    """
+    """Get paginated attendance history for the current user."""
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
@@ -231,20 +195,7 @@ async def request_time_correction(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> TimeCorrectionOut:
-    """
-    Submit a time correction request for an attendance record.
-
-    Args:
-        correction: Time correction request data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        TimeCorrectionOut: Created time correction request.
-
-    Raises:
-        HTTPException: If record not found or invalid data.
-    """
+    """Submit a time correction request for an attendance record."""
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.record_id == correction.record_id,
@@ -287,22 +238,7 @@ async def get_time_corrections(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[TimeCorrectionOut]:
-    """
-    Get paginated time correction requests for a user or team.
-
-    Args:
-        user_id: Optional user ID to filter corrections (manager/HR/admin only).
-        skip: Number of records to skip.
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[TimeCorrectionOut]: List of time correction requests.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get paginated time correction requests for a user or team."""
     try:
         if user_id and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view others' corrections")
@@ -332,21 +268,7 @@ async def approve_reject_time_correction(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> TimeCorrectionOut:
-    """
-    Approve or reject a time correction request.
-
-    Args:
-        correction_id: ID of the time correction request.
-        status_update: New status ('approved' or 'rejected').
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        TimeCorrectionOut: Updated time correction request.
-
-    Raises:
-        HTTPException: If user lacks permission, correction not found, or invalid status.
-    """
+    """Approve or reject a time correction request."""
     try:
         has_permission = await check_permissions([Permission.APPROVE_TIME_CORRECTIONS.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
@@ -399,22 +321,7 @@ async def get_attendance_summary(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> AttendanceSummary:
-    """
-    Get attendance summary for a user or team for a specified period.
-
-    Args:
-        user_id: Optional user ID to filter summary (manager/HR/admin only).
-        start_date: Start date of the period.
-        end_date: End date of the period.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        AttendanceSummary: Summary of total and overtime hours.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get attendance summary for a user or team for a specified period."""
     try:
         if user_id and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view others' summaries")
@@ -466,21 +373,7 @@ async def export_attendance_csv(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> FileResponse:
-    """
-    Export attendance history as a CSV file.
-
-    Args:
-        start_date: Start date of the period.
-        end_date: End date of the period.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        FileResponse: CSV file with attendance history.
-
-    Raises:
-        HTTPException: If an error occurs.
-    """
+    """Export attendance history as a CSV file."""
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
@@ -527,21 +420,7 @@ async def export_attendance_pdf(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> FileResponse:
-    """
-    Export attendance history as a PDF file.
-
-    Args:
-        start_date: Start date of the period.
-        end_date: End date of the period.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        FileResponse: PDF file with attendance history.
-
-    Raises:
-        HTTPException: If an error occurs.
-    """
+    """Export attendance history as a PDF file."""
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,

@@ -10,7 +10,9 @@ from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
 from app.core.config import settings
-from app.core.security import check_user_permission
+from app.core.permissions import check_permissions
+from app.core.security import get_current_active_user
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,6 @@ class SystemLogOut(BaseModel):
     entity_id: Optional[int]
     details: Optional[str]
     created_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -41,26 +42,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
-
 async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if user has HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -74,30 +57,16 @@ async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
         logger.error(f"Error checking admin/hr role for user_id {user.user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
 
-@router.get("/", response_model=List[SystemLogOut], summary="List system logs", description="Retrieve all system logs with pagination. Requires view_system_logs permission or HR/admin access.")
+@router.get("/", response_model=List[SystemLogOut], summary="List system logs")
 async def read_system_logs(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[SystemLogOut]:
-    """
-    Get a paginated list of all system logs.
-
-    Args:
-        skip: Number of records to skip (for pagination).
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[SystemLogOut]: List of system log details.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get a paginated list of all system logs."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_system_logs")
+        has_permission = await check_permissions([Permission.VIEW_SYSTEM_LOGS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view system logs")
 
@@ -114,35 +83,19 @@ async def read_system_logs(
         logger.error(f"Error retrieving system logs: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving system logs")
 
-@router.get("/{log_id}", response_model=SystemLogOut, summary="Get system log by ID", description="Retrieve a specific system log by its ID. Requires view_system_logs permission or HR/admin access.")
+@router.get("/{log_id}", response_model=SystemLogOut, summary="Get system log by ID")
 async def read_system_log(
     log_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> SystemLogOut:
-    """
-    Get a specific system log by its ID.
-
-    Args:
-        log_id: ID of the system log to retrieve.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        SystemLogOut: System log details.
-
-    Raises:
-        HTTPException: If user lacks permission or log not found.
-    """
+    """Get a specific system log by ID."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_system_logs")
+        has_permission = await check_permissions([Permission.VIEW_SYSTEM_LOGS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view system logs")
 
-        query = select(SystemLogs).where(
-            SystemLogs.log_id == log_id,
-            SystemLogs.is_active == True
-        )
+        query = select(SystemLogs).where(SystemLogs.log_id == log_id, SystemLogs.is_active == True)
         result = await db.execute(query)
         log = result.scalar_one_or_none()
 

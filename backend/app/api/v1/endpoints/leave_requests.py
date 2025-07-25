@@ -13,8 +13,10 @@ from app.models.leave_approval_workflow import LeaveApprovalWorkflow
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
-from app.core.security import check_user_permission
+from app.core.permissions import check_permissions
+from app.core.security import get_current_active_user
 from app.core.config import settings
+from app.core.enums import Permission
 import logging
 from fastapi.responses import FileResponse
 import csv
@@ -34,7 +36,6 @@ class LeaveRequestCreate(BaseModel):
     start_date: date
     end_date: date
     reason: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class LeaveRequestOut(BaseModel):
@@ -49,7 +50,6 @@ class LeaveRequestOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_active: bool
-
     model_config = ConfigDict(from_attributes=True)
 
 class LeaveBalanceOut(BaseModel):
@@ -58,7 +58,6 @@ class LeaveBalanceOut(BaseModel):
     leave_type: str
     balance: float
     updated_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 class LeavePolicyCreate(BaseModel):
@@ -67,7 +66,6 @@ class LeavePolicyCreate(BaseModel):
     annual_allocation: float
     max_consecutive_days: Optional[int] = None
     description: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class LeavePolicyOut(BaseModel):
@@ -80,7 +78,6 @@ class LeavePolicyOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_active: bool
-
     model_config = ConfigDict(from_attributes=True)
 
 class HolidayCreate(BaseModel):
@@ -88,7 +85,6 @@ class HolidayCreate(BaseModel):
     name: str
     date: date
     description: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class HolidayOut(BaseModel):
@@ -100,14 +96,12 @@ class HolidayOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_active: bool
-
     model_config = ConfigDict(from_attributes=True)
 
 class LeaveApprovalUpdate(BaseModel):
     """Schema for updating leave approval status."""
     status: str  # 'approved' or 'rejected'
     comments: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class LeaveApprovalOut(BaseModel):
@@ -119,7 +113,6 @@ class LeaveApprovalOut(BaseModel):
     comments: Optional[str]
     created_at: datetime
     updated_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -134,26 +127,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
-
 async def is_manager_or_hr_or_admin(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has Manager, HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -167,40 +142,21 @@ async def is_manager_or_hr_or_admin(db: AsyncSession, user: Users) -> bool:
         logger.error(f"Error checking role for user_id {user.user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
 
-@router.post("/", response_model=LeaveRequestOut, status_code=status.HTTP_201_CREATED, summary="Create leave request", description="Submit a new leave request.")
+@router.post("/", response_model=LeaveRequestOut, status_code=status.HTTP_201_CREATED, summary="Create leave request")
 async def create_leave_request(
     leave_request: LeaveRequestCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> LeaveRequestOut:
-    """
-    Create a new leave request.
-
-    Args:
-        leave_request: Leave request data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        LeaveRequestOut: Created leave request details.
-
-    Raises:
-        HTTPException: If leave policy not found, insufficient balance, or dates overlap with holidays.
-    """
+    """Create a new leave request."""
     try:
-        query = select(LeavePolicies).where(
-            LeavePolicies.leave_type == leave_request.leave_type,
-            LeavePolicies.is_active == True
-        )
+        query = select(LeavePolicies).where(LeavePolicies.leave_type == leave_request.leave_type, LeavePolicies.is_active == True)
         result = await db.execute(query)
         policy = result.scalar_one_or_none()
         if not policy:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid leave type")
 
-        query = select(LeaveBalances).where(
-            LeaveBalances.user_id == current_user.user_id,
-            LeaveBalances.leave_type == leave_request.leave_type
-        )
+        query = select(LeaveBalances).where(LeaveBalances.user_id == current_user.user_id, LeaveBalances.leave_type == leave_request.leave_type)
         result = await db.execute(query)
         balance = result.scalar_one_or_none()
         if not balance:
@@ -210,10 +166,7 @@ async def create_leave_request(
         if balance.balance < days_requested:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient leave balance")
 
-        query = select(HolidayCalendar).where(
-            HolidayCalendar.date.between(leave_request.start_date, leave_request.end_date),
-            HolidayCalendar.is_active == True
-        )
+        query = select(HolidayCalendar).where(HolidayCalendar.date.between(leave_request.start_date, leave_request.end_date), HolidayCalendar.is_active == True)
         result = await db.execute(query)
         if result.scalars().first():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requested dates overlap with holidays")
@@ -242,7 +195,7 @@ async def create_leave_request(
         logger.error(f"Error creating leave request for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating leave request")
 
-@router.get("/history", response_model=List[LeaveRequestOut], summary="Get leave request history", description="Retrieve leave request history for the current user or team (manager/HR/admin).")
+@router.get("/history", response_model=List[LeaveRequestOut], summary="Get leave request history")
 async def get_leave_requests(
     user_id: Optional[int] = None,
     skip: int = 0,
@@ -250,22 +203,7 @@ async def get_leave_requests(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[LeaveRequestOut]:
-    """
-    Get paginated leave request history.
-
-    Args:
-        user_id: Optional user ID to filter requests (manager/HR/admin only).
-        skip: Number of records to skip.
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[LeaveRequestOut]: List of leave requests.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get paginated leave request history."""
     try:
         if user_id and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view others' leave requests")
@@ -288,28 +226,14 @@ async def get_leave_requests(
         logger.error(f"Error retrieving leave requests: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave requests")
 
-@router.get("/balance", response_model=List[LeaveBalanceOut], summary="Get leave balance", description="Retrieve leave balance for the current user.")
+@router.get("/balance", response_model=List[LeaveBalanceOut], summary="Get leave balance")
 async def get_leave_balance(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[LeaveBalanceOut]:
-    """
-    Get leave balance for the current user.
-
-    Args:
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[LeaveBalanceOut]: List of leave balances.
-
-    Raises:
-        HTTPException: If an error occurs.
-    """
+    """Get leave balance for the current user."""
     try:
-        query = select(LeaveBalances).where(
-            LeaveBalances.user_id == current_user.user_id
-        )
+        query = select(LeaveBalances).where(LeaveBalances.user_id == current_user.user_id)
         result = await db.execute(query)
         balances = result.scalars().all()
 
@@ -322,35 +246,19 @@ async def get_leave_balance(
         logger.error(f"Error retrieving leave balance for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave balance")
 
-@router.post("/policies", response_model=LeavePolicyOut, status_code=status.HTTP_201_CREATED, summary="Create leave policy", description="Create a new leave policy. Requires manage_leave_policies permission or admin access.")
+@router.post("/policies", response_model=LeavePolicyOut, status_code=status.HTTP_201_CREATED, summary="Create leave policy")
 async def create_leave_policy(
     policy: LeavePolicyCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> LeavePolicyOut:
-    """
-    Create a new leave policy.
-
-    Args:
-        policy: Leave policy creation data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        LeavePolicyOut: Created leave policy details.
-
-    Raises:
-        HTTPException: If user lacks permission or leave type exists.
-    """
+    """Create a new leave policy."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_leave_policies")
+        has_permission = await check_permissions([Permission.MANAGE_LEAVE_POLICIES.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create leave policies")
 
-        query = select(LeavePolicies).where(
-            LeavePolicies.leave_type == policy.leave_type,
-            LeavePolicies.is_active == True
-        )
+        query = select(LeavePolicies).where(LeavePolicies.leave_type == policy.leave_type, LeavePolicies.is_active == True)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Leave type already exists")
@@ -374,36 +282,20 @@ async def create_leave_policy(
         logger.error(f"Error creating leave policy: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating leave policy")
 
-@router.get("/policies", response_model=List[LeavePolicyOut], summary="List leave policies", description="Retrieve all leave policies with pagination. Requires view_leave_policies permission or admin access.")
+@router.get("/policies", response_model=List[LeavePolicyOut], summary="List leave policies")
 async def get_leave_policies(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[LeavePolicyOut]:
-    """
-    Get paginated list of all leave policies.
-
-    Args:
-        skip: Number of records to skip.
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[LeavePolicyOut]: List of leave policies.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get paginated list of all leave policies."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_leave_policies")
+        has_permission = await check_permissions([Permission.VIEW_LEAVE_POLICIES.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view leave policies")
 
-        query = select(LeavePolicies).where(
-            LeavePolicies.is_active == True
-        ).offset(skip).limit(limit)
+        query = select(LeavePolicies).where(LeavePolicies.is_active == True).offset(skip).limit(limit)
         result = await db.execute(query)
         policies = result.scalars().all()
 
@@ -416,35 +308,19 @@ async def get_leave_policies(
         logger.error(f"Error retrieving leave policies: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave policies")
 
-@router.post("/holidays", response_model=HolidayOut, status_code=status.HTTP_201_CREATED, summary="Create holiday", description="Create a new holiday. Requires manage_holidays permission or admin access.")
+@router.post("/holidays", response_model=HolidayOut, status_code=status.HTTP_201_CREATED, summary="Create holiday")
 async def create_holiday(
     holiday: HolidayCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> HolidayOut:
-    """
-    Create a new holiday in the calendar.
-
-    Args:
-        holiday: Holiday creation data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        HolidayOut: Created holiday details.
-
-    Raises:
-        HTTPException: If user lacks permission or holiday exists.
-    """
+    """Create a new holiday in the calendar."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_holidays")
+        has_permission = await check_permissions([Permission.MANAGE_HOLIDAYS.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create holidays")
 
-        query = select(HolidayCalendar).where(
-            HolidayCalendar.date == holiday.date,
-            HolidayCalendar.is_active == True
-        )
+        query = select(HolidayCalendar).where(HolidayCalendar.date == holiday.date, HolidayCalendar.is_active == True)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Holiday already exists for this date")
@@ -468,36 +344,20 @@ async def create_holiday(
         logger.error(f"Error creating holiday: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating holiday")
 
-@router.get("/holidays", response_model=List[HolidayOut], summary="List holidays", description="Retrieve all holidays with pagination. Requires view_holidays permission or admin access.")
+@router.get("/holidays", response_model=List[HolidayOut], summary="List holidays")
 async def get_holidays(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[HolidayOut]:
-    """
-    Get paginated list of all holidays.
-
-    Args:
-        skip: Number of records to skip.
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[HolidayOut]: List of holidays.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Get paginated list of all holidays."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_holidays")
+        has_permission = await check_permissions([Permission.VIEW_HOLIDAYS.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view holidays")
 
-        query = select(HolidayCalendar).where(
-            HolidayCalendar.is_active == True
-        ).offset(skip).limit(limit)
+        query = select(HolidayCalendar).where(HolidayCalendar.is_active == True).offset(skip).limit(limit)
         result = await db.execute(query)
         holidays = result.scalars().all()
 
@@ -510,40 +370,23 @@ async def get_holidays(
         logger.error(f"Error retrieving holidays: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving holidays")
 
-@router.put("/approve/{request_id}", response_model=LeaveApprovalOut, summary="Approve/reject leave request", description="Approve or reject a leave request. Requires approve_leave_requests permission or manager/HR/admin access.")
+@router.put("/approve/{request_id}", response_model=LeaveApprovalOut, summary="Approve/reject leave request")
 async def approve_reject_leave_request(
     request_id: int,
     approval: LeaveApprovalUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> LeaveApprovalOut:
-    """
-    Approve or reject a leave request.
-
-    Args:
-        request_id: ID of the leave request.
-        approval: Approval status and comments.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        LeaveApprovalOut: Updated approval details.
-
-    Raises:
-        HTTPException: If user lacks permission, request not found, or invalid status.
-    """
+    """Approve or reject a leave request."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "approve_leave_requests")
+        has_permission = await check_permissions([Permission.APPROVE_LEAVE_REQUESTS.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to approve leave requests")
 
         if approval.status not in ["approved", "rejected"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status")
 
-        query = select(LeaveRequests).where(
-            LeaveRequests.request_id == request_id,
-            LeaveRequests.is_active == True
-        )
+        query = select(LeaveRequests).where(LeaveRequests.request_id == request_id, LeaveRequests.is_active == True)
         result = await db.execute(query)
         leave_request = result.scalar_one_or_none()
         if not leave_request:
@@ -564,10 +407,7 @@ async def approve_reject_leave_request(
 
         if approval.status == "approved":
             days = (leave_request.end_date - leave_request.start_date).days + 1
-            query = select(LeaveBalances).where(
-                LeaveBalances.user_id == leave_request.user_id,
-                LeaveBalances.leave_type == leave_request.leave_type
-            )
+            query = select(LeaveBalances).where(LeaveBalances.user_id == leave_request.user_id, LeaveBalances.leave_type == leave_request.leave_type)
             result = await db.execute(query)
             balance = result.scalar_one_or_none()
             if balance:
@@ -588,7 +428,7 @@ async def approve_reject_leave_request(
         logger.error(f"Error processing leave request {request_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing leave request")
 
-@router.get("/export/csv", response_model=None, summary="Export leave requests as CSV", description="Export leave request history as a CSV file.")
+@router.get("/export/csv", response_model=None, summary="Export leave requests as CSV")
 async def export_leave_requests_csv(
     start_date: date = date.today().replace(day=1),
     end_date: date = date.today(),
@@ -596,31 +436,12 @@ async def export_leave_requests_csv(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> FileResponse:
-    """
-    Export leave request history as a CSV file.
-
-    Args:
-        start_date: Start date of the period.
-        end_date: End date of the period.
-        user_id: Optional user ID to filter requests (manager/HR/admin only).
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        FileResponse: CSV file with leave request history.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Export leave request history as a CSV file."""
     try:
         if user_id and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to export others' leave requests")
 
-        query = select(LeaveRequests).where(
-            LeaveRequests.start_date >= start_date,
-            LeaveRequests.end_date <= end_date,
-            LeaveRequests.is_active == True
-        )
+        query = select(LeaveRequests).where(LeaveRequests.start_date >= start_date, LeaveRequests.end_date <= end_date, LeaveRequests.is_active == True)
         if user_id:
             query = query.where(LeaveRequests.user_id == user_id)
         else:
@@ -661,7 +482,7 @@ async def export_leave_requests_csv(
         if os.path.exists(filename):
             os.remove(filename)
 
-@router.get("/export/pdf", response_model=None, summary="Export leave requests as PDF", description="Export leave request history as a PDF file.")
+@router.get("/export/pdf", response_model=None, summary="Export leave requests as PDF")
 async def export_leave_requests_pdf(
     start_date: date = date.today().replace(day=1),
     end_date: date = date.today(),
@@ -669,31 +490,12 @@ async def export_leave_requests_pdf(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> FileResponse:
-    """
-    Export leave request history as a PDF file.
-
-    Args:
-        start_date: Start date of the period.
-        end_date: End date of the period.
-        user_id: Optional user ID to filter requests (manager/HR/admin only).
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        FileResponse: PDF file with leave request history.
-
-    Raises:
-        HTTPException: If user lacks permission or an error occurs.
-    """
+    """Export leave request history as a PDF file."""
     try:
         if user_id and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to export others' leave requests")
 
-        query = select(LeaveRequests).where(
-            LeaveRequests.start_date >= start_date,
-            LeaveRequests.end_date <= end_date,
-            LeaveRequests.is_active == True
-        )
+        query = select(LeaveRequests).where(LeaveRequests.start_date >= start_date, LeaveRequests.end_date <= end_date, LeaveRequests.is_active == True)
         if user_id:
             query = query.where(LeaveRequests.user_id == user_id)
         else:

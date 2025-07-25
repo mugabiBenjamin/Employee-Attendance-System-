@@ -43,19 +43,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 @router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login", description="Authenticate user and return JWT tokens.")
 async def login_for_access_token(user_auth: UserAuth, db: AsyncSession = Depends(get_db)) -> Token:
-    """
-    Authenticate user credentials and return access and refresh tokens.
-
-    Args:
-        user_auth: User authentication credentials (email, password).
-        db: Async database session.
-
-    Returns:
-        Token response containing access and refresh tokens.
-
-    Raises:
-        HTTPException: If credentials are invalid or user is not found/inactive.
-    """
+    """Authenticate user credentials and return access and refresh tokens."""
     try:
         query = select(Users).where(
             Users.email == user_auth.email,
@@ -90,19 +78,7 @@ async def login_for_access_token(user_auth: UserAuth, db: AsyncSession = Depends
 
 @router.post("/refresh", response_model=Token, status_code=status.HTTP_200_OK, summary="Refresh access token", description="Generate new access token using a valid refresh token.")
 async def refresh_access_token(refresh_token: str, db: AsyncSession = Depends(get_db)) -> Token:
-    """
-    Refresh an expired access token using a valid refresh token.
-
-    Args:
-        refresh_token: The refresh token provided by the client.
-        db: Async database session.
-
-    Returns:
-        Token response containing new access and refresh tokens.
-
-    Raises:
-        HTTPException: If refresh token is invalid or user is not found/inactive.
-    """
+    """Refresh an expired access token using a valid refresh token."""
     try:
         payload = decode_refresh_token(refresh_token)
         user_id = payload.get("sub")

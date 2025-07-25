@@ -1,15 +1,14 @@
+from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 import logging
-
 from app.core.config import settings
 from app.core.database import init_db, start_materialized_view_refresh, AsyncSessionLocal
 from app.api.v1.api import api_router
-from app.models.system_logs import SystemLog
+from app.models.system_logs import SystemLogs
 from app.core.enums import SystemAction
 
 # Configure logging
@@ -60,33 +59,32 @@ async def log_system_actions(request: Request, call_next):
 
     # Match common tracked paths
     if path.endswith("/auth/token") and method == "POST":
-        action = SystemAction.LOGIN
+        action = SystemAction.LOGIN.value
     elif path.endswith("/auth/logout") and method == "POST":
-        action = SystemAction.LOGOUT
+        action = SystemAction.LOGOUT.value
     elif path.endswith("/attendance-records/clock") and method == "POST":
-        action = SystemAction.CLOCK_IN  # Could distinguish more deeply
+        action = SystemAction.CLOCK_IN.value
     elif path.endswith("/leave-requests/approve") and method == "POST":
-        action = SystemAction.APPROVE_LEAVE
+        action = SystemAction.APPROVE_LEAVE.value
     elif path.endswith("/leave-requests/reject") and method == "POST":
-        action = SystemAction.REJECT_LEAVE
+        action = SystemAction.REJECT_LEAVE.value
     elif method in ["POST", "PUT", "DELETE"]:
         try:
-            action = SystemAction[method]
+            action = SystemAction[method].value
         except KeyError:
             action = None
 
     if action:
         try:
             async with AsyncSessionLocal() as session:
-                system_log = SystemLog(
+                system_log = SystemLogs(
                     user_id=user_id,
                     action=action,
-                    table_affected=path.strip("/").split("/")[0],
-                    record_id=None,
-                    old_values=None,
-                    new_values=None,
-                    ip_address=str(request.client.host),
-                    user_agent=request.headers.get("user-agent"),
+                    entity_type=path.strip("/").split("/")[0],
+                    entity_id=None,
+                    details=None,
+                    created_at=datetime.now(timezone.utc),
+                    is_active=True
                 )
                 session.add(system_log)
                 await session.commit()

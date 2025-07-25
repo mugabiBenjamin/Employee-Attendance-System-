@@ -10,7 +10,9 @@ from app.models.user_roles import UserRoles
 from app.models.roles import Roles
 from app.models.users import Users
 from app.core.config import settings
-from app.core.security import check_user_permission
+from app.core.permissions import check_permissions
+from app.core.security import get_current_active_user
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -54,28 +56,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-async def get_current_active_user(db: AsyncSession = Depends(get_db)) -> Users:
-    """Dependency to get the current active user."""
-    # This is a placeholder. In a real implementation, this would verify the JWT token
-    # and fetch the user from the database. For this example, we assume it's provided.
-    query = select(Users).where(Users.is_active == True, Users.deleted_at == None)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
-    return user
-
 async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has Manager, HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if the user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -95,22 +77,9 @@ async def create_new_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> DepartmentOut:
-    """
-    Create a new department in the system.
-
-    Args:
-        department: Department creation data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        DepartmentOut: Created department details.
-
-    Raises:
-        HTTPException: If user lacks permission or department name already exists.
-    """
+    """Create a new department in the system."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")
+        has_permission = await check_permissions([Permission.MANAGE_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create departments")
 
@@ -144,22 +113,9 @@ async def read_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> DepartmentOut:
-    """
-    Get a specific department by its ID.
-
-    Args:
-        department_id: ID of the department to retrieve.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        DepartmentOut: Department details.
-
-    Raises:
-        HTTPException: If user lacks permission or department not found.
-    """
+    """Get a specific department by its ID."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_departments")
+        has_permission = await check_permissions([Permission.VIEW_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view departments")
 
@@ -190,23 +146,9 @@ async def read_departments(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[DepartmentOut]:
-    """
-    Get a paginated list of all departments.
-
-    Args:
-        skip: Number of records to skip (for pagination).
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[DepartmentOut]: List of department details.
-
-    Raises:
-        HTTPException: If user lacks permission.
-    """
+    """Get a paginated list of all departments."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "view_departments")
+        has_permission = await check_permissions([Permission.VIEW_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view departments")
 
@@ -233,23 +175,9 @@ async def update_existing_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> DepartmentOut:
-    """
-    Update an existing department's information.
-
-    Args:
-        department_id: ID of the department to update.
-        department_update: Updated department data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        DepartmentOut: Updated department details.
-
-    Raises:
-        HTTPException: If user lacks permission, department not found, or name already exists.
-    """
+    """Update an existing department's information."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")
+        has_permission = await check_permissions([Permission.MANAGE_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update departments")
 
@@ -294,19 +222,9 @@ async def delete_existing_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """
-    Soft delete a department from the system.
-
-    Args:
-        department_id: ID of the department to delete.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Raises:
-        HTTPException: If user lacks permission or department not found.
-    """
+    """Soft delete a department from the system."""
     try:
-        has_permission = await check_user_permission(db, current_user.user_id, "manage_departments")
+        has_permission = await check_permissions([Permission.MANAGE_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete departments")
 

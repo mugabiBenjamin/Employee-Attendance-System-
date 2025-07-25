@@ -63,16 +63,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has HR, Admin, or Super_Admin role.
-
-    Args:
-        db: Async database session.
-        user: Current user object.
-
-    Returns:
-        bool: True if user has required role, False otherwise.
-    """
+    """Check if the user has HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -92,20 +83,7 @@ async def create_new_user(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserOut:
-    """
-    Create a new user in the system.
-
-    Args:
-        user: User creation data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        UserOut: Created user details.
-
-    Raises:
-        HTTPException: If user lacks permission or email already exists.
-    """
+    """Create a new user in the system."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -144,20 +122,7 @@ async def read_user(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserOut:
-    """
-    Get a specific user by their ID.
-
-    Args:
-        user_id: ID of the user to retrieve.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        UserOut: User details.
-
-    Raises:
-        HTTPException: If user lacks permission or user not found.
-    """
+    """Get a specific user by their ID."""
     try:
         has_permission = await check_permissions([Permission.VIEW_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -190,21 +155,7 @@ async def read_users(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[UserOut]:
-    """
-    Get a paginated list of all users.
-
-    Args:
-        skip: Number of records to skip (for pagination).
-        limit: Maximum number of records to return.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        List[UserOut]: List of user details.
-
-    Raises:
-        HTTPException: If user lacks permission.
-    """
+    """Get a paginated list of all users."""
     try:
         has_permission = await check_permissions([Permission.VIEW_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -233,21 +184,7 @@ async def update_existing_user(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserOut:
-    """
-    Update an existing user's information.
-
-    Args:
-        user_id: ID of the user to update.
-        user_update: Updated user data.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Returns:
-        UserOut: Updated user details.
-
-    Raises:
-        HTTPException: If user lacks permission, user not found, or email already exists.
-    """
+    """Update an existing user's information."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -297,17 +234,7 @@ async def delete_existing_user(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """
-    Soft delete a user from the system.
-
-    Args:
-        user_id: ID of the user to delete.
-        db: Async database session.
-        current_user: Current authenticated user.
-
-    Raises:
-        HTTPException: If user lacks permission or user not found.
-    """
+    """Soft delete a user from the system."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
