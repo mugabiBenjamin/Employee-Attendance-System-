@@ -1,8 +1,6 @@
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 import logging
 from app.core.config import settings
@@ -18,6 +16,32 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Action mapping: (path_suffix, method) -> SystemAction
+ACTION_MAPPING = {
+    ("/auth/token", "POST"): SystemAction.LOGIN,
+    ("/auth/logout", "POST"): SystemAction.LOGOUT,
+    ("/attendance-records/clock", "POST"): SystemAction.CLOCK_IN,
+    ("/leave-requests/approve", "POST"): SystemAction.APPROVE_LEAVE,
+    ("/leave-requests/reject", "POST"): SystemAction.REJECT_LEAVE,
+}
+
+# Method-based fallback mapping
+METHOD_FALLBACK = {
+    "POST": SystemAction.INSERT,
+    "PUT": SystemAction.UPDATE,
+    "DELETE": SystemAction.DELETE,
+}
+
+def determine_system_action(path: str, method: str) -> str | None:
+    """Determine system action based on request path and method."""
+    # Check specific path mappings first
+    for (path_suffix, mapped_method), action in ACTION_MAPPING.items():
+        if path.endswith(path_suffix) and method == mapped_method:
+            return action
+    
+    # Fallback to method-based actions
+    return METHOD_FALLBACK.get(method)
 
 # Define lifespan context
 @asynccontextmanager
@@ -55,24 +79,7 @@ async def log_system_actions(request: Request, call_next):
 
     path = request.url.path
     method = request.method
-    action = None
-
-    # Match common tracked paths
-    if path.endswith("/auth/token") and method == "POST":
-        action = SystemAction.LOGIN.value
-    elif path.endswith("/auth/logout") and method == "POST":
-        action = SystemAction.LOGOUT.value
-    elif path.endswith("/attendance-records/clock") and method == "POST":
-        action = SystemAction.CLOCK_IN.value
-    elif path.endswith("/leave-requests/approve") and method == "POST":
-        action = SystemAction.APPROVE_LEAVE.value
-    elif path.endswith("/leave-requests/reject") and method == "POST":
-        action = SystemAction.REJECT_LEAVE.value
-    elif method in ["POST", "PUT", "DELETE"]:
-        try:
-            action = SystemAction[method].value
-        except KeyError:
-            action = None
+    action = determine_system_action(path, method)
 
     if action:
         try:
@@ -84,15 +91,15 @@ async def log_system_actions(request: Request, call_next):
                     record_id=None,
                     old_values=None,
                     new_values=None,
-                    ip_address=None,
-                    user_agent=None,
+                    ip_address=str(request.client.host) if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
                     timestamp=datetime.now(timezone.utc)
                 )
                 session.add(system_log)
                 await session.commit()
                 logger.info(f"📋 Logged action: {action} by user_id={user_id}")
         except Exception as e:
-            logger.error(f"⚠️ Failed to log action: {e}")
+            logger.error(f"⚠️ Failed to log action: {str(e)}")
 
     return response
 

@@ -1,5 +1,5 @@
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -13,7 +13,10 @@ class OvertimeRecordBase(BaseModel):
     approved_at: Optional[datetime] = None
 
 class OvertimeRecordCreate(OvertimeRecordBase):
-    pass
+    user_id: int
+    date: date
+    overtime_hours: float
+    description: Optional[str] = None
 
 class OvertimeRecordUpdate(BaseModel):
     overtime_hours: Optional[float] = Field(None, gt=0)

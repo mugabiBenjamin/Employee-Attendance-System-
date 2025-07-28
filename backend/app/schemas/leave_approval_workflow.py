@@ -1,7 +1,7 @@
-
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
+from app.core.enums import LeaveRequestStatus
 
 class LeaveApprovalWorkflowBase(BaseModel):
     leave_id: int
@@ -12,7 +12,10 @@ class LeaveApprovalWorkflowBase(BaseModel):
     action_taken_at: Optional[datetime] = None
 
 class LeaveApprovalWorkflowCreate(LeaveApprovalWorkflowBase):
-    pass
+    request_id: int
+    approver_id: int
+    status: LeaveRequestStatus
+    comments: Optional[str] = None
 
 class LeaveApprovalWorkflowUpdate(BaseModel):
     status: Optional[str] = None
@@ -22,5 +25,6 @@ class LeaveApprovalWorkflowUpdate(BaseModel):
 class LeaveApprovalWorkflowOut(LeaveApprovalWorkflowBase):
     workflow_id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)

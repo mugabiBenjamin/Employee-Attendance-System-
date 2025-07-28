@@ -3,41 +3,19 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.user_roles import UserRoles
 from app.models.users import Users
 from app.models.roles import Roles
 from app.models.system_logs import SystemLogs
+from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.exceptions import UserNotFoundError, RoleNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
 
-class UserRoleCreateInternal(BaseModel):
-    user_id: int
-    role_id: int
-    is_active: bool = True
-
-    model_config = ConfigDict(from_attributes=True)
-
-class UserRoleUpdateInternal(BaseModel):
-    role_id: Optional[int] = None
-    is_active: Optional[bool] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-class UserRoleOut(BaseModel):
-    user_role_id: int
-    user_id: int
-    role_id: int
-    assigned_by: Optional[int]
-    is_active: bool
-    assigned_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-async def create_user_role(db: AsyncSession, user_role: UserRoleCreateInternal, current_user: Users) -> UserRoleOut:
+async def create_user_role(db: AsyncSession, user_role: UserRoleCreate, current_user: Users) -> UserRoleOut:
     """
     Assign a role to a user with validation and logging.
     """
@@ -50,10 +28,7 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreateInternal, 
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         # Validate role
         query = select(Roles).where(
@@ -63,16 +38,14 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreateInternal, 
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Role not found"
-            )
+            raise RoleNotFoundError(detail="Role not found")
 
         # Check for existing assignment
         query = select(UserRoles).where(
             UserRoles.user_id == user_role.user_id,
             UserRoles.role_id == user_role.role_id,
-            UserRoles.is_active == True
+            UserRoles.is_active == True,
+            UserRoles.deleted_at == None
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
@@ -83,9 +56,12 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreateInternal, 
 
         # Create user-role assignment
         db_user_role = UserRoles(
-            **user_role.model_dump(),
+            user_id=user_role.user_id,
+            role_id=user_role.role_id,
             assigned_by=current_user.user_id,
-            assigned_at=datetime.now(timezone.utc)
+            is_active=user_role.is_active,
+            assigned_at=datetime.now(timezone.utc),
+            deleted_at=None
         )
         db.add(db_user_role)
         await db.commit()
@@ -94,7 +70,7 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreateInternal, 
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.ASSIGN_ROLE,
+            action=SystemAction.INSERT,
             table_affected="user_roles",
             record_id=db_user_role.user_role_id,
             old_values=None,
@@ -124,16 +100,22 @@ async def get_user_role_by_id(db: AsyncSession, user_role_id: int) -> Optional[U
     try:
         query = select(UserRoles).where(
             UserRoles.user_role_id == user_role_id,
-            UserRoles.is_active == True
+            UserRoles.is_active == True,
+            UserRoles.deleted_at == None
         )
         result = await db.execute(query)
         user_role = result.scalar_one_or_none()
 
         if not user_role:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User role assignment not found"
+            )
 
         return UserRoleOut.model_validate(user_role)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving user role assignment {user_role_id}: {str(e)}")
         raise HTTPException(
@@ -153,14 +135,12 @@ async def get_user_roles(db: AsyncSession, user_id: int, skip: int = 0, limit: i
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         query = select(UserRoles).where(
             UserRoles.user_id == user_id,
-            UserRoles.is_active == True
+            UserRoles.is_active == True,
+            UserRoles.deleted_at == None
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         user_roles = result.scalars().all()
@@ -177,7 +157,7 @@ async def get_user_roles(db: AsyncSession, user_id: int, skip: int = 0, limit: i
             detail="Error retrieving role assignments"
         )
 
-async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update: UserRoleUpdateInternal, current_user: Users) -> UserRoleOut:
+async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update: UserRoleUpdate, current_user: Users) -> UserRoleOut:
     """
     Update a user-role assignment with validation and logging.
     """
@@ -185,7 +165,8 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
         # Retrieve user-role assignment
         query = select(UserRoles).where(
             UserRoles.user_role_id == user_role_id,
-            UserRoles.is_active == True
+            UserRoles.is_active == True,
+            UserRoles.deleted_at == None
         )
         result = await db.execute(query)
         db_user_role = result.scalar_one_or_none()
@@ -196,8 +177,19 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
                 detail="User role assignment not found"
             )
 
-        # Validate role if updated
+        # Validate user if updated
         update_data = user_role_update.model_dump(exclude_none=True)
+        if "user_id" in update_data:
+            query = select(Users).where(
+                Users.user_id == update_data["user_id"],
+                Users.is_active == True,
+                Users.deleted_at == None
+            )
+            result = await db.execute(query)
+            if not result.scalar_one_or_none():
+                raise UserNotFoundError(detail="User not found")
+
+        # Validate role if updated
         if "role_id" in update_data:
             query = select(Roles).where(
                 Roles.role_id == update_data["role_id"],
@@ -206,17 +198,15 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Role not found"
-                )
+                raise RoleNotFoundError(detail="Role not found")
 
             # Check for existing assignment
             query = select(UserRoles).where(
-                UserRoles.user_id == db_user_role.user_id,
+                UserRoles.user_id == (update_data.get("user_id", db_user_role.user_id)),
                 UserRoles.role_id == update_data["role_id"],
                 UserRoles.user_role_id != user_role_id,
-                UserRoles.is_active == True
+                UserRoles.is_active == True,
+                UserRoles.deleted_at == None
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
@@ -232,7 +222,7 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
         for key, value in update_data.items():
             setattr(db_user_role, key, value)
 
-        db_user_role.assigned_at = datetime.now(timezone.utc)
+        db_user_role.updated_at = datetime.now(timezone.utc)
         db.add(db_user_role)
         await db.commit()
         await db.refresh(db_user_role)
@@ -240,7 +230,7 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE_ROLE_ASSIGNMENT,
+            action=SystemAction.UPDATE,
             table_affected="user_roles",
             record_id=user_role_id,
             old_values=old_values,
@@ -270,7 +260,8 @@ async def delete_user_role(db: AsyncSession, user_role_id: int, current_user: Us
     try:
         query = select(UserRoles).where(
             UserRoles.user_role_id == user_role_id,
-            UserRoles.is_active == True
+            UserRoles.is_active == True,
+            UserRoles.deleted_at == None
         )
         result = await db.execute(query)
         db_user_role = result.scalar_one_or_none()
@@ -282,13 +273,14 @@ async def delete_user_role(db: AsyncSession, user_role_id: int, current_user: Us
             )
 
         db_user_role.is_active = False
+        db_user_role.deleted_at = datetime.now(timezone.utc)
         db.add(db_user_role)
         await db.commit()
 
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE_ROLE_ASSIGNMENT,
+            action=SystemAction.DELETE,
             table_affected="user_roles",
             record_id=user_role_id,
             old_values=db_user_role.__dict__,

@@ -8,7 +8,9 @@ class RoleBase(BaseModel):
     permissions: dict = {}
 
 class RoleCreate(RoleBase):
-    pass
+    role_name: str
+    description: Optional[str] = None
+    permissions: dict = {}
 
 class RoleUpdate(BaseModel):
     role_name: Optional[str] = Field(None, max_length=50)
@@ -17,6 +19,10 @@ class RoleUpdate(BaseModel):
 
 class RoleOut(RoleBase):
     role_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    description: Optional[str]
+    permissions: dict
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)

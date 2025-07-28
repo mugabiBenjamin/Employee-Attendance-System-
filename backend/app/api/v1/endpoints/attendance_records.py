@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import AsyncGenerator, List, Optional
-from pydantic import BaseModel, ConfigDict
+from typing import List, Optional
 from datetime import datetime, timezone, date
-from app.core.database import AsyncSessionLocal
+from app.core.database import get_db
 from app.models.attendance_records import AttendanceRecords
 from app.models.time_corrections import TimeCorrections
-from app.models.overtime_records import OvertimeRecords
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
@@ -15,14 +15,16 @@ from app.core.permissions import check_permissions
 from app.core.security import get_current_active_user
 from app.core.config import settings
 from app.core.enums import Permission
+from app.schemas.attendance_record import AttendanceRecordOut
+from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionOut
+from app.schemas.attendance_summary import AttendanceSummaryOut
 import logging
-from fastapi.responses import FileResponse
 import csv
 import io
 import os
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 
 logger = logging.getLogger(__name__)
@@ -30,70 +32,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/attendance-records", tags=["Attendance Records"])
 
 class ClockInOut(BaseModel):
-    """Schema for clock-in/out requests."""
     action: str  # 'clock_in' or 'clock_out'
-
     model_config = ConfigDict(from_attributes=True)
-
-class AttendanceRecordOut(BaseModel):
-    """Schema for attendance record output."""
-    record_id: int
-    user_id: int
-    clock_in_time: datetime
-    clock_out_time: Optional[datetime]
-    created_at: datetime
-    updated_at: datetime
-    is_active: bool
-
-    model_config = ConfigDict(from_attributes=True)
-
-class TimeCorrectionCreate(BaseModel):
-    """Schema for creating a time correction request."""
-    record_id: int
-    corrected_clock_in: Optional[datetime]
-    corrected_clock_out: Optional[datetime]
-    reason: str
-
-    model_config = ConfigDict(from_attributes=True)
-
-class TimeCorrectionOut(BaseModel):
-    """Schema for time correction output."""
-    correction_id: int
-    record_id: int
-    user_id: int
-    corrected_clock_in: Optional[datetime]
-    corrected_clock_out: Optional[datetime]
-    reason: str
-    status: str
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-class AttendanceSummary(BaseModel):
-    """Schema for attendance summary output."""
-    user_id: int
-    total_hours: float
-    overtime_hours: float
-    period_start: date
-    period_end: date
-
-    model_config = ConfigDict(from_attributes=True)
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to provide an async database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {str(e)}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
 
 async def is_manager_or_hr_or_admin(db: AsyncSession, user: Users) -> bool:
-    """Check if the user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -113,7 +55,6 @@ async def clock_in_out(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> AttendanceRecordOut:
-    """Record a clock-in or clock-out action for the current user."""
     try:
         if clock_data.action not in ["clock_in", "clock_out"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action")
@@ -171,7 +112,6 @@ async def get_attendance_history(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[AttendanceRecordOut]:
-    """Get paginated attendance history for the current user."""
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
@@ -195,10 +135,9 @@ async def request_time_correction(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> TimeCorrectionOut:
-    """Submit a time correction request for an attendance record."""
     try:
         query = select(AttendanceRecords).where(
-            AttendanceRecords.record_id == correction.record_id,
+            AttendanceRecords.record_id == correction.attendance_id,
             AttendanceRecords.user_id == current_user.user_id,
             AttendanceRecords.is_active == True
         )
@@ -208,7 +147,7 @@ async def request_time_correction(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance record not found")
 
         db_correction = TimeCorrections(
-            record_id=correction.record_id,
+            record_id=correction.attendance_id,
             user_id=current_user.user_id,
             corrected_clock_in=correction.corrected_clock_in,
             corrected_clock_out=correction.corrected_clock_out,
@@ -221,13 +160,13 @@ async def request_time_correction(
         await db.commit()
         await db.refresh(db_correction)
 
-        logger.info(f"Time correction requested for record_id: {correction.record_id}, user_id: {current_user.user_id}")
+        logger.info(f"Time correction requested for record_id: {correction.attendance_id}, user_id: {current_user.user_id}")
         return TimeCorrectionOut.model_validate(db_correction)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error requesting time correction for record_id {correction.record_id}: {str(e)}")
+        logger.error(f"Error requesting time correction for record_id {correction.attendance_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error requesting time correction")
 
 @router.get("/time-corrections", response_model=List[TimeCorrectionOut], summary="Get time correction requests", description="Retrieve time correction requests for a user or team (manager/HR/admin).")
@@ -238,7 +177,6 @@ async def get_time_corrections(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[TimeCorrectionOut]:
-    """Get paginated time correction requests for a user or team."""
     try:
         if user_id and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view others' corrections")
@@ -268,7 +206,6 @@ async def approve_reject_time_correction(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> TimeCorrectionOut:
-    """Approve or reject a time correction request."""
     try:
         has_permission = await check_permissions([Permission.APPROVE_TIME_CORRECTIONS.value], current_user, db)
         if not has_permission and not await is_manager_or_hr_or_admin(db, current_user):
@@ -313,15 +250,14 @@ async def approve_reject_time_correction(
         logger.error(f"Error processing time correction {correction_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing time correction")
 
-@router.get("/summary", response_model=AttendanceSummary, summary="Get attendance summary", description="Get monthly attendance summary for a user or team (manager/HR/admin).")
+@router.get("/summary", response_model=List[AttendanceSummaryOut], summary="Get attendance summary", description="Get monthly attendance summary for a user or team (manager/HR/admin).")
 async def get_attendance_summary(
     user_id: Optional[int] = None,
     start_date: date = date.today().replace(day=1),
     end_date: date = date.today(),
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
-) -> AttendanceSummary:
-    """Get attendance summary for a user or team for a specified period."""
+) -> List[AttendanceSummaryOut]:
     try:
         if user_id and not await is_manager_or_hr_or_admin(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view others' summaries")
@@ -329,36 +265,42 @@ async def get_attendance_summary(
         target_user_id = user_id or current_user.user_id
 
         query = select(
-            func.sum(func.extract('epoch', AttendanceRecords.clock_out_time - AttendanceRecords.clock_in_time) / 3600)
+            AttendanceRecords.user_id,
+            Users.employee_id,
+            func.concat(Users.first_name, ' ', Users.last_name).label('full_name'),
+            AttendanceRecords.date,
+            AttendanceRecords.status,
+            AttendanceRecords.total_hours,
+            AttendanceRecords.overtime_hours,
+            AttendanceRecords.clock_in_time,
+            AttendanceRecords.clock_out_time
+        ).join(
+            Users, Users.user_id == AttendanceRecords.user_id
         ).where(
             AttendanceRecords.user_id == target_user_id,
             AttendanceRecords.clock_out_time != None,
             AttendanceRecords.clock_in_time >= start_date,
             AttendanceRecords.clock_out_time <= end_date,
-            AttendanceRecords.is_active == True
+            AttendanceRecords.is_active == True,
+            Users.is_active == True,
+            Users.deleted_at == None
         )
-        result = await db.execute(query)
-        total_hours = result.scalar() or 0.0
 
-        query = select(
-            func.sum(func.extract('epoch', OvertimeRecords.duration) / 3600)
-        ).where(
-            OvertimeRecords.user_id == target_user_id,
-            OvertimeRecords.start_time >= start_date,
-            OvertimeRecords.end_time <= end_date,
-            OvertimeRecords.is_active == True
-        )
         result = await db.execute(query)
-        overtime_hours = result.scalar() or 0.0
+        records = result.fetchall()
 
         logger.info(f"Attendance summary retrieved for user_id: {target_user_id}")
-        return AttendanceSummary(
-            user_id=target_user_id,
-            total_hours=total_hours,
-            overtime_hours=overtime_hours,
-            period_start=start_date,
-            period_end=end_date
-        )
+        return [AttendanceSummaryOut(
+            user_id=record.user_id,
+            employee_id=record.employee_id,
+            full_name=record.full_name,
+            date=record.date,
+            status=record.status,
+            total_hours=str(record.total_hours) if record.total_hours is not None else None,
+            overtime_hours=str(record.overtime_hours) if record.overtime_hours is not None else None,
+            clock_in_time=record.clock_in_time,
+            clock_out_time=record.clock_out_time
+        ) for record in records]
 
     except HTTPException:
         raise
@@ -373,7 +315,6 @@ async def export_attendance_csv(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> FileResponse:
-    """Export attendance history as a CSV file."""
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
@@ -420,7 +361,6 @@ async def export_attendance_pdf(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> FileResponse:
-    """Export attendance history as a PDF file."""
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,

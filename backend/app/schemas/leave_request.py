@@ -1,7 +1,7 @@
-
 from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
+from app.core.enums import LeaveRequestStatus
 
 class LeaveRequestBase(BaseModel):
     leave_type: str
@@ -15,6 +15,11 @@ class LeaveRequestBase(BaseModel):
 
 class LeaveRequestCreate(LeaveRequestBase):
     user_id: int
+    leave_type: str
+    start_date: date
+    end_date: date
+    reason: Optional[str] = None
+    status: LeaveRequestStatus = LeaveRequestStatus.UNDER_REVIEW
 
 class LeaveRequestUpdate(BaseModel):
     leave_type: Optional[str] = None

@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import AsyncGenerator, List, Optional
-from pydantic import BaseModel, ConfigDict
+from typing import List
 from datetime import datetime, timezone
-from app.core.database import AsyncSessionLocal
+from app.core.database import get_db
 from app.models.departments import Departments
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
@@ -13,51 +12,14 @@ from app.core.config import settings
 from app.core.permissions import check_permissions
 from app.core.security import get_current_active_user
 from app.core.enums import Permission
+from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentOut
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/departments", tags=["Departments"])
 
-class DepartmentCreate(BaseModel):
-    """Schema for creating a new department."""
-    name: str
-    description: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-class DepartmentUpdate(BaseModel):
-    """Schema for updating an existing department."""
-    name: Optional[str] = None
-    description: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-class DepartmentOut(BaseModel):
-    """Schema for department output."""
-    department_id: int
-    name: str
-    description: Optional[str]
-    created_at: datetime
-    updated_at: datetime
-    is_active: bool
-
-    model_config = ConfigDict(from_attributes=True)
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to provide an async database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {str(e)}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
 async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
-    """Check if the user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -77,13 +39,12 @@ async def create_new_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> DepartmentOut:
-    """Create a new department in the system."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create departments")
 
-        query = select(Departments).where(Departments.name == department.name, Departments.is_active == True)
+        query = select(Departments).where(Departments.department_name == department.department_name, Departments.is_active == True)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department name already exists")
@@ -98,7 +59,7 @@ async def create_new_department(
         await db.commit()
         await db.refresh(db_department)
 
-        logger.info(f"Department created, department_id: {db_department.department_id}, name: {db_department.name}")
+        logger.info(f"Department created, department_id: {db_department.department_id}, name: {db_department.department_name}")
         return DepartmentOut.model_validate(db_department)
 
     except HTTPException:
@@ -113,7 +74,6 @@ async def read_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> DepartmentOut:
-    """Get a specific department by its ID."""
     try:
         has_permission = await check_permissions([Permission.VIEW_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
@@ -146,7 +106,6 @@ async def read_departments(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[DepartmentOut]:
-    """Get a paginated list of all departments."""
     try:
         has_permission = await check_permissions([Permission.VIEW_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
@@ -175,7 +134,6 @@ async def update_existing_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> DepartmentOut:
-    """Update an existing department's information."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
@@ -193,8 +151,8 @@ async def update_existing_department(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
         update_data = department_update.model_dump(exclude_none=True)
-        if "name" in update_data and update_data["name"] != department.name:
-            query = select(Departments).where(Departments.name == update_data["name"], Departments.is_active == True)
+        if "department_name" in update_data and update_data["department_name"] != department.department_name:
+            query = select(Departments).where(Departments.department_name == update_data["department_name"], Departments.is_active == True)
             result = await db.execute(query)
             if result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department name already exists")
@@ -222,7 +180,6 @@ async def delete_existing_department(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """Soft delete a department from the system."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_DEPARTMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):

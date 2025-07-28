@@ -1,4 +1,3 @@
-
 from datetime import datetime, time
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
@@ -13,7 +12,10 @@ class ShiftPatternBase(BaseModel):
     is_active: bool = True
 
 class ShiftPatternCreate(ShiftPatternBase):
-    pass
+    shift_name: str
+    start_time: str
+    end_time: str
+    description: Optional[str] = None
 
 class ShiftPatternUpdate(BaseModel):
     pattern_name: Optional[str] = Field(None, max_length=100)
@@ -27,5 +29,6 @@ class ShiftPatternUpdate(BaseModel):
 class ShiftPatternOut(ShiftPatternBase):
     pattern_id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)

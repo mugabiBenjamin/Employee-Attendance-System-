@@ -3,28 +3,18 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.employee_emergency_contacts import EmployeeEmergencyContacts
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
-from app.schemas.employee_emergency_contact import EmergencyContactCreate, EmergencyContactUpdate, EmergencyContactOut
+from app.schemas.employee_emergency_contact import EmployeeEmergencyContactCreate, EmployeeEmergencyContactUpdate, EmployeeEmergencyContactOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.exceptions import UserNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
 
-class EmergencyContactCreateInternal(BaseModel):
-    employee_id: int
-    contact_name: str
-    relationship: str
-    phone_number: str
-    alternate_phone_number: Optional[str] = None
-    email: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-async def create_emergency_contact(db: AsyncSession, contact: EmergencyContactCreate, current_user: Users) -> EmergencyContactOut:
+async def create_emergency_contact(db: AsyncSession, contact: EmployeeEmergencyContactCreate, current_user: Users) -> EmployeeEmergencyContactOut:
     """
     Create a new emergency contact for an employee with validation and logging.
     """
@@ -37,14 +27,12 @@ async def create_emergency_contact(db: AsyncSession, contact: EmergencyContactCr
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee not found"
-            )
+            raise UserNotFoundError(detail="Employee not found")
 
         # Create emergency contact
         db_contact = EmployeeEmergencyContacts(
-            **EmergencyContactCreateInternal(**contact.model_dump()).model_dump(),
+            user_id=contact.employee_id,  # Map employee_id to user_id
+            **EmployeeEmergencyContactCreate(**contact.model_dump(exclude={'employee_id'})).model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -55,7 +43,7 @@ async def create_emergency_contact(db: AsyncSession, contact: EmergencyContactCr
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.EMERGENCY_CONTACT_CREATED,
+            action=SystemAction.INSERT,
             table_affected="employee_emergency_contacts",
             record_id=db_contact.contact_id,
             old_values=None,
@@ -66,8 +54,8 @@ async def create_emergency_contact(db: AsyncSession, contact: EmergencyContactCr
         db.add(system_log)
         await db.commit()
 
-        logger.info(f"Emergency contact created, contact_id: {db_contact.contact_id}, employee_id: {contact.employee_id}")
-        return EmergencyContactOut.model_validate(db_contact)
+        logger.info(f"Emergency contact created, contact_id: {db_contact.contact_id}, user_id: {contact.employee_id}")
+        return EmployeeEmergencyContactOut.model_validate(db_contact)
 
     except HTTPException:
         raise
@@ -78,7 +66,7 @@ async def create_emergency_contact(db: AsyncSession, contact: EmergencyContactCr
             detail="Error creating emergency contact"
         )
 
-async def get_emergency_contact_by_id(db: AsyncSession, contact_id: int) -> Optional[EmergencyContactOut]:
+async def get_emergency_contact_by_id(db: AsyncSession, contact_id: int) -> Optional[EmployeeEmergencyContactOut]:
     """
     Retrieve an emergency contact by ID.
     """
@@ -92,10 +80,15 @@ async def get_emergency_contact_by_id(db: AsyncSession, contact_id: int) -> Opti
         contact = result.scalar_one_or_none()
 
         if not contact:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Emergency contact not found"
+            )
 
-        return EmergencyContactOut.model_validate(contact)
+        return EmployeeEmergencyContactOut.model_validate(contact)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving emergency contact {contact_id}: {str(e)}")
         raise HTTPException(
@@ -103,7 +96,7 @@ async def get_emergency_contact_by_id(db: AsyncSession, contact_id: int) -> Opti
             detail="Error retrieving emergency contact"
         )
 
-async def get_emergency_contacts_by_employee(db: AsyncSession, employee_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[EmergencyContactOut]:
+async def get_emergency_contacts_by_employee(db: AsyncSession, employee_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[EmployeeEmergencyContactOut]:
     """
     Retrieve a list of emergency contacts for an employee with pagination.
     """
@@ -115,32 +108,29 @@ async def get_emergency_contacts_by_employee(db: AsyncSession, employee_id: int,
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee not found"
-            )
+            raise UserNotFoundError(detail="Employee not found")
 
         query = select(EmployeeEmergencyContacts).where(
-            EmployeeEmergencyContacts.employee_id == employee_id,
+            EmployeeEmergencyContacts.user_id == employee_id,
             EmployeeEmergencyContacts.is_active == True,
             EmployeeEmergencyContacts.deleted_at == None
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         contacts = result.scalars().all()
 
-        logger.info(f"Retrieved {len(contacts)} emergency contacts for employee_id: {employee_id}")
-        return [EmergencyContactOut.model_validate(contact) for contact in contacts]
+        logger.info(f"Retrieved {len(contacts)} emergency contacts for user_id: {employee_id}")
+        return [EmployeeEmergencyContactOut.model_validate(contact) for contact in contacts]
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving emergency contacts for employee_id {employee_id}: {str(e)}")
+        logger.error(f"Error retrieving emergency contacts for user_id {employee_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving emergency contacts"
         )
 
-async def update_emergency_contact(db: AsyncSession, contact_id: int, contact_update: EmergencyContactUpdate, current_user: Users) -> EmergencyContactOut:
+async def update_emergency_contact(db: AsyncSession, contact_id: int, contact_update: EmployeeEmergencyContactUpdate, current_user: Users) -> EmployeeEmergencyContactOut:
     """
     Update an emergency contact with validation and logging.
     """
@@ -176,7 +166,7 @@ async def update_emergency_contact(db: AsyncSession, contact_id: int, contact_up
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.EMERGENCY_CONTACT_UPDATED,
+            action=SystemAction.UPDATE,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
             old_values=old_values,
@@ -188,7 +178,7 @@ async def update_emergency_contact(db: AsyncSession, contact_id: int, contact_up
         await db.commit()
 
         logger.info(f"Emergency contact updated, contact_id: {contact_id}")
-        return EmergencyContactOut.model_validate(db_contact)
+        return EmployeeEmergencyContactOut.model_validate(db_contact)
 
     except HTTPException:
         raise
@@ -225,7 +215,7 @@ async def delete_emergency_contact(db: AsyncSession, contact_id: int, current_us
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.EMERGENCY_CONTACT_DELETED,
+            action=SystemAction.DELETE,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
             old_values=db_contact.__dict__,

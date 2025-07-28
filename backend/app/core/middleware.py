@@ -8,51 +8,64 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Action mapping: (path_suffix, method) -> SystemAction
+ACTION_MAPPING = {
+    ("/auth/token", "POST"): SystemAction.LOGIN,
+    ("/auth/logout", "POST"): SystemAction.LOGOUT,
+    ("/attendance/clock_in", "POST"): SystemAction.CLOCK_IN,
+    ("/attendance/clock_out", "POST"): SystemAction.CLOCK_OUT,
+    ("/users/password", "PUT"): SystemAction.PASSWORD_CHANGE,
+    ("/users/me", "PUT"): SystemAction.PROFILE_UPDATE,
+    ("/users/export", "GET"): SystemAction.DATA_EXPORT,
+    ("/users/import", "POST"): SystemAction.DATA_IMPORT,
+    ("/users/roles", "POST"): SystemAction.ASSIGN_ROLE,
+    ("/users/roles", "DELETE"): SystemAction.REVOKE_ROLE,
+    ("/reports", "GET"): SystemAction.VIEW_REPORT,
+    ("/leave/approve", "POST"): SystemAction.APPROVE_LEAVE,
+    ("/leave/reject", "POST"): SystemAction.REJECT_LEAVE,
+    ("/departments", "POST"): SystemAction.CREATE_DEPARTMENT,
+    ("/departments", "DELETE"): SystemAction.DELETE_DEPARTMENT,
+}
+
+# Method-based fallback mapping for generic CRUD operations
+METHOD_FALLBACK = {
+    "POST": SystemAction.INSERT,
+    "PUT": SystemAction.UPDATE,
+    "DELETE": SystemAction.DELETE,
+}
+
+def determine_system_action(path: str, method: str) -> str | None:
+    """Determine the system action based on request path and method.
+    
+    Args:
+        path: The request path
+        method: The HTTP method
+        
+    Returns:
+        SystemAction value or None if no action should be logged
+    """
+    # Check for exact path matches first
+    for (path_suffix, mapped_method), action in ACTION_MAPPING.items():
+        if path.endswith(path_suffix) and method == mapped_method:
+            return action
+    
+    # Fallback to generic method-based actions for POST/PUT/DELETE
+    if method in METHOD_FALLBACK:
+        return METHOD_FALLBACK[method]
+    
+    return None
+
 def setup_middleware(app: FastAPI) -> None:
     """Setup middleware for logging system actions."""
     
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
         response = await call_next(request)
-        user_id = None
-        action = None
         
         # Determine the action based on request method and path
         path = request.url.path
         method = request.method
-        
-        if path.endswith("/auth/token") and method == "POST":
-            action = SystemAction.LOGIN
-        elif path.endswith("/auth/logout") and method == "POST":
-            action = SystemAction.LOGOUT
-        elif path.endswith("/attendance/clock_in") and method == "POST":
-            action = SystemAction.CLOCK_IN
-        elif path.endswith("/attendance/clock_out") and method == "POST":
-            action = SystemAction.CLOCK_OUT
-        elif path.endswith("/users/password") and method == "PUT":
-            action = SystemAction.PASSWORD_CHANGE
-        elif path.endswith("/users/me") and method == "PUT":
-            action = SystemAction.PROFILE_UPDATE
-        elif path.endswith("/users/export") and method == "GET":
-            action = SystemAction.DATA_EXPORT
-        elif path.endswith("/users/import") and method == "POST":
-            action = SystemAction.DATA_IMPORT
-        elif path.endswith("/users/roles") and method == "POST":
-            action = SystemAction.ASSIGN_ROLE
-        elif path.endswith("/users/roles") and method == "DELETE":
-            action = SystemAction.REVOKE_ROLE
-        elif path.endswith("/reports") and method == "GET":
-            action = SystemAction.VIEW_REPORT
-        elif path.endswith("/leave/approve") and method == "POST":
-            action = SystemAction.APPROVE_LEAVE
-        elif path.endswith("/leave/reject") and method == "POST":
-            action = SystemAction.REJECT_LEAVE
-        elif path.endswith("/departments") and method == "POST":
-            action = SystemAction.CREATE_DEPARTMENT
-        elif path.endswith("/departments") and method == "DELETE":
-            action = SystemAction.DELETE_DEPARTMENT
-        elif method in ["POST", "PUT", "DELETE"]:
-            action = SystemAction[method]  # Maps POST->INSERT, PUT->UPDATE, DELETE->DELETE
+        action = determine_system_action(path, method)
 
         if action:
             # Get user_id from request state if available

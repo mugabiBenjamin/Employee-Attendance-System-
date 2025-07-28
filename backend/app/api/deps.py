@@ -1,24 +1,49 @@
-from typing import AsyncGenerator, Optional
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.permissions import check_permissions
-from app.core.security import get_current_user
+from app.core.config import settings
+from app.core.enums import Permission
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
 from app.models.shift_assignments import ShiftAssignments
 from app.models.leave_policies import LeavePolicies
-from app.core.config import settings
-from app.core.enums import Permission
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
+from datetime import datetime
+from app.models.users import Users
+from app.models.shift_assignments import ShiftAssignments
+from app.models.leave_policies import LeavePolicies
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with get_db() as session:
-        yield session
+class UserOut(BaseModel):
+    user_id: int
+    email: str
+    first_name: str
+    last_name: str
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db)
+) -> Users:
+    # Placeholder for actual token validation logic
+    # This should include JWT decoding and user lookup
+    query = select(Users).where(Users.is_active == True)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    return user
 
 async def get_current_active_user(current_user: Users = Depends(get_current_user)) -> Users:
     if not current_user.is_active:
@@ -27,7 +52,7 @@ async def get_current_active_user(current_user: Users = Depends(get_current_user
 
 async def get_current_admin_user(
     current_user: Users = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db)
 ) -> Users:
     query = select(Users).join(UserRoles).join(Roles).where(
         Users.user_id == current_user.user_id,
@@ -36,7 +61,6 @@ async def get_current_admin_user(
         (Roles.role_name.in_(["Admin", "Super_Admin"]) | 
          Roles.permissions.contains('{"manage_users": true}') |
          Roles.permissions.contains('{"system_configuration": true}') |
-        #  Roles.permissions.contains('{"view_system_logs": true}') |
          Roles.permissions.contains('{"manage_departments": true}'))
     )
     result = await db.execute(query)
@@ -46,7 +70,7 @@ async def get_current_admin_user(
 
 async def get_current_super_admin_user(
     current_user: Users = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db)
 ) -> Users:
     query = select(Users).join(UserRoles).join(Roles).where(
         Users.user_id == current_user.user_id,
@@ -62,7 +86,7 @@ async def get_current_super_admin_user(
 
 async def get_current_manager_user(
     current_user: Users = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db)
 ) -> Users:
     query = select(Users).join(UserRoles).join(Roles).where(
         Users.user_id == current_user.user_id,
@@ -81,7 +105,7 @@ async def get_current_manager_user(
 
 async def get_current_hr_user(
     current_user: Users = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db)
 ) -> Users:
     query = select(Users).join(UserRoles).join(Roles).where(
         Users.user_id == current_user.user_id,
@@ -100,7 +124,7 @@ async def get_current_hr_user(
 
 async def is_manager_or_hr(
     current_user: Users = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db)
 ) -> bool:
     query = select(Users).join(UserRoles).join(Roles).where(
         Users.user_id == current_user.user_id,
@@ -118,7 +142,7 @@ async def validate_shift_or_leave(
     shift_assignment: Optional[ShiftAssignments] = None,
     leave_policy: Optional[LeavePolicies] = None,
     current_user: Users = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db)
 ) -> None:
     if not shift_assignment and not leave_policy:
         raise HTTPException(

@@ -1,4 +1,3 @@
-
 from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
@@ -12,7 +11,10 @@ class HolidayCalendarBase(BaseModel):
     year: int = Field(..., ge=2020, le=2050)
 
 class HolidayCalendarCreate(HolidayCalendarBase):
-    pass
+    holiday_name: str
+    date: date
+    description: Optional[str] = None
+    is_recurring: bool = False
 
 class HolidayCalendarUpdate(BaseModel):
     holiday_name: Optional[str] = Field(None, max_length=100)
@@ -25,5 +27,6 @@ class HolidayCalendarUpdate(BaseModel):
 class HolidayCalendarOut(HolidayCalendarBase):
     holiday_id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)

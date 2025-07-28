@@ -3,40 +3,19 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.user_departments import UserDepartments
 from app.models.users import Users
 from app.models.departments import Departments
 from app.models.system_logs import SystemLogs
+from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.exceptions import UserNotFoundError, DepartmentNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
 
-class UserDepartmentCreateInternal(BaseModel):
-    user_id: int
-    department_id: int
-    is_primary: bool = False
-
-    model_config = ConfigDict(from_attributes=True)
-
-class UserDepartmentUpdateInternal(BaseModel):
-    department_id: Optional[int] = None
-    is_primary: Optional[bool] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-class UserDepartmentOut(BaseModel):
-    user_department_id: int
-    user_id: int
-    department_id: int
-    is_primary: bool
-    assigned_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-async def create_user_department(db: AsyncSession, user_department: UserDepartmentCreateInternal, current_user: Users) -> UserDepartmentOut:
+async def create_user_department(db: AsyncSession, user_department: UserDepartmentCreate, current_user: Users) -> UserDepartmentOut:
     """
     Assign a user to a department with validation and logging.
     """
@@ -49,10 +28,7 @@ async def create_user_department(db: AsyncSession, user_department: UserDepartme
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         # Validate department
         query = select(Departments).where(
@@ -62,15 +38,14 @@ async def create_user_department(db: AsyncSession, user_department: UserDepartme
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Department not found"
-            )
+            raise DepartmentNotFoundError(detail="Department not found")
 
         # Check for existing assignment
         query = select(UserDepartments).where(
             UserDepartments.user_id == user_department.user_id,
-            UserDepartments.department_id == user_department.department_id
+            UserDepartments.department_id == user_department.department_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
@@ -83,7 +58,9 @@ async def create_user_department(db: AsyncSession, user_department: UserDepartme
         if user_department.is_primary:
             query = select(UserDepartments).where(
                 UserDepartments.user_id == user_department.user_id,
-                UserDepartments.is_primary == True
+                UserDepartments.is_primary == True,
+                UserDepartments.is_active == True,
+                UserDepartments.deleted_at == None
             )
             result = await db.execute(query)
             existing_primary = result.scalars().all()
@@ -93,8 +70,12 @@ async def create_user_department(db: AsyncSession, user_department: UserDepartme
 
         # Create user-department assignment
         db_user_department = UserDepartments(
-            **user_department.model_dump(),
-            assigned_at=datetime.now(timezone.utc)
+            user_id=user_department.user_id,
+            department_id=user_department.department_id,
+            is_primary=user_department.is_primary,
+            assigned_at=datetime.now(timezone.utc),
+            is_active=True,
+            deleted_at=None
         )
         db.add(db_user_department)
         await db.commit()
@@ -103,7 +84,7 @@ async def create_user_department(db: AsyncSession, user_department: UserDepartme
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.ASSIGN_DEPARTMENT,
+            action=SystemAction.INSERT,
             table_affected="user_departments",
             record_id=db_user_department.user_department_id,
             old_values=None,
@@ -132,16 +113,23 @@ async def get_user_department_by_id(db: AsyncSession, user_department_id: int) -
     """
     try:
         query = select(UserDepartments).where(
-            UserDepartments.user_department_id == user_department_id
+            UserDepartments.user_department_id == user_department_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
         )
         result = await db.execute(query)
         user_department = result.scalar_one_or_none()
 
         if not user_department:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User department assignment not found"
+            )
 
         return UserDepartmentOut.model_validate(user_department)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving user department assignment {user_department_id}: {str(e)}")
         raise HTTPException(
@@ -161,13 +149,12 @@ async def get_user_departments(db: AsyncSession, user_id: int, skip: int = 0, li
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         query = select(UserDepartments).where(
-            UserDepartments.user_id == user_id
+            UserDepartments.user_id == user_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         user_departments = result.scalars().all()
@@ -184,14 +171,16 @@ async def get_user_departments(db: AsyncSession, user_id: int, skip: int = 0, li
             detail="Error retrieving department assignments"
         )
 
-async def update_user_department(db: AsyncSession, user_department_id: int, user_department_update: UserDepartmentUpdateInternal, current_user: Users) -> UserDepartmentOut:
+async def update_user_department(db: AsyncSession, user_department_id: int, user_department_update: UserDepartmentUpdate, current_user: Users) -> UserDepartmentOut:
     """
     Update a user-department assignment with validation and logging.
     """
     try:
         # Retrieve user-department assignment
         query = select(UserDepartments).where(
-            UserDepartments.user_department_id == user_department_id
+            UserDepartments.user_department_id == user_department_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
         )
         result = await db.execute(query)
         db_user_department = result.scalar_one_or_none()
@@ -202,8 +191,19 @@ async def update_user_department(db: AsyncSession, user_department_id: int, user
                 detail="User department assignment not found"
             )
 
-        # Validate department if updated
+        # Validate user if updated
         update_data = user_department_update.model_dump(exclude_none=True)
+        if "user_id" in update_data:
+            query = select(Users).where(
+                Users.user_id == update_data["user_id"],
+                Users.is_active == True,
+                Users.deleted_at == None
+            )
+            result = await db.execute(query)
+            if not result.scalar_one_or_none():
+                raise UserNotFoundError(detail="User not found")
+
+        # Validate department if updated
         if "department_id" in update_data:
             query = select(Departments).where(
                 Departments.department_id == update_data["department_id"],
@@ -212,16 +212,15 @@ async def update_user_department(db: AsyncSession, user_department_id: int, user
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Department not found"
-                )
+                raise DepartmentNotFoundError(detail="Department not found")
 
             # Check for existing assignment
             query = select(UserDepartments).where(
-                UserDepartments.user_id == db_user_department.user_id,
+                UserDepartments.user_id == (update_data.get("user_id", db_user_department.user_id)),
                 UserDepartments.department_id == update_data["department_id"],
-                UserDepartments.user_department_id != user_department_id
+                UserDepartments.user_department_id != user_department_id,
+                UserDepartments.is_active == True,
+                UserDepartments.deleted_at == None
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
@@ -233,9 +232,11 @@ async def update_user_department(db: AsyncSession, user_department_id: int, user
         # If setting as primary, update existing primary assignments
         if "is_primary" in update_data and update_data["is_primary"]:
             query = select(UserDepartments).where(
-                UserDepartments.user_id == db_user_department.user_id,
+                UserDepartments.user_id == (update_data.get("user_id", db_user_department.user_id)),
                 UserDepartments.is_primary == True,
-                UserDepartments.user_department_id != user_department_id
+                UserDepartments.user_department_id != user_department_id,
+                UserDepartments.is_active == True,
+                UserDepartments.deleted_at == None
             )
             result = await db.execute(query)
             existing_primary = result.scalars().all()
@@ -250,7 +251,7 @@ async def update_user_department(db: AsyncSession, user_department_id: int, user
         for key, value in update_data.items():
             setattr(db_user_department, key, value)
 
-        db_user_department.assigned_at = datetime.now(timezone.utc)
+        db_user_department.updated_at = datetime.now(timezone.utc)
         db.add(db_user_department)
         await db.commit()
         await db.refresh(db_user_department)
@@ -258,7 +259,7 @@ async def update_user_department(db: AsyncSession, user_department_id: int, user
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE_DEPARTMENT_ASSIGNMENT,
+            action=SystemAction.UPDATE,
             table_affected="user_departments",
             record_id=user_department_id,
             old_values=old_values,
@@ -283,11 +284,13 @@ async def update_user_department(db: AsyncSession, user_department_id: int, user
 
 async def delete_user_department(db: AsyncSession, user_department_id: int, current_user: Users) -> None:
     """
-    Delete a user-department assignment with logging.
+    Soft delete a user-department assignment with logging.
     """
     try:
         query = select(UserDepartments).where(
-            UserDepartments.user_department_id == user_department_id
+            UserDepartments.user_department_id == user_department_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
         )
         result = await db.execute(query)
         db_user_department = result.scalar_one_or_none()
@@ -298,13 +301,15 @@ async def delete_user_department(db: AsyncSession, user_department_id: int, curr
                 detail="User department assignment not found"
             )
 
-        await db.delete(db_user_department)
+        db_user_department.is_active = False
+        db_user_department.deleted_at = datetime.now(timezone.utc)
+        db.add(db_user_department)
         await db.commit()
 
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE_DEPARTMENT_ASSIGNMENT,
+            action=SystemAction.DELETE,
             table_affected="user_departments",
             record_id=user_department_id,
             old_values=db_user_department.__dict__,
@@ -315,7 +320,7 @@ async def delete_user_department(db: AsyncSession, user_department_id: int, curr
         db.add(system_log)
         await db.commit()
 
-        logger.info(f"User department assignment deleted, user_department_id: {user_department_id}")
+        logger.info(f"User department assignment soft deleted, user_department_id: {user_department_id}")
 
     except HTTPException:
         raise

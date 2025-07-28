@@ -3,26 +3,16 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.leave_policies import LeavePolicies
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.leave_policy import LeavePolicyCreate, LeavePolicyUpdate, LeavePolicyOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.exceptions import LeavePolicyNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
-
-class LeavePolicyCreateInternal(BaseModel):
-    leave_type: str
-    description: Optional[str] = None
-    max_days: float
-    accrual_rate: Optional[float] = None
-    carryover_limit: Optional[float] = None
-    version: int = 1
-
-    model_config = ConfigDict(from_attributes=True)
 
 async def create_leave_policy(db: AsyncSession, policy: LeavePolicyCreate, current_user: Users) -> LeavePolicyOut:
     """
@@ -44,9 +34,18 @@ async def create_leave_policy(db: AsyncSession, policy: LeavePolicyCreate, curre
 
         # Create leave policy
         db_policy = LeavePolicies(
-            **LeavePolicyCreateInternal(**policy.model_dump()).model_dump(),
+            employee_type=policy.employee_type or "all",
+            leave_type=policy.leave_type,
+            annual_allocation=policy.max_days,
+            carry_forward_limit=policy.carryover_limit or 0,
+            max_consecutive_days=policy.max_days,
+            requires_approval=True,
+            approval_levels=1,
+            accrual_rate=policy.accrual_rate or 0,
+            effective_from=datetime.now(timezone.utc).date(),
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            updated_at=datetime.now(timezone.utc),
+            version=policy.version
         )
         db.add(db_policy)
         await db.commit()
@@ -55,7 +54,7 @@ async def create_leave_policy(db: AsyncSession, policy: LeavePolicyCreate, curre
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.LEAVE_POLICY_CREATED,
+            action=SystemAction.INSERT,
             table_affected="leave_policies",
             record_id=db_policy.policy_id,
             old_values=None,
@@ -92,10 +91,12 @@ async def get_leave_policy_by_id(db: AsyncSession, policy_id: int) -> Optional[L
         policy = result.scalar_one_or_none()
 
         if not policy:
-            return None
+            raise LeavePolicyNotFoundError()
 
         return LeavePolicyOut.model_validate(policy)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving leave policy {policy_id}: {str(e)}")
         raise HTTPException(
@@ -140,31 +141,13 @@ async def update_leave_policy(db: AsyncSession, policy_id: int, policy_update: L
         db_policy = result.scalar_one_or_none()
 
         if not db_policy:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave policy not found"
-            )
-
-        # Check for duplicate leave type if updated
-        update_data = policy_update.model_dump(exclude_none=True)
-        if "leave_type" in update_data:
-            query = select(LeavePolicies).where(
-                LeavePolicies.leave_type == update_data["leave_type"],
-                LeavePolicies.policy_id != policy_id,
-                LeavePolicies.is_active == True,
-                LeavePolicies.deleted_at == None
-            )
-            result = await db.execute(query)
-            if result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Leave policy type already exists"
-                )
+            raise LeavePolicyNotFoundError()
 
         # Store old values for logging
         old_values = db_policy.__dict__.copy()
 
-        # Apply updates and increment version
+        # Apply updates
+        update_data = policy_update.model_dump(exclude_none=True)
         for key, value in update_data.items():
             setattr(db_policy, key, value)
         db_policy.version += 1
@@ -176,7 +159,7 @@ async def update_leave_policy(db: AsyncSession, policy_id: int, policy_update: L
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.LEAVE_POLICY_UPDATED,
+            action=SystemAction.UPDATE,
             table_affected="leave_policies",
             record_id=policy_id,
             old_values=old_values,
@@ -213,10 +196,7 @@ async def delete_leave_policy(db: AsyncSession, policy_id: int, current_user: Us
         db_policy = result.scalar_one_or_none()
 
         if not db_policy:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave policy not found"
-            )
+            raise LeavePolicyNotFoundError()
 
         db_policy.is_active = False
         db_policy.deleted_at = datetime.now(timezone.utc)
@@ -225,7 +205,7 @@ async def delete_leave_policy(db: AsyncSession, policy_id: int, current_user: Us
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.LEAVE_POLICY_DELETED,
+            action=SystemAction.DELETE,
             table_affected="leave_policies",
             record_id=policy_id,
             old_values=db_policy.__dict__,

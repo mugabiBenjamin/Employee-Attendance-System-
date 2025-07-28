@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional, AsyncGenerator
-from pydantic import BaseModel, ConfigDict, Field
+from typing import List
 from datetime import datetime, timezone
-from app.core.database import AsyncSessionLocal
+from app.core.database import get_db
 from app.models.roles import Roles
 from app.models.users import Users
 from app.models.user_roles import UserRoles
@@ -12,48 +11,14 @@ from app.core.permissions import check_permissions
 from app.core.security import get_current_active_user
 from app.core.config import settings
 from app.core.enums import Permission
+from app.schemas.role import RoleCreate, RoleUpdate, RoleOut
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/roles", tags=["Roles"])
 
-class RoleCreate(BaseModel):
-    """Schema for creating a new role."""
-    role_name: str = Field(..., max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-    model_config = ConfigDict(from_attributes=True)
-
-class RoleUpdate(BaseModel):
-    """Schema for updating an existing role."""
-    role_name: Optional[str] = Field(None, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-    model_config = ConfigDict(from_attributes=True)
-
-class RoleOut(BaseModel):
-    """Schema for role output."""
-    role_id: int
-    role_name: str = Field(..., max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-    created_at: datetime
-    updated_at: datetime
-    is_active: bool
-    model_config = ConfigDict(from_attributes=True)
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to provide an async database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {str(e)}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
 async def is_admin_or_super_admin(db: AsyncSession, user: Users) -> bool:
-    """Check if user has Admin or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -73,7 +38,6 @@ async def create_role(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> RoleOut:
-    """Create a new role."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
         if not has_permission and not await is_admin_or_super_admin(db, current_user):
@@ -85,7 +49,9 @@ async def create_role(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role name already exists")
 
         db_role = Roles(
-            **role.model_dump(),
+            role_name=role.role_name,
+            description=role.description,
+            permissions=role.permissions,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
             is_active=True
@@ -109,7 +75,6 @@ async def read_role(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> RoleOut:
-    """Get a specific role by ID."""
     try:
         has_permission = await check_permissions([Permission.VIEW_ROLES.value], current_user, db)
         if not has_permission and not await is_admin_or_super_admin(db, current_user):
@@ -138,7 +103,6 @@ async def read_roles(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[RoleOut]:
-    """Get a paginated list of all roles."""
     try:
         has_permission = await check_permissions([Permission.VIEW_ROLES.value], current_user, db)
         if not has_permission and not await is_admin_or_super_admin(db, current_user):
@@ -164,7 +128,6 @@ async def update_role(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> RoleOut:
-    """Update an existing role."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
         if not has_permission and not await is_admin_or_super_admin(db, current_user):
@@ -207,7 +170,6 @@ async def delete_role(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """Soft delete a role."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
         if not has_permission and not await is_admin_or_super_admin(db, current_user):

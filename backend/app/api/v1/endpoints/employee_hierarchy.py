@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import AsyncGenerator, List, Optional
-from pydantic import BaseModel, ConfigDict
+from typing import List, Optional
 from datetime import datetime, timezone
-from app.core.database import AsyncSessionLocal
+from app.core.database import get_db
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.users import Users
 from app.models.user_roles import UserRoles
@@ -13,53 +12,14 @@ from app.core.permissions import check_permissions
 from app.core.security import get_current_active_user
 from app.core.config import settings
 from app.core.enums import Permission
+from app.schemas.employee_hierarchy import EmployeeHierarchyCreate, EmployeeHierarchyUpdate, EmployeeHierarchyOut
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/employee-hierarchy", tags=["Employee Hierarchy"])
 
-class EmployeeHierarchyCreate(BaseModel):
-    """Schema for creating a new employee hierarchy."""
-    employee_id: int
-    manager_id: int
-
-    model_config = ConfigDict(from_attributes=True)
-
-class EmployeeHierarchyUpdate(BaseModel):
-    """Schema for updating an existing employee hierarchy."""
-    employee_id: Optional[int] = None
-    manager_id: Optional[int] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-class EmployeeHierarchyOut(BaseModel):
-    """Schema for employee hierarchy output."""
-    hierarchy_id: int
-    employee_id: int
-    manager_id: int
-    created_at: datetime
-    updated_at: datetime
-    is_active: bool
-
-    model_config = ConfigDict(from_attributes=True)
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to provide an async database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {str(e)}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
 async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
-    """
-    Check if the user has HR, Admin, or Super_Admin role.
-    """
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -79,31 +39,24 @@ async def create_employee_hierarchy(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmployeeHierarchyOut:
-    """
-    Create a new employee hierarchy.
-    """
     try:
         has_permission = await check_permissions([Permission.MANAGE_EMPLOYEE_HIERARCHY.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create employee hierarchy")
 
-        # Verify employee exists
         query = select(Users).where(Users.user_id == hierarchy.employee_id, Users.is_active == True, Users.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
-        # Verify manager exists
         query = select(Users).where(Users.user_id == hierarchy.manager_id, Users.is_active == True, Users.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manager not found")
 
-        # Prevent self-reporting
         if hierarchy.employee_id == hierarchy.manager_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee cannot be their own manager")
 
-        # Check for existing hierarchy
         query = select(EmployeeHierarchy).where(EmployeeHierarchy.employee_id == hierarchy.employee_id, EmployeeHierarchy.is_active == True)
         result = await db.execute(query)
         if result.scalar_one_or_none():
@@ -134,9 +87,6 @@ async def read_employee_hierarchy(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmployeeHierarchyOut:
-    """
-    Get a specific employee hierarchy by its ID.
-    """
     try:
         has_permission = await check_permissions([Permission.VIEW_EMPLOYEE_HIERARCHY.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -170,9 +120,6 @@ async def read_employee_hierarchies(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[EmployeeHierarchyOut]:
-    """
-    Get a paginated list of employee hierarchies.
-    """
     try:
         has_permission = await check_permissions([Permission.VIEW_EMPLOYEE_HIERARCHY.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -201,9 +148,6 @@ async def update_employee_hierarchy(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmployeeHierarchyOut:
-    """
-    Update an existing employee hierarchy.
-    """
     try:
         has_permission = await check_permissions([Permission.MANAGE_EMPLOYEE_HIERARCHY.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -270,9 +214,6 @@ async def delete_employee_hierarchy(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """
-    Soft delete an employee hierarchy.
-    """
     try:
         has_permission = await check_permissions([Permission.MANAGE_EMPLOYEE_HIERARCHY.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):

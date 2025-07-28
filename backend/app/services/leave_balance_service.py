@@ -3,25 +3,17 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.leave_balances import LeaveBalances
 from app.models.leave_policies import LeavePolicies
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
-from app.schemas.leave_balance import LeaveBalanceOut
+from app.schemas.leave_balance import LeaveBalanceCreate, LeaveBalanceOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.exceptions import UserNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
-
-class LeaveBalanceUpdateInternal(BaseModel):
-    user_id: int
-    leave_type: str
-    balance: float
-    last_updated: datetime
-
-    model_config = ConfigDict(from_attributes=True)
 
 async def get_leave_balance(db: AsyncSession, user: Users, leave_type: Optional[str] = None) -> List[LeaveBalanceOut]:
     """
@@ -84,10 +76,7 @@ async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, 
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         # Validate leave type
         query = select(LeavePolicies).where(
@@ -114,19 +103,22 @@ async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, 
 
         if not db_balance:
             db_balance = LeaveBalances(
-                user_id=user_id,
-                leave_type=leave_type,
-                balance=0.0,
-                last_updated=datetime.now(timezone.utc),
+                **LeaveBalanceCreate(
+                    user_id=user_id,
+                    leave_type=leave_type,
+                    allocated_days=0,
+                    used_days=0,
+                    carried_forward=0,
+                    year=datetime.now(timezone.utc).year
+                ).model_dump(),
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
 
         # Update balance
-        old_balance = db_balance.balance
-        new_balance = max(0.0, db_balance.balance + balance_change)  # Prevent negative balance
-        db_balance.balance = new_balance
-        db_balance.last_updated = datetime.now(timezone.utc)
+        old_used_days = db_balance.used_days
+        new_used_days = max(0.0, db_balance.used_days - balance_change)  # Adjust used_days based on balance_change
+        db_balance.used_days = new_used_days
         db_balance.updated_at = datetime.now(timezone.utc)
         db.add(db_balance)
         await db.commit()
@@ -135,11 +127,11 @@ async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, 
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.LEAVE_BALANCE_UPDATED,
+            action=SystemAction.UPDATE,
             table_affected="leave_balances",
             record_id=db_balance.balance_id,
-            old_values={"balance": old_balance},
-            new_values={"balance": new_balance},
+            old_values={"used_days": old_used_days},
+            new_values={"used_days": new_used_days},
             ip_address=None,
             timestamp=datetime.now(timezone.utc)
         )

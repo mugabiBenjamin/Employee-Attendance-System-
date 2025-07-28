@@ -3,22 +3,16 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.employee_hierarchy import EmployeeHierarchyCreate, EmployeeHierarchyUpdate, EmployeeHierarchyOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.exceptions import UserNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
-
-class EmployeeHierarchyCreateInternal(BaseModel):
-    employee_id: int
-    manager_id: int
-
-    model_config = ConfigDict(from_attributes=True)
 
 async def create_employee_hierarchy(db: AsyncSession, hierarchy: EmployeeHierarchyCreate, current_user: Users) -> EmployeeHierarchyOut:
     """
@@ -34,10 +28,7 @@ async def create_employee_hierarchy(db: AsyncSession, hierarchy: EmployeeHierarc
         result = await db.execute(query)
         users = result.scalars().all()
         if len(users) != 2:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee or manager not found"
-            )
+            raise UserNotFoundError(detail="Employee or manager not found")
 
         # Check for existing hierarchy
         query = select(EmployeeHierarchy).where(
@@ -61,7 +52,8 @@ async def create_employee_hierarchy(db: AsyncSession, hierarchy: EmployeeHierarc
 
         # Create hierarchy
         db_hierarchy = EmployeeHierarchy(
-            **EmployeeHierarchyCreateInternal(**hierarchy.model_dump()).model_dump(),
+            **EmployeeHierarchyCreate(**hierarchy.model_dump()).model_dump(),
+            effective_from=datetime.now(timezone.utc).date(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -72,7 +64,7 @@ async def create_employee_hierarchy(db: AsyncSession, hierarchy: EmployeeHierarc
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.HIERARCHY_CREATED,
+            action=SystemAction.INSERT,
             table_affected="employee_hierarchy",
             record_id=db_hierarchy.hierarchy_id,
             old_values=None,
@@ -109,10 +101,15 @@ async def get_employee_hierarchy_by_id(db: AsyncSession, hierarchy_id: int) -> O
         hierarchy = result.scalar_one_or_none()
 
         if not hierarchy:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee hierarchy not found"
+            )
 
         return EmployeeHierarchyOut.model_validate(hierarchy)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving employee hierarchy {hierarchy_id}: {str(e)}")
         raise HTTPException(
@@ -172,10 +169,7 @@ async def update_employee_hierarchy(db: AsyncSession, hierarchy_id: int, hierarc
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Manager not found"
-                )
+                raise UserNotFoundError(detail="Manager not found")
 
             # Prevent self-reporting
             if update_data["manager_id"] == db_hierarchy.employee_id:
@@ -199,7 +193,7 @@ async def update_employee_hierarchy(db: AsyncSession, hierarchy_id: int, hierarc
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.HIERARCHY_UPDATED,
+            action=SystemAction.UPDATE,
             table_affected="employee_hierarchy",
             record_id=hierarchy_id,
             old_values=old_values,
@@ -248,7 +242,7 @@ async def delete_employee_hierarchy(db: AsyncSession, hierarchy_id: int, current
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.HIERARCHY_DELETED,
+            action=SystemAction.DELETE,
             table_affected="employee_hierarchy",
             record_id=hierarchy_id,
             old_values=db_hierarchy.__dict__,

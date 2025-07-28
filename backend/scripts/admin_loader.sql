@@ -1,3 +1,4 @@
+BEGIN;
 -- Insert admin user
 INSERT INTO users (
         email,
@@ -39,3 +40,4 @@ FROM users u,
     departments d
 WHERE u.email = 'admin@company.com'
     AND d.department_name = 'IT';
+COMMIT;

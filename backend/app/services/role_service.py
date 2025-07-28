@@ -3,40 +3,17 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.roles import Roles
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
+from app.schemas.role import RoleCreate, RoleUpdate, RoleOut
 from app.core.config import settings
 from app.core.enums import SystemAction
 import logging
 
 logger = logging.getLogger(__name__)
 
-class RoleCreateInternal(BaseModel):
-    role_name: str
-    description: Optional[str] = None
-    permissions: dict = {}
-    
-    model_config = ConfigDict(from_attributes=True)
-
-class RoleUpdateInternal(BaseModel):
-    role_name: Optional[str] = None
-    description: Optional[str] = None
-    permissions: Optional[dict] = None
-    
-    model_config = ConfigDict(from_attributes=True)
-
-class RoleOut(BaseModel):
-    role_id: int
-    role_name: str
-    description: Optional[str]
-    permissions: dict
-    created_at: datetime
-    
-    model_config = ConfigDict(from_attributes=True)
-
-async def create_role(db: AsyncSession, role: RoleCreateInternal, current_user: Users) -> RoleOut:
+async def create_role(db: AsyncSession, role: RoleCreate, current_user: Users) -> RoleOut:
     """
     Create a new role with validation and logging.
     """
@@ -71,8 +48,11 @@ async def create_role(db: AsyncSession, role: RoleCreateInternal, current_user: 
 
         # Create role
         db_role = Roles(
-            **role.model_dump(),
-            created_at=datetime.now(timezone.utc)
+            role_name=role.role_name,
+            description=role.description,
+            permissions=role.permissions,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(db_role)
         await db.commit()
@@ -81,7 +61,7 @@ async def create_role(db: AsyncSession, role: RoleCreateInternal, current_user: 
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.CREATE_ROLE,
+            action=SystemAction.INSERT,
             table_affected="roles",
             record_id=db_role.role_id,
             old_values=None,
@@ -118,10 +98,15 @@ async def get_role_by_id(db: AsyncSession, role_id: int) -> Optional[RoleOut]:
         role = result.scalar_one_or_none()
 
         if not role:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Role not found"
+            )
 
         return RoleOut.model_validate(role)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving role {role_id}: {str(e)}")
         raise HTTPException(
@@ -151,7 +136,7 @@ async def get_roles(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAU
             detail="Error retrieving roles"
         )
 
-async def update_role(db: AsyncSession, role_id: int, role_update: RoleUpdateInternal, current_user: Users) -> RoleOut:
+async def update_role(db: AsyncSession, role_id: int, role_update: RoleUpdate, current_user: Users) -> RoleOut:
     """
     Update a role with validation and logging.
     """
@@ -216,7 +201,7 @@ async def update_role(db: AsyncSession, role_id: int, role_update: RoleUpdateInt
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE_ROLE,
+            action=SystemAction.UPDATE,
             table_affected="roles",
             record_id=role_id,
             old_values=old_values,
@@ -265,7 +250,7 @@ async def delete_role(db: AsyncSession, role_id: int, current_user: Users) -> No
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE_ROLE,
+            action=SystemAction.DELETE,
             table_affected="roles",
             record_id=role_id,
             old_values=db_role.__dict__,

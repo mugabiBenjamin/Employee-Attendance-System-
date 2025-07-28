@@ -5,9 +5,8 @@ from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from fastapi import Depends, HTTPException
+from fastapi import HTTPException
 from app.core.config import settings
-from app.core.database import get_db
 from app.models.users import Users
 from app.core.exceptions import DatabaseError
 
@@ -47,8 +46,6 @@ async def send_email(email_data: EmailSchema) -> None:
         with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT) as server:
             if settings.MAIL_STARTTLS:
                 server.starttls()
-            if settings.MAIL_SSL_TLS:
-                server.starttls()
             server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
             server.send_message(msg)
 
@@ -62,7 +59,7 @@ async def send_leave_notification(
     start_date: str,
     end_date: str,
     status: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession
 ) -> None:
     """Send leave request notification email to user."""
     email = await get_user_email(user_id, db)
@@ -91,7 +88,7 @@ async def send_leave_notification(
 async def send_password_reset_email(
     user_id: int,
     reset_token: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession
 ) -> None:
     """Send password reset email to user."""
     email = await get_user_email(user_id, db)

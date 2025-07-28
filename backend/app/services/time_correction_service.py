@@ -3,7 +3,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.time_corrections import TimeCorrections
 from app.models.attendance_records import AttendanceRecords
 from app.models.users import Users
@@ -12,48 +11,16 @@ from app.models.system_logs import SystemLogs
 from app.core.mail import send_email, EmailSchema, get_user_email
 from app.core.config import settings
 from app.core.enums import SystemAction, CorrectionStatus
+from app.core.exceptions import UserNotFoundError
 import logging
+from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionOut, TimeCorrectionUpdate
 
 logger = logging.getLogger(__name__)
 
-class TimeCorrectionCreateInternal(BaseModel):
-    attendance_id: int
-    user_id: int
-    original_clock_in: datetime | None = None
-    original_clock_out: datetime | None = None
-    corrected_clock_in: datetime | None = None
-    corrected_clock_out: datetime | None = None
-    reason: str
-    status: CorrectionStatus = CorrectionStatus.DRAFT
-
-    model_config = ConfigDict(from_attributes=True)
-
-class TimeCorrectionUpdateInternal(BaseModel):
-    corrected_clock_in: datetime | None = None
-    corrected_clock_out: datetime | None = None
-    reason: str | None = None
-    status: CorrectionStatus | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-class TimeCorrectionOut(BaseModel):
-    correction_id: int
-    attendance_id: int
-    user_id: int
-    original_clock_in: datetime | None
-    original_clock_out: datetime | None
-    corrected_clock_in: datetime | None
-    corrected_clock_out: datetime | None
-    reason: str
-    status: CorrectionStatus
-    approved_by: int | None
-    approved_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-async def create_time_correction(db: AsyncSession, time_correction: TimeCorrectionCreateInternal, current_user: Users) -> TimeCorrectionOut:
+async def create_time_correction(db: AsyncSession, time_correction: TimeCorrectionCreate, current_user: Users) -> TimeCorrectionOut:
+    """
+    Create a new time correction with validation, logging, and email notification to manager.
+    """
     try:
         # Validate attendance record
         query = select(AttendanceRecords).where(
@@ -78,10 +45,7 @@ async def create_time_correction(db: AsyncSession, time_correction: TimeCorrecti
         result = await db.execute(query)
         user = result.scalar_one_or_none()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         # Validate time logic
         if time_correction.corrected_clock_in and time_correction.corrected_clock_out:
@@ -93,7 +57,14 @@ async def create_time_correction(db: AsyncSession, time_correction: TimeCorrecti
 
         # Create time correction
         db_time_correction = TimeCorrections(
-            **time_correction.model_dump(),
+            attendance_id=time_correction.attendance_id,
+            user_id=time_correction.user_id,
+            original_clock_in=time_correction.original_clock_in,
+            original_clock_out=time_correction.original_clock_out,
+            corrected_clock_in=time_correction.corrected_clock_in,
+            corrected_clock_out=time_correction.corrected_clock_out,
+            reason=time_correction.reason,
+            status=time_correction.status,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -129,7 +100,7 @@ async def create_time_correction(db: AsyncSession, time_correction: TimeCorrecti
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.TIME_CORRECTION_SUBMITTED,
+            action=SystemAction.INSERT,
             table_affected="time_corrections",
             record_id=db_time_correction.correction_id,
             old_values=None,
@@ -153,6 +124,9 @@ async def create_time_correction(db: AsyncSession, time_correction: TimeCorrecti
         )
 
 async def get_time_correction_by_id(db: AsyncSession, correction_id: int) -> Optional[TimeCorrectionOut]:
+    """
+    Retrieve a time correction by ID.
+    """
     try:
         query = select(TimeCorrections).where(
             TimeCorrections.correction_id == correction_id,
@@ -163,10 +137,15 @@ async def get_time_correction_by_id(db: AsyncSession, correction_id: int) -> Opt
         correction = result.scalar_one_or_none()
 
         if not correction:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Time correction not found"
+            )
 
         return TimeCorrectionOut.model_validate(correction)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving time correction {correction_id}: {str(e)}")
         raise HTTPException(
@@ -175,6 +154,9 @@ async def get_time_correction_by_id(db: AsyncSession, correction_id: int) -> Opt
         )
 
 async def get_user_time_corrections(db: AsyncSession, user_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[TimeCorrectionOut]:
+    """
+    Retrieve a list of time corrections for a user with pagination.
+    """
     try:
         query = select(Users).where(
             Users.user_id == user_id,
@@ -183,10 +165,7 @@ async def get_user_time_corrections(db: AsyncSession, user_id: int, skip: int = 
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         query = select(TimeCorrections).where(
             TimeCorrections.user_id == user_id,
@@ -208,7 +187,10 @@ async def get_user_time_corrections(db: AsyncSession, user_id: int, skip: int = 
             detail="Error retrieving time corrections"
         )
 
-async def update_time_correction(db: AsyncSession, correction_id: int, time_correction_update: TimeCorrectionUpdateInternal, current_user: Users) -> TimeCorrectionOut:
+async def update_time_correction(db: AsyncSession, correction_id: int, time_correction_update: TimeCorrectionUpdate, current_user: Users) -> TimeCorrectionOut:
+    """
+    Update a time correction with validation, logging, and email notification.
+    """
     try:
         # Retrieve time correction
         query = select(TimeCorrections).where(
@@ -274,7 +256,7 @@ async def update_time_correction(db: AsyncSession, correction_id: int, time_corr
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.TIME_CORRECTION_UPDATED,
+            action=SystemAction.UPDATE,
             table_affected="time_corrections",
             record_id=correction_id,
             old_values=old_values,
@@ -298,6 +280,9 @@ async def update_time_correction(db: AsyncSession, correction_id: int, time_corr
         )
 
 async def delete_time_correction(db: AsyncSession, correction_id: int, current_user: Users) -> None:
+    """
+    Soft delete a time correction with logging.
+    """
     try:
         query = select(TimeCorrections).where(
             TimeCorrections.correction_id == correction_id,
@@ -320,7 +305,7 @@ async def delete_time_correction(db: AsyncSession, correction_id: int, current_u
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.TIME_CORRECTION_DELETED,
+            action=SystemAction.DELETE,
             table_affected="time_corrections",
             record_id=correction_id,
             old_values=db_correction.__dict__,

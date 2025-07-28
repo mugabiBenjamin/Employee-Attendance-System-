@@ -16,6 +16,7 @@ class Users(Base):
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     phone = Column(String(20))
+    job_title = Column(String(100))
     hire_date = Column(Date, nullable=False)
     employee_type = Column(employee_type_enum, nullable=False, default='full_time')
     salary = Column(DECIMAL(12, 2))

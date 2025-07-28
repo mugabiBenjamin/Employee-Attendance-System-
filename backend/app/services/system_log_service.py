@@ -3,26 +3,14 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.system_logs import SystemLogs
 from app.models.users import Users
 from app.schemas.system_log import SystemLogCreate, SystemLogOut
 from app.core.config import settings
-from app.core.enums import SystemAction
+from app.core.exceptions import UserNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
-
-class SystemLogCreateInternal(BaseModel):
-    user_id: Optional[int] = None
-    action: SystemAction
-    table_affected: Optional[str] = None
-    record_id: Optional[int] = None
-    old_values: Optional[dict] = None
-    new_values: Optional[dict] = None
-    ip_address: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
 
 async def create_system_log(db: AsyncSession, log: SystemLogCreate, current_user: Optional[Users] = None) -> SystemLogOut:
     """
@@ -38,14 +26,18 @@ async def create_system_log(db: AsyncSession, log: SystemLogCreate, current_user
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
-                )
+                raise UserNotFoundError(detail="User not found")
 
         # Create system log
         db_log = SystemLogs(
-            **SystemLogCreateInternal(**log.model_dump()).model_dump(),
+            user_id=log.user_id,
+            action=log.action,
+            table_affected=log.table_affected,
+            record_id=log.record_id,
+            old_values=log.old_values,
+            new_values=log.new_values,
+            ip_address=log.ip_address,
+            user_agent=log.user_agent,
             timestamp=datetime.now(timezone.utc)
         )
         db.add(db_log)
@@ -76,10 +68,15 @@ async def get_system_log_by_id(db: AsyncSession, log_id: int) -> Optional[System
         system_log = result.scalar_one_or_none()
 
         if not system_log:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="System log not found"
+            )
 
         return SystemLogOut.model_validate(system_log)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving system log {log_id}: {str(e)}")
         raise HTTPException(
@@ -118,10 +115,7 @@ async def get_system_logs_by_user(db: AsyncSession, user_id: int, skip: int = 0,
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         query = select(SystemLogs).where(
             SystemLogs.user_id == user_id

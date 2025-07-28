@@ -8,15 +8,21 @@ class UserDepartmentBase(BaseModel):
     is_primary: bool = False
 
 class UserDepartmentCreate(UserDepartmentBase):
-    pass
+    user_id: int
+    department_id: int
+    is_primary: bool = False
 
-class UserDepartmentUpdate(UserDepartmentBase):
+class UserDepartmentUpdate(BaseModel):
     user_id: Optional[int] = None
     department_id: Optional[int] = None
     is_primary: Optional[bool] = None
 
 class UserDepartmentOut(UserDepartmentBase):
     user_department_id: int
+    user_id: int
+    department_id: int
+    is_primary: bool
     assigned_at: datetime
-
+    updated_at: Optional[datetime] = None
+    
     model_config = ConfigDict(from_attributes=True)

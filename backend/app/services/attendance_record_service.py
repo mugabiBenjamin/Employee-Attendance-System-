@@ -3,29 +3,18 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, date
-from pydantic import BaseModel, ConfigDict
 from app.models.attendance_records import AttendanceRecords
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.attendance_record import AttendanceRecordCreate, AttendanceRecordOut
 from app.core.config import settings
 from app.core.utils import calculate_total_hours, calculate_overtime_hours
-from app.core.enums import AttendanceStatus, SystemAction
+from app.core.enums import SystemAction
 import logging
 import csv
 import io
-from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
-
-class AttendanceRecordCreateInternal(BaseModel):
-    user_id: int
-    clock_in_time: datetime
-    ip_address: str
-    location: Optional[str] = None
-    status: AttendanceStatus = AttendanceStatus.PRESENT
-
-    model_config = ConfigDict(from_attributes=True)
 
 async def clock_in(db: AsyncSession, user: Users, ip_address: str, location: Optional[str] = None) -> AttendanceRecordOut:
     """
@@ -50,7 +39,7 @@ async def clock_in(db: AsyncSession, user: Users, ip_address: str, location: Opt
 
         # Create attendance record
         db_record = AttendanceRecords(
-            **AttendanceRecordCreateInternal(
+            **AttendanceRecordCreate(
                 user_id=user.user_id,
                 clock_in_time=datetime.now(timezone.utc),
                 ip_address=ip_address,
@@ -214,7 +203,7 @@ async def export_attendance_history_csv(db: AsyncSession, user: Users, start_dat
                 record.clock_out_time.strftime("%Y-%m-%d %H:%M:%S") if record.clock_out_time else "",
                 record.total_hours or 0,
                 record.overtime_hours or 0,
-                record.status.value
+                record.status
             ])
 
         logger.info(f"Exported attendance history to CSV for user_id: {user.user_id}")

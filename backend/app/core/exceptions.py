@@ -1,5 +1,4 @@
 from fastapi import HTTPException, status
-from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 class DatabaseError(SQLAlchemyError):
@@ -50,4 +49,9 @@ class RoleNotFoundError(HTTPException):
 class FileUploadError(HTTPException):
     """Custom exception for file upload errors."""
     def __init__(self, detail: str = "File upload failed", status_code: int = status.HTTP_400_BAD_REQUEST):
+        super().__init__(status_code=status_code, detail=detail)
+        
+class LeavePolicyNotFoundError(HTTPException):
+    """Custom exception for leave policy not found errors."""
+    def __init__(self, detail: str = "Leave policy not found", status_code: int = status.HTTP_404_NOT_FOUND):
         super().__init__(status_code=status_code, detail=detail)

@@ -1,6 +1,7 @@
 from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
+from app.core.enums import AttendanceStatus
 
 class AttendanceRecordBase(BaseModel):
     clock_in_time: datetime
@@ -15,6 +16,10 @@ class AttendanceRecordBase(BaseModel):
 
 class AttendanceRecordCreate(AttendanceRecordBase):
     user_id: int
+    clock_in_time: datetime
+    ip_address: str
+    location: Optional[str] = None
+    status: AttendanceStatus = AttendanceStatus.PRESENT
 
 class AttendanceRecordUpdate(BaseModel):
     clock_in_time: Optional[datetime] = None

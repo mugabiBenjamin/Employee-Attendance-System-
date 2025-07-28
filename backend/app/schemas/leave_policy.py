@@ -1,4 +1,3 @@
-
 from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
@@ -16,7 +15,12 @@ class LeavePolicyBase(BaseModel):
     effective_to: Optional[date] = None
 
 class LeavePolicyCreate(LeavePolicyBase):
-    pass
+    leave_type: str
+    description: Optional[str] = None
+    max_days: float
+    accrual_rate: Optional[float] = None
+    carryover_limit: Optional[float] = None
+    version: int = 1
 
 class LeavePolicyUpdate(BaseModel):
     annual_allocation: Optional[int] = Field(None, ge=0)

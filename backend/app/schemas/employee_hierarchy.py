@@ -10,7 +10,8 @@ class EmployeeHierarchyBase(BaseModel):
     effective_to: Optional[date] = None
 
 class EmployeeHierarchyCreate(EmployeeHierarchyBase):
-    pass
+    employee_id: int
+    manager_id: int
 
 class EmployeeHierarchyUpdate(BaseModel):
     manager_id: Optional[int] = None
@@ -21,5 +22,6 @@ class EmployeeHierarchyUpdate(BaseModel):
 class EmployeeHierarchyOut(EmployeeHierarchyBase):
     hierarchy_id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)

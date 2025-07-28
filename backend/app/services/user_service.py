@@ -3,27 +3,16 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.core.enums import SystemAction
+from app.core.exceptions import UserNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
-
-class UserCreateInternal(BaseModel):
-    email: str
-    password_hash: str
-    first_name: str
-    last_name: str
-    phone_number: Optional[str] = None
-    job_title: Optional[str] = None
-    is_active: bool = True
-
-    model_config = ConfigDict(from_attributes=True)
 
 async def create_user(db: AsyncSession, user: UserCreate, current_user: Users) -> UserOut:
     """
@@ -31,7 +20,11 @@ async def create_user(db: AsyncSession, user: UserCreate, current_user: Users) -
     """
     try:
         # Check for existing email
-        query = select(Users).where(Users.email == user.email)
+        query = select(Users).where(
+            Users.email == user.email,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(
@@ -39,13 +32,31 @@ async def create_user(db: AsyncSession, user: UserCreate, current_user: Users) -
                 detail="Email already registered"
             )
 
+        # Validate manager_id if provided
+        if user.manager_id:
+            query = select(Users).where(
+                Users.user_id == user.manager_id,
+                Users.is_active == True,
+                Users.deleted_at == None
+            )
+            result = await db.execute(query)
+            if not result.scalar_one_or_none():
+                raise UserNotFoundError(detail="Manager not found")
+
         # Create user with hashed password
         hashed_password = get_password_hash(user.password)
         db_user = Users(
-            **UserCreateInternal(
-                **user.model_dump(exclude={"password"}),
-                password_hash=hashed_password
-            ).model_dump(),
+            email=user.email,
+            password_hash=hashed_password,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            phone=user.phone,
+            job_title=user.job_title,
+            hire_date=user.hire_date,
+            employee_type=user.employee_type,
+            salary=user.salary,
+            manager_id=user.manager_id,
+            is_active=user.is_active,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -56,7 +67,7 @@ async def create_user(db: AsyncSession, user: UserCreate, current_user: Users) -
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.USER_CREATED,
+            action=SystemAction.INSERT,
             table_affected="users",
             record_id=db_user.user_id,
             old_values=None,
@@ -93,10 +104,12 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[UserOut]:
         user = result.scalar_one_or_none()
 
         if not user:
-            return None
+            raise UserNotFoundError(detail="User not found")
 
         return UserOut.model_validate(user)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving user {user_id}: {str(e)}")
         raise HTTPException(
@@ -141,17 +154,16 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, c
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         # Check for duplicate email if updated
         update_data = user_update.model_dump(exclude_none=True)
         if "email" in update_data:
             query = select(Users).where(
                 Users.email == update_data["email"],
-                Users.user_id != user_id
+                Users.user_id != user_id,
+                Users.is_active == True,
+                Users.deleted_at == None
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
@@ -160,9 +172,16 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, c
                     detail="Email already registered"
                 )
 
-        # Handle password update if provided
-        if "password" in update_data:
-            update_data["password_hash"] = get_password_hash(update_data.pop("password"))
+        # Validate manager_id if updated
+        if "manager_id" in update_data and update_data["manager_id"] is not None:
+            query = select(Users).where(
+                Users.user_id == update_data["manager_id"],
+                Users.is_active == True,
+                Users.deleted_at == None
+            )
+            result = await db.execute(query)
+            if not result.scalar_one_or_none():
+                raise UserNotFoundError(detail="Manager not found")
 
         # Store old values for logging
         old_values = db_user.__dict__.copy()
@@ -179,7 +198,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, c
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.USER_UPDATED,
+            action=SystemAction.UPDATE,
             table_affected="users",
             record_id=user_id,
             old_values=old_values,
@@ -216,19 +235,17 @@ async def delete_user(db: AsyncSession, user_id: int, current_user: Users) -> No
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         db_user.is_active = False
         db_user.deleted_at = datetime.now(timezone.utc)
+        db.add(db_user)
         await db.commit()
 
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.USER_DELETED,
+            action=SystemAction.DELETE,
             table_affected="users",
             record_id=user_id,
             old_values=db_user.__dict__,

@@ -1,10 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import AsyncGenerator, List, Optional
-from pydantic import BaseModel, ConfigDict
-from datetime import datetime, timezone
-from app.core.database import AsyncSessionLocal
+from typing import List
+from app.core.database import get_db
 from app.models.system_logs import SystemLogs
 from app.models.users import Users
 from app.models.user_roles import UserRoles
@@ -13,37 +11,14 @@ from app.core.config import settings
 from app.core.permissions import check_permissions
 from app.core.security import get_current_active_user
 from app.core.enums import Permission
+from app.schemas.system_log import SystemLogOut
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system-logs", tags=["System Logs"])
 
-class SystemLogOut(BaseModel):
-    """Schema for system log output."""
-    log_id: int
-    user_id: Optional[int]
-    action: str
-    entity_type: str
-    entity_id: Optional[int]
-    details: Optional[str]
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to provide an async database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {str(e)}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
 async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
-    """Check if user has HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -64,7 +39,6 @@ async def read_system_logs(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[SystemLogOut]:
-    """Get a paginated list of all system logs."""
     try:
         has_permission = await check_permissions([Permission.VIEW_SYSTEM_LOGS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):
@@ -89,7 +63,6 @@ async def read_system_log(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> SystemLogOut:
-    """Get a specific system log by ID."""
     try:
         has_permission = await check_permissions([Permission.VIEW_SYSTEM_LOGS.value], current_user, db)
         if not has_permission and not await is_admin_or_hr(db, current_user):

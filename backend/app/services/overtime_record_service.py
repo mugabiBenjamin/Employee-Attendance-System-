@@ -3,7 +3,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, date
-from pydantic import BaseModel, ConfigDict
 from app.models.overtime_records import OvertimeRecords
 from app.models.users import Users
 from app.models.employee_hierarchy import EmployeeHierarchy
@@ -11,18 +10,11 @@ from app.models.system_logs import SystemLogs
 from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordOut
 from app.core.config import settings
 from app.core.enums import SystemAction
-from app.core.mail import send_email_notification
+from app.core.mail import send_email
+from app.core.exceptions import UserNotFoundError
 import logging
 
 logger = logging.getLogger(__name__)
-
-class OvertimeRecordCreateInternal(BaseModel):
-    user_id: int
-    date: date
-    overtime_hours: float
-    description: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
 
 async def create_overtime_record(db: AsyncSession, overtime: OvertimeRecordCreate, current_user: Users) -> OvertimeRecordOut:
     """
@@ -37,10 +29,7 @@ async def create_overtime_record(db: AsyncSession, overtime: OvertimeRecordCreat
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         # Check for existing record on same date
         query = select(OvertimeRecords).where(
@@ -70,7 +59,7 @@ async def create_overtime_record(db: AsyncSession, overtime: OvertimeRecordCreat
             result = await db.execute(query)
             manager = result.scalar_one_or_none()
             if manager:
-                await send_email_notification(
+                await send_email(
                     to_email=manager.email,
                     subject="Overtime Alert",
                     body=f"Employee {current_user.first_name} {current_user.last_name} recorded {overtime.overtime_hours} overtime hours on {overtime.date}."
@@ -78,7 +67,11 @@ async def create_overtime_record(db: AsyncSession, overtime: OvertimeRecordCreat
 
         # Create overtime record
         db_overtime = OvertimeRecords(
-            **OvertimeRecordCreateInternal(**overtime.model_dump()).model_dump(),
+            user_id=overtime.user_id,
+            overtime_hours=overtime.overtime_hours,
+            overtime_rate=1.5,  # Default rate from schema
+            overtime_amount=overtime.overtime_hours * 1.5,  # Calculate amount
+            date=overtime.date,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -89,7 +82,7 @@ async def create_overtime_record(db: AsyncSession, overtime: OvertimeRecordCreat
         # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.OVERTIME_RECORDED,
+            action=SystemAction.INSERT,
             table_affected="overtime_records",
             record_id=db_overtime.overtime_id,
             old_values=None,
@@ -126,10 +119,15 @@ async def get_overtime_record_by_id(db: AsyncSession, overtime_id: int) -> Optio
         overtime = result.scalar_one_or_none()
 
         if not overtime:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Overtime record not found"
+            )
 
         return OvertimeRecordOut.model_validate(overtime)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving overtime record {overtime_id}: {str(e)}")
         raise HTTPException(
@@ -149,10 +147,7 @@ async def get_user_overtime_records(db: AsyncSession, user_id: int, start_date: 
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise UserNotFoundError(detail="User not found")
 
         query = select(OvertimeRecords).where(
             OvertimeRecords.user_id == user_id,

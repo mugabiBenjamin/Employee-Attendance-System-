@@ -6,19 +6,25 @@ class EmployeeEmergencyContactBase(BaseModel):
     user_id: int
     contact_name: str = Field(..., max_length=255)
     relationship: str = Field(..., max_length=100)
-    phone: str = Field(..., regex=r'^[\+]?[0-9\s\-\(\)]+$')
-    email: Optional[str] = Field(None, regex=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    phone: str = Field(..., pattern=r'^[\+]?[0-9\s\-\(\)]+$')
+    email: Optional[str] = Field(None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
     address: Optional[str] = None
     is_primary: bool = False
 
 class EmployeeEmergencyContactCreate(EmployeeEmergencyContactBase):
-    pass
+    user_id: int
+    contact_name: str
+    relationship: str
+    phone: str
+    alternate_phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
 
 class EmployeeEmergencyContactUpdate(BaseModel):
     contact_name: Optional[str] = Field(None, max_length=255)
     relationship: Optional[str] = Field(None, max_length=100)
-    phone: Optional[str] = Field(None, regex=r'^[\+]?[0-9\s\-\(\)]+$')
-    email: Optional[str] = Field(None, regex=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    phone: Optional[str] = Field(None, pattern=r'^[\+]?[0-9\s\-\(\)]+$')
+    email: Optional[str] = Field(None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
     address: Optional[str] = None
     is_primary: Optional[bool] = None
 

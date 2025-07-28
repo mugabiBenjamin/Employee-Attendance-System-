@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import AsyncGenerator, List, Optional
-from pydantic import BaseModel, ConfigDict
-from datetime import datetime, timezone, date
-from app.core.database import AsyncSessionLocal
+from typing import List, Optional
+from datetime import datetime, timezone
+from app.core.database import get_db
 from app.models.shift_assignments import ShiftAssignments
 from app.models.shift_patterns import ShiftPatterns
 from app.models.users import Users
@@ -14,54 +13,14 @@ from app.core.permissions import check_permissions
 from app.core.security import get_current_active_user
 from app.core.config import settings
 from app.core.enums import Permission
+from app.schemas.shift_assignment import ShiftAssignmentCreate, ShiftAssignmentUpdate, ShiftAssignmentOut
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/shift-assignments", tags=["Shift Assignments"])
 
-class ShiftAssignmentCreate(BaseModel):
-    """Schema for creating a new shift assignment."""
-    user_id: int
-    shift_pattern_id: int
-    start_date: date
-    end_date: Optional[date] = None
-    model_config = ConfigDict(from_attributes=True)
-
-class ShiftAssignmentUpdate(BaseModel):
-    """Schema for updating an existing shift assignment."""
-    user_id: Optional[int] = None
-    shift_pattern_id: Optional[int] = None
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    model_config = ConfigDict(from_attributes=True)
-
-class ShiftAssignmentOut(BaseModel):
-    """Schema for shift assignment output."""
-    assignment_id: int
-    user_id: int
-    shift_pattern_id: int
-    start_date: date
-    end_date: Optional[date]
-    created_at: datetime
-    updated_at: datetime
-    is_active: bool
-    model_config = ConfigDict(from_attributes=True)
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to provide an async database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {str(e)}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
 async def is_admin_or_manager(db: AsyncSession, user: Users) -> bool:
-    """Check if user has Manager, HR, Admin, or Super_Admin role."""
     try:
         query = select(UserRoles).join(Roles).where(
             UserRoles.user_id == user.user_id,
@@ -81,37 +40,36 @@ async def create_shift_assignment(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftAssignmentOut:
-    """Create a new shift assignment."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create shift assignments")
 
-        # Verify user exists
         query = select(Users).where(Users.user_id == shift_assignment.user_id, Users.is_active == True, Users.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        # Verify shift pattern exists
-        query = select(ShiftPatterns).where(ShiftPatterns.shift_pattern_id == shift_assignment.shift_pattern_id, ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
+        query = select(ShiftPatterns).where(ShiftPatterns.pattern_id == shift_assignment.pattern_id, ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift pattern not found")
 
-        # Check for conflicting assignments
         query = select(ShiftAssignments).where(
             ShiftAssignments.user_id == shift_assignment.user_id,
             ShiftAssignments.is_active == True,
-            ShiftAssignments.start_date <= (shift_assignment.end_date or shift_assignment.start_date),
-            (ShiftAssignments.end_date >= shift_assignment.start_date) | (ShiftAssignments.end_date == None)
+            ShiftAssignments.effective_from <= (shift_assignment.effective_to or shift_assignment.effective_from),
+            (ShiftAssignments.effective_to >= shift_assignment.effective_from) | (ShiftAssignments.effective_to == None)
         )
         result = await db.execute(query)
         if result.scalars().first():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Conflicting shift assignment exists")
 
         db_assignment = ShiftAssignments(
-            **shift_assignment.model_dump(),
+            user_id=shift_assignment.user_id,
+            pattern_id=shift_assignment.pattern_id,
+            effective_from=shift_assignment.effective_from,
+            effective_to=shift_assignment.effective_to,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
             is_active=True
@@ -135,7 +93,6 @@ async def read_shift_assignment(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftAssignmentOut:
-    """Get a specific shift assignment by ID."""
     try:
         has_permission = await check_permissions([Permission.VIEW_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
@@ -165,7 +122,6 @@ async def read_shift_assignments(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[ShiftAssignmentOut]:
-    """Get a paginated list of shift assignments."""
     try:
         has_permission = await check_permissions([Permission.VIEW_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
@@ -194,7 +150,6 @@ async def update_shift_assignment(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> ShiftAssignmentOut:
-    """Update an existing shift assignment."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
@@ -214,19 +169,19 @@ async def update_shift_assignment(
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        if "shift_pattern_id" in update_data:
-            query = select(ShiftPatterns).where(ShiftPatterns.shift_pattern_id == update_data["shift_pattern_id"], ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
+        if "pattern_id" in update_data:
+            query = select(ShiftPatterns).where(ShiftPatterns.pattern_id == update_data["pattern_id"], ShiftPatterns.is_active == True, ShiftPatterns.deleted_at == None)
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift pattern not found")
 
-        if update_data.get("user_id") or update_data.get("start_date") or update_data.get("end_date"):
+        if update_data.get("user_id") or update_data.get("effective_from") or update_data.get("effective_to"):
             query = select(ShiftAssignments).where(
                 ShiftAssignments.user_id == update_data.get("user_id", assignment.user_id),
                 ShiftAssignments.is_active == True,
                 ShiftAssignments.assignment_id != assignment_id,
-                ShiftAssignments.start_date <= (update_data.get("end_date", assignment.end_date) or update_data.get("start_date", assignment.start_date)),
-                (ShiftAssignments.end_date >= update_data.get("start_date", assignment.start_date)) | (ShiftAssignments.end_date == None)
+                ShiftAssignments.effective_from <= (update_data.get("effective_to", assignment.effective_to) or update_data.get("effective_from", assignment.effective_from)),
+                (ShiftAssignments.effective_to >= update_data.get("effective_from", assignment.effective_from)) | (ShiftAssignments.effective_to == None)
             )
             result = await db.execute(query)
             if result.scalars().first():
@@ -255,7 +210,6 @@ async def delete_shift_assignment(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
-    """Soft delete a shift assignment."""
     try:
         has_permission = await check_permissions([Permission.MANAGE_SHIFT_ASSIGNMENTS.value], current_user, db)
         if not has_permission and not await is_admin_or_manager(db, current_user):
