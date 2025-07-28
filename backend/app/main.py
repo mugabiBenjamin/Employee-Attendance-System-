@@ -80,11 +80,13 @@ async def log_system_actions(request: Request, call_next):
                 system_log = SystemLogs(
                     user_id=user_id,
                     action=action,
-                    entity_type=path.strip("/").split("/")[0],
-                    entity_id=None,
-                    details=None,
-                    created_at=datetime.now(timezone.utc),
-                    is_active=True
+                    table_affected=path.strip("/").split("/")[0],
+                    record_id=None,
+                    old_values=None,
+                    new_values=None,
+                    ip_address=None,
+                    user_agent=None,
+                    timestamp=datetime.now(timezone.utc)
                 )
                 session.add(system_log)
                 await session.commit()

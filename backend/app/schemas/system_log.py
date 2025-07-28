@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.networks import IPvAnyAddress
 
 class SystemLogBase(BaseModel):
     user_id: Optional[int] = None
@@ -9,7 +10,7 @@ class SystemLogBase(BaseModel):
     record_id: Optional[int] = None
     old_values: Optional[dict] = None
     new_values: Optional[dict] = None
-    ip_address: Optional[str] = None
+    ip_address: Optional[IPvAnyAddress | str] = None  # Allow both IPvAnyAddress and string
     user_agent: Optional[str] = None
 
 class SystemLogCreate(SystemLogBase):
@@ -18,6 +19,5 @@ class SystemLogCreate(SystemLogBase):
 class SystemLogOut(SystemLogBase):
     log_id: int
     timestamp: datetime
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)

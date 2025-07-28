@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class EmployeeEmergencyContactBase(BaseModel):
     user_id: int
@@ -27,5 +27,4 @@ class EmployeeEmergencyContactOut(EmployeeEmergencyContactBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -4,7 +4,7 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from unittest.mock import AsyncMock, patch
 from app.core.database import AsyncSessionLocal
 from app.models.users import Users
@@ -20,8 +20,9 @@ class UserCreate(BaseModel):
     password: str
     first_name: str
     last_name: str
-    phone_number: str | None = None
+    phone: str | None = None
     job_title: str | None = None
+    hire_date: date
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,9 +31,10 @@ class UserUpdate(BaseModel):
     password: str | None = None
     first_name: str | None = None
     last_name: str | None = None
-    phone_number: str | None = None
+    phone: str | None = None
     job_title: str | None = None
     is_active: bool | None = None
+    hire_date: date | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -41,8 +43,9 @@ class UserOut(BaseModel):
     email: str
     first_name: str
     last_name: str
-    phone_number: str | None
+    phone: str | None
     job_title: str | None
+    hire_date: date
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -64,8 +67,9 @@ async def test_user(db_session: AsyncSession):
         password_hash="hashed_password",
         first_name="Test",
         last_name="User",
-        phone_number="1234567890",
+        phone="1234567890",
         job_title="Tester",
+        hire_date=date.today(),
         is_active=True,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc)
@@ -82,6 +86,7 @@ async def current_user(db_session: AsyncSession):
         password_hash="hashed_admin_password",
         first_name="Admin",
         last_name="User",
+        hire_date=date.today(),
         is_active=True,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc)
@@ -99,15 +104,16 @@ async def test_create_user_success(db_session: AsyncSession, current_user: Users
             password="NewPassword123",
             first_name="New",
             last_name="User",
-            phone_number="0987654321",
-            job_title="Developer"
+            phone="0987654321",
+            job_title="Developer",
+            hire_date=date.today()
         )
         result = await create_user(db_session, user_data, current_user)
         assert result is not None
         assert result.email == "newuser@example.com"
         assert result.first_name == "New"
         assert result.last_name == "User"
-        assert result.phone_number == "0987654321"
+        assert result.phone == "0987654321"
         assert result.job_title == "Developer"
         assert result.is_active is True
         assert result.created_at is not None
@@ -125,7 +131,8 @@ async def test_create_user_duplicate_email(db_session: AsyncSession, test_user: 
         email="test@example.com",
         password="NewPassword123",
         first_name="New",
-        last_name="User"
+        last_name="User",
+        hire_date=date.today()
     )
     with pytest.raises(HTTPException) as exc:
         await create_user(db_session, user_data, current_user)
@@ -138,7 +145,8 @@ async def test_create_user_internal_error(db_session: AsyncSession, current_user
         email="newuser@example.com",
         password="NewPassword123",
         first_name="New",
-        last_name="User"
+        last_name="User",
+        hire_date=date.today()
     )
     with patch.object(db_session, "commit", side_effect=Exception("Database error")):
         with pytest.raises(HTTPException) as exc:
@@ -154,7 +162,7 @@ async def test_get_user_by_id_success(db_session: AsyncSession, test_user: Users
     assert result.email == test_user.email
     assert result.first_name == test_user.first_name
     assert result.last_name == test_user.last_name
-    assert result.phone_number == test_user.phone_number
+    assert result.phone == test_user.phone
     assert result.job_title == test_user.job_title
     assert result.is_active == test_user.is_active
 
@@ -198,16 +206,17 @@ async def test_update_user_success(db_session: AsyncSession, test_user: Users, c
             email="updated@example.com",
             password="UpdatedPassword123",
             first_name="Updated",
-            phone_number="1112223333",
+            phone="1112223333",
             job_title="Senior Developer",
-            is_active=False
+            is_active=False,
+            hire_date=date.today()
         )
         result = await update_user(db_session, test_user.user_id, update_data, current_user)
         assert result is not None
         assert result.user_id == test_user.user_id
         assert result.email == "updated@example.com"
         assert result.first_name == "Updated"
-        assert result.phone_number == "1112223333"
+        assert result.phone == "1112223333"
         assert result.job_title == "Senior Developer"
         assert result.is_active is False
         assert result.updated_at is not None
@@ -226,6 +235,7 @@ async def test_update_user_duplicate_email(db_session: AsyncSession, test_user: 
         password_hash="hashed_password",
         first_name="Other",
         last_name="User",
+        hire_date=date.today(),
         is_active=True,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc)

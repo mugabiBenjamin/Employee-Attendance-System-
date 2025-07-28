@@ -1,6 +1,6 @@
 from datetime import datetime, date as dt
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class AttendanceSummaryOut(BaseModel):
     user_id: int
@@ -14,5 +14,4 @@ class AttendanceSummaryOut(BaseModel):
     clock_in_time: Optional[datetime] = None
     clock_out_time: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

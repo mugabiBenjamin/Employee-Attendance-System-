@@ -31,9 +31,9 @@ class UserRoleOut(BaseModel):
     user_role_id: int
     user_id: int
     role_id: int
+    assigned_by: Optional[int]
     is_active: bool
-    created_at: datetime
-    updated_at: datetime
+    assigned_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -72,8 +72,7 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreateInternal, 
         query = select(UserRoles).where(
             UserRoles.user_id == user_role.user_id,
             UserRoles.role_id == user_role.role_id,
-            UserRoles.is_active == True,
-            UserRoles.deleted_at == None
+            UserRoles.is_active == True
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
@@ -85,8 +84,8 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreateInternal, 
         # Create user-role assignment
         db_user_role = UserRoles(
             **user_role.model_dump(),
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            assigned_by=current_user.user_id,
+            assigned_at=datetime.now(timezone.utc)
         )
         db.add(db_user_role)
         await db.commit()
@@ -125,8 +124,7 @@ async def get_user_role_by_id(db: AsyncSession, user_role_id: int) -> Optional[U
     try:
         query = select(UserRoles).where(
             UserRoles.user_role_id == user_role_id,
-            UserRoles.is_active == True,
-            UserRoles.deleted_at == None
+            UserRoles.is_active == True
         )
         result = await db.execute(query)
         user_role = result.scalar_one_or_none()
@@ -162,8 +160,7 @@ async def get_user_roles(db: AsyncSession, user_id: int, skip: int = 0, limit: i
 
         query = select(UserRoles).where(
             UserRoles.user_id == user_id,
-            UserRoles.is_active == True,
-            UserRoles.deleted_at == None
+            UserRoles.is_active == True
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         user_roles = result.scalars().all()
@@ -188,8 +185,7 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
         # Retrieve user-role assignment
         query = select(UserRoles).where(
             UserRoles.user_role_id == user_role_id,
-            UserRoles.is_active == True,
-            UserRoles.deleted_at == None
+            UserRoles.is_active == True
         )
         result = await db.execute(query)
         db_user_role = result.scalar_one_or_none()
@@ -220,8 +216,7 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
                 UserRoles.user_id == db_user_role.user_id,
                 UserRoles.role_id == update_data["role_id"],
                 UserRoles.user_role_id != user_role_id,
-                UserRoles.is_active == True,
-                UserRoles.deleted_at == None
+                UserRoles.is_active == True
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
@@ -237,7 +232,7 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
         for key, value in update_data.items():
             setattr(db_user_role, key, value)
 
-        db_user_role.updated_at = datetime.now(timezone.utc)
+        db_user_role.assigned_at = datetime.now(timezone.utc)
         db.add(db_user_role)
         await db.commit()
         await db.refresh(db_user_role)
@@ -275,8 +270,7 @@ async def delete_user_role(db: AsyncSession, user_role_id: int, current_user: Us
     try:
         query = select(UserRoles).where(
             UserRoles.user_role_id == user_role_id,
-            UserRoles.is_active == True,
-            UserRoles.deleted_at == None
+            UserRoles.is_active == True
         )
         result = await db.execute(query)
         db_user_role = result.scalar_one_or_none()
@@ -288,7 +282,7 @@ async def delete_user_role(db: AsyncSession, user_role_id: int, current_user: Us
             )
 
         db_user_role.is_active = False
-        db_user_role.deleted_at = datetime.now(timezone.utc)
+        db.add(db_user_role)
         await db.commit()
 
         # Log action

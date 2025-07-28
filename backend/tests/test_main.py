@@ -53,8 +53,11 @@ async def test_middleware_log_login(db_session: AsyncSession, client, test_user:
         # Mock the request state to include a user
         with patch("app.main.Request.state", new_callable=AsyncMock) as mock_request_state:
             mock_request_state.user = test_user
-            response = client.post("/api/v1/auth/token")
-            assert response.status_code == 200  # Assuming the endpoint exists and returns 200
+            response = client.post(
+                "/api/v1/auth/token",
+                data={"username": test_user.email, "password": "testpassword"}
+            )
+            assert response.status_code == 200
             # Verify system log
             query = select(SystemLogs).where(SystemLogs.action == SystemAction.LOGIN.value)
             result = await db_session.execute(query)
@@ -62,8 +65,8 @@ async def test_middleware_log_login(db_session: AsyncSession, client, test_user:
             assert log is not None
             assert log.user_id == test_user.user_id
             assert log.action == SystemAction.LOGIN.value
-            assert log.entity_type == "auth"
-            assert log.created_at is not None
+            assert log.table_affected == "auth"
+            assert log.timestamp is not None
 
 @pytest.mark.asyncio
 async def test_middleware_log_logout(db_session: AsyncSession, client, test_user: Users):
@@ -80,8 +83,8 @@ async def test_middleware_log_logout(db_session: AsyncSession, client, test_user
             assert log is not None
             assert log.user_id == test_user.user_id
             assert log.action == SystemAction.LOGOUT.value
-            assert log.entity_type == "auth"
-            assert log.created_at is not None
+            assert log.table_affected == "auth"
+            assert log.timestamp is not None
 
 @pytest.mark.asyncio
 async def test_middleware_log_clock_in(db_session: AsyncSession, client, test_user: Users):
@@ -98,8 +101,8 @@ async def test_middleware_log_clock_in(db_session: AsyncSession, client, test_us
             assert log is not None
             assert log.user_id == test_user.user_id
             assert log.action == SystemAction.CLOCK_IN.value
-            assert log.entity_type == "attendance-records"
-            assert log.created_at is not None
+            assert log.table_affected == "attendance-records"
+            assert log.timestamp is not None
 
 @pytest.mark.asyncio
 async def test_middleware_log_approve_leave(db_session: AsyncSession, client, test_user: Users):
@@ -116,8 +119,8 @@ async def test_middleware_log_approve_leave(db_session: AsyncSession, client, te
             assert log is not None
             assert log.user_id == test_user.user_id
             assert log.action == SystemAction.APPROVE_LEAVE.value
-            assert log.entity_type == "leave-requests"
-            assert log.created_at is not None
+            assert log.table_affected == "leave-requests"
+            assert log.timestamp is not None
 
 @pytest.mark.asyncio
 async def test_middleware_log_reject_leave(db_session: AsyncSession, client, test_user: Users):
@@ -134,8 +137,8 @@ async def test_middleware_log_reject_leave(db_session: AsyncSession, client, tes
             assert log is not None
             assert log.user_id == test_user.user_id
             assert log.action == SystemAction.REJECT_LEAVE.value
-            assert log.entity_type == "leave-requests"
-            assert log.created_at is not None
+            assert log.table_affected == "leave-requests"
+            assert log.timestamp is not None
 
 @pytest.mark.asyncio
 async def test_middleware_log_generic_post(db_session: AsyncSession, client, test_user: Users):
@@ -152,15 +155,18 @@ async def test_middleware_log_generic_post(db_session: AsyncSession, client, tes
             assert log is not None
             assert log.user_id == test_user.user_id
             assert log.action == SystemAction.POST.value
-            assert log.entity_type == "some-endpoint"
-            assert log.created_at is not None
+            assert log.table_affected == "some-endpoint"
+            assert log.timestamp is not None
 
 @pytest.mark.asyncio
 async def test_middleware_log_no_user(db_session: AsyncSession, client):
     with patch("app.main.AsyncSessionLocal", return_value=AsyncMock()) as mock_session, \
          patch.object(mock_session.return_value.__aenter__.return_value, "commit", return_value=None):
-        response = client.post("/api/v1/auth/token")
-        assert response.status_code == 200  # Assuming the endpoint exists and returns 200
+        response = client.post(
+            "/api/v1/auth/token",
+            data={"username": "test@example.com", "password": "testpassword"}
+        )
+        assert response.status_code == 200
         # Verify system log with no user
         query = select(SystemLogs).where(SystemLogs.action == SystemAction.LOGIN.value)
         result = await db_session.execute(query)
@@ -168,8 +174,8 @@ async def test_middleware_log_no_user(db_session: AsyncSession, client):
         assert log is not None
         assert log.user_id is None
         assert log.action == SystemAction.LOGIN.value
-        assert log.entity_type == "auth"
-        assert log.created_at is not None
+        assert log.table_affected == "auth"
+        assert log.timestamp is not None
 
 @pytest.mark.asyncio
 async def test_middleware_log_database_error(db_session: AsyncSession, client, test_user: Users):
@@ -177,8 +183,11 @@ async def test_middleware_log_database_error(db_session: AsyncSession, client, t
          patch.object(mock_session.return_value.__aenter__.return_value, "commit", side_effect=Exception("Database error")):
         with patch("app.main.Request.state", new_callable=AsyncMock) as mock_request_state:
             mock_request_state.user = test_user
-            response = client.post("/api/v1/auth/token")
-            assert response.status_code == 200  # Assuming the endpoint exists and returns 200
+            response = client.post(
+                "/api/v1/auth/token",
+                data={"username": test_user.email, "password": "testpassword"}
+            )
+            assert response.status_code == 200
             # No assertion on log since database error prevents logging, but request should still complete
 
 @pytest.mark.asyncio
