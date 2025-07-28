@@ -1,9 +1,8 @@
 from typing import AsyncGenerator, Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 from app.core.database import get_db
 from app.core.permissions import check_permissions
 from app.core.security import get_current_user
@@ -37,7 +36,7 @@ async def get_current_admin_user(
         (Roles.role_name.in_(["Admin", "Super_Admin"]) | 
          Roles.permissions.contains('{"manage_users": true}') |
          Roles.permissions.contains('{"system_configuration": true}') |
-         Roles.permissions.contains('{"view_system_logs": true}') |
+        #  Roles.permissions.contains('{"view_system_logs": true}') |
          Roles.permissions.contains('{"manage_departments": true}'))
     )
     result = await db.execute(query)

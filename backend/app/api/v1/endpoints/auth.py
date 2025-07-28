@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import AsyncGenerator, Optional
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
 from app.core.database import AsyncSessionLocal
 from app.models.users import Users
@@ -14,13 +15,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-class UserAuth(BaseModel):
-    """Schema for user authentication credentials."""
-    email: EmailStr
-    password: str
-
-    model_config = ConfigDict(from_attributes=True)
-
 class Token(BaseModel):
     """Schema for JWT token response."""
     access_token: str
@@ -28,6 +22,10 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
     model_config = ConfigDict(from_attributes=True)
+
+class RefreshTokenRequest(BaseModel):
+    """Schema for refresh token request."""
+    refresh_token: str
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency to provide an async database session."""
@@ -41,20 +39,21 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-@router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login", description="Authenticate user and return JWT tokens.")
-async def login_for_access_token(user_auth: UserAuth, db: AsyncSession = Depends(get_db)) -> Token:
+@router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login", description="Authenticate user with email (as username) and password to get JWT tokens.")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)) -> Token:
     """Authenticate user credentials and return access and refresh tokens."""
     try:
+        # Use form_data.username as email (OAuth2 standard)
         query = select(Users).where(
-            Users.email == user_auth.email,
+            Users.email == form_data.username,
             Users.is_active == True,
             Users.deleted_at == None
         )
         result = await db.execute(query)
         user = result.scalar_one_or_none()
 
-        if not user or not verify_password(user_auth.password, user.password_hash):
-            logger.warning(f"Failed login attempt for email: {user_auth.email}")
+        if not user or not verify_password(form_data.password, user.password_hash):
+            logger.warning(f"Failed login attempt for email: {form_data.username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
@@ -70,17 +69,17 @@ async def login_for_access_token(user_auth: UserAuth, db: AsyncSession = Depends
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error during login for email {user_auth.email}: {str(e)}")
+        logger.error(f"Error during login for email {form_data.username}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during authentication"
         )
 
 @router.post("/refresh", response_model=Token, status_code=status.HTTP_200_OK, summary="Refresh access token", description="Generate new access token using a valid refresh token.")
-async def refresh_access_token(refresh_token: str, db: AsyncSession = Depends(get_db)) -> Token:
+async def refresh_access_token(token_request: RefreshTokenRequest, db: AsyncSession = Depends(get_db)) -> Token:
     """Refresh an expired access token using a valid refresh token."""
     try:
-        payload = decode_refresh_token(refresh_token)
+        payload = decode_refresh_token(token_request.refresh_token)
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(
