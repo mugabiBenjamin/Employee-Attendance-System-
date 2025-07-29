@@ -37,6 +37,7 @@ class UserUpdate(BaseModel):
     salary: Optional[float] = Field(None, ge=0, description="User salary")
     manager_id: Optional[int] = Field(None, description="User manager ID")
     is_active: Optional[bool] = Field(None, description="User active status")
+    hire_date: date = Field(..., description="User hire date")
 
 class UserOut(UserBase):
     user_id: int = Field(..., description="User ID")

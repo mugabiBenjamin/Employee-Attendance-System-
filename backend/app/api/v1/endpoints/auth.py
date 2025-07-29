@@ -25,6 +25,14 @@ class RefreshTokenRequest(BaseModel):
 @router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login", description="Authenticate user with email (as username) and password to get JWT tokens.")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)) -> Token:
     try:
+        if not form_data.username or not form_data.password:
+            logger.warning("Missing email or password in login attempt")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Missing email or password",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
         query = select(Users).where(
             Users.email == form_data.username,
             Users.is_active == True,
@@ -33,11 +41,19 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         result = await db.execute(query)
         user = result.scalar_one_or_none()
 
-        if not user or not verify_password(form_data.password, user.password_hash):
-            logger.warning(f"Failed login attempt for email: {form_data.username}")
+        if not user:
+            logger.warning(f"User not found for email: {form_data.username}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
+        if not verify_password(form_data.password, user.password_hash):
+            logger.warning(f"Invalid password for email: {form_data.username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password",
+                detail="Invalid password",
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
@@ -79,7 +95,7 @@ async def refresh_access_token(token_request: RefreshTokenRequest, db: AsyncSess
         if not user:
             logger.warning(f"Invalid refresh token for user_id: {user_id}")
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
+                status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found or inactive",
                 headers={"WWW-Authenticate": "Bearer"}
             )

@@ -127,14 +127,27 @@ MATERIALIZED_VIEW_SQLS = [
 # Initialize database tables and enums
 async def init_db():
     async with engine.begin() as conn:
-        # Create enums individually
+        # Create enums
         for enum_sql in ENUM_CREATION_SQLS:
             await conn.execute(text(enum_sql))
         
-        # Create tables using SQLAlchemy Base
+        # Ensure job_title column in users table
+        await conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'job_title'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN job_title VARCHAR(100);
+                END IF;
+            END $$;
+        """))
+        
+        # Create tables
         await conn.run_sync(Base.metadata.create_all)
         
-        # Create materialized view and indexes individually
+        # Create materialized views
         for view_sql in MATERIALIZED_VIEW_SQLS:
             await conn.execute(text(view_sql))
         

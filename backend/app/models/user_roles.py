@@ -11,6 +11,7 @@ class UserRoles(Base):
     assigned_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     assigned_by = Column(Integer, ForeignKey('users.user_id', ondelete='SET NULL'))
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         UniqueConstraint('user_id', 'role_id', name='unique_user_role'),

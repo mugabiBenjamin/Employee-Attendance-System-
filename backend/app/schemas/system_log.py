@@ -22,6 +22,7 @@ class SystemLogCreate(SystemLogBase):
     old_values: Optional[dict] = None
     new_values: Optional[dict] = None
     ip_address: Optional[str] = None
+
 class SystemLogOut(SystemLogBase):
     log_id: int
     timestamp: datetime

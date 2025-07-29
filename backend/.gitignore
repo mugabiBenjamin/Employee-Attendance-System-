@@ -145,3 +145,4 @@ backup/
 # uv.lock
 
 scripts/
+tests/

@@ -1,13 +1,15 @@
-from datetime import datetime, timezone
+# app/main.py
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import logging
 from app.core.config import settings
 from app.core.database import init_db, start_materialized_view_refresh, AsyncSessionLocal
 from app.api.v1.api import api_router
 from app.models.system_logs import SystemLogs
 from app.core.enums import SystemAction
+from ipaddress import ip_address
 
 # Configure logging
 logging.basicConfig(
@@ -26,7 +28,6 @@ ACTION_MAPPING = {
     ("/leave-requests/reject", "POST"): SystemAction.REJECT_LEAVE,
 }
 
-# Method-based fallback mapping
 METHOD_FALLBACK = {
     "POST": SystemAction.INSERT,
     "PUT": SystemAction.UPDATE,
@@ -34,16 +35,11 @@ METHOD_FALLBACK = {
 }
 
 def determine_system_action(path: str, method: str) -> str | None:
-    """Determine system action based on request path and method."""
-    # Check specific path mappings first
     for (path_suffix, mapped_method), action in ACTION_MAPPING.items():
         if path.endswith(path_suffix) and method == mapped_method:
             return action
-    
-    # Fallback to method-based actions
     return METHOD_FALLBACK.get(method)
 
-# Define lifespan context
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🔄 Application startup: initializing database and views...")
@@ -53,7 +49,6 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("🛑 Application shutdown...")
 
-# Initialize FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
@@ -61,7 +56,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -70,7 +64,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Middleware: Log system actions
 @app.middleware("http")
 async def log_system_actions(request: Request, call_next):
     response = await call_next(request)
@@ -84,6 +77,14 @@ async def log_system_actions(request: Request, call_next):
     if action:
         try:
             async with AsyncSessionLocal() as session:
+                ip_addr = None
+                if request.client and request.client.host:
+                    try:
+                        ip_addr = str(ip_address(request.client.host))
+                    except ValueError:
+                        logger.warning(f"Invalid IP address: {request.client.host}")
+                        ip_addr = None  # or set to a default like "0.0.0.0"
+
                 system_log = SystemLogs(
                     user_id=user_id,
                     action=action,
@@ -91,7 +92,7 @@ async def log_system_actions(request: Request, call_next):
                     record_id=None,
                     old_values=None,
                     new_values=None,
-                    ip_address=str(request.client.host) if request.client else None,
+                    ip_address=ip_addr,
                     user_agent=request.headers.get("user-agent"),
                     timestamp=datetime.now(timezone.utc)
                 )
@@ -103,10 +104,8 @@ async def log_system_actions(request: Request, call_next):
 
     return response
 
-# Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# Root endpoint
 @app.get("/")
 async def root():
     return {"message": f"Welcome to {settings.APP_NAME} API"}
