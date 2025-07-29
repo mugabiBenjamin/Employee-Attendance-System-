@@ -143,3 +143,6 @@ backup/
 
 # Lock files
 # uv.lock
+
+scripts/
+tests/

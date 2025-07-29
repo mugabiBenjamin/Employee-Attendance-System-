@@ -111,3 +111,5 @@ backup/
 
 # Documentation
 docs/_build/
+
+.github/
