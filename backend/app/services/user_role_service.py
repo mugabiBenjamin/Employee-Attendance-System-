@@ -272,6 +272,21 @@ async def delete_user_role(db: AsyncSession, user_role_id: int, current_user: Us
                 detail="User role assignment not found"
             )
 
+        # Prevent deletion of user's last role assignment
+        query = select(UserRoles).where(
+            UserRoles.user_id == db_user_role.user_id,
+            UserRoles.is_active == True,
+            UserRoles.deleted_at == None
+        )
+        result = await db.execute(query)
+        user_roles = result.scalars().all()
+        
+        if len(user_roles) <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete user's last role assignment"
+            )
+
         db_user_role.is_active = False
         db_user_role.deleted_at = datetime.now(timezone.utc)
         db.add(db_user_role)

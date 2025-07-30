@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -10,14 +10,21 @@ from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
 from app.schemas.leave_approval_workflow import LeaveApprovalWorkflowCreate, LeaveApprovalWorkflowOut
 from app.core.config import settings
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, CorrectionStatus
 from app.core.mail import send_email
 from app.core.exceptions import UserNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def approve_or_reject_leave(db: AsyncSession, approval: LeaveApprovalWorkflowCreate, current_user: Users) -> LeaveApprovalWorkflowOut:
+async def approve_or_reject_leave(
+    db: AsyncSession,
+    approval: LeaveApprovalWorkflowCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("approve_leave"))
+) -> LeaveApprovalWorkflowOut:
     """
     Approve or reject a leave request with validation, logging, and email notification.
     """
@@ -59,6 +66,13 @@ async def approve_or_reject_leave(db: AsyncSession, approval: LeaveApprovalWorkf
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to approve this leave request"
+            )
+
+        # Validate status
+        if approval.status not in [CorrectionStatus.APPROVED, CorrectionStatus.REJECTED]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid status for leave approval"
             )
 
         # Create approval workflow entry
@@ -115,7 +129,11 @@ async def approve_or_reject_leave(db: AsyncSession, approval: LeaveApprovalWorkf
             detail="Error processing leave approval"
         )
 
-async def get_leave_approval_by_id(db: AsyncSession, approval_id: int) -> Optional[LeaveApprovalWorkflowOut]:
+async def get_leave_approval_by_id(
+    db: AsyncSession,
+    approval_id: int,
+    _: str = Depends(check_permission("view_leave_approval"))
+) -> Optional[LeaveApprovalWorkflowOut]:
     """
     Retrieve a leave approval by ID.
     """
@@ -145,7 +163,13 @@ async def get_leave_approval_by_id(db: AsyncSession, approval_id: int) -> Option
             detail="Error retrieving leave approval"
         )
 
-async def get_leave_approvals_by_request(db: AsyncSession, request_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[LeaveApprovalWorkflowOut]:
+async def get_leave_approvals_by_request(
+    db: AsyncSession,
+    request_id: int,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_leave_approval"))
+) -> List[LeaveApprovalWorkflowOut]:
     """
     Retrieve a list of approvals for a leave request with pagination.
     """

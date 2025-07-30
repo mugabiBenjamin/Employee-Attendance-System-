@@ -4,15 +4,9 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.permissions import check_permissions
+from app.core.permissions import get_user_permissions
 from app.core.config import settings
 from app.core.enums import Permission
-from app.models.users import Users
-from app.models.user_roles import UserRoles
-from app.models.roles import Roles
-from app.models.shift_assignments import ShiftAssignments
-from app.models.leave_policies import LeavePolicies
-from typing import Optional
 from app.models.users import Users
 from app.models.shift_assignments import ShiftAssignments
 from app.models.leave_policies import LeavePolicies
@@ -41,17 +35,20 @@ async def get_current_admin_user(
     current_user: Users = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> Users:
-    query = select(Users).join(UserRoles).join(Roles).where(
-        Users.user_id == current_user.user_id,
-        UserRoles.is_active == True,
-        Roles.is_active == True,
-        (Roles.role_name.in_(["Admin", "Super_Admin"]) | 
-         Roles.permissions.contains('{"manage_users": true}') |
-         Roles.permissions.contains('{"system_configuration": true}') |
-         Roles.permissions.contains('{"manage_departments": true}'))
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    
+    required_admin_perms = [
+        Permission.MANAGE_USERS,
+        Permission.SYSTEM_CONFIGURATION,
+        Permission.MANAGE_DEPARTMENTS
+    ]
+    
+    has_admin_permission = (
+        Permission.ALL_PERMISSIONS in user_permissions or
+        any(perm in user_permissions for perm in required_admin_perms)
     )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
+    
+    if not has_admin_permission:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     return current_user
 
@@ -59,15 +56,9 @@ async def get_current_super_admin_user(
     current_user: Users = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> Users:
-    query = select(Users).join(UserRoles).join(Roles).where(
-        Users.user_id == current_user.user_id,
-        UserRoles.is_active == True,
-        Roles.is_active == True,
-        (Roles.role_name == "Super_Admin" | 
-         Roles.permissions.contains('{"all_permissions": true}'))
-    )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    
+    if Permission.ALL_PERMISSIONS not in user_permissions:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     return current_user
 
@@ -75,18 +66,21 @@ async def get_current_manager_user(
     current_user: Users = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> Users:
-    query = select(Users).join(UserRoles).join(Roles).where(
-        Users.user_id == current_user.user_id,
-        UserRoles.is_active == True,
-        Roles.is_active == True,
-        (Roles.role_name == "Manager" | 
-         Roles.permissions.contains('{"approve_leave": true}') |
-         Roles.permissions.contains('{"view_team_attendance": true}') |
-         Roles.permissions.contains('{"generate_reports": true}') |
-         Roles.permissions.contains('{"manage_overtime": true}'))
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    
+    required_manager_perms = [
+        Permission.APPROVE_LEAVE,
+        Permission.VIEW_TEAM_ATTENDANCE,
+        Permission.GENERATE_REPORTS,
+        Permission.MANAGE_OVERTIME
+    ]
+    
+    has_manager_permission = (
+        Permission.ALL_PERMISSIONS in user_permissions or
+        any(perm in user_permissions for perm in required_manager_perms)
     )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
+    
+    if not has_manager_permission:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     return current_user
 
@@ -94,18 +88,21 @@ async def get_current_hr_user(
     current_user: Users = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> Users:
-    query = select(Users).join(UserRoles).join(Roles).where(
-        Users.user_id == current_user.user_id,
-        UserRoles.is_active == True,
-        Roles.is_active == True,
-        (Roles.role_name == "HR" | 
-         Roles.permissions.contains('{"manage_employees": true}') |
-         Roles.permissions.contains('{"generate_compliance_reports": true}') |
-         Roles.permissions.contains('{"view_all_attendance": true}') |
-         Roles.permissions.contains('{"manage_leave_policies": true}'))
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    
+    required_hr_perms = [
+        Permission.MANAGE_EMPLOYEES,
+        Permission.GENERATE_COMPLIANCE_REPORTS,
+        Permission.VIEW_ALL_ATTENDANCE,
+        Permission.MANAGE_LEAVE_POLICIES
+    ]
+    
+    has_hr_permission = (
+        Permission.ALL_PERMISSIONS in user_permissions or
+        any(perm in user_permissions for perm in required_hr_perms)
     )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
+    
+    if not has_hr_permission:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     return current_user
 
@@ -113,17 +110,17 @@ async def is_manager_or_hr(
     current_user: Users = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> bool:
-    query = select(Users).join(UserRoles).join(Roles).where(
-        Users.user_id == current_user.user_id,
-        UserRoles.is_active == True,
-        Roles.is_active == True,
-        (Roles.role_name.in_(["Manager", "HR", "Admin", "Super_Admin"]) |
-         Roles.permissions.contains('{"approve_leave": true}') |
-         Roles.permissions.contains('{"manage_employees": true}') |
-         Roles.permissions.contains('{"manage_leave_policies": true}') |
-         Roles.permissions.contains('{"manage_shift_assignments": true}')))
-    result = await db.execute(query)
-    return result.first() is not None
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    
+    management_perms = [
+        Permission.APPROVE_LEAVE,
+        Permission.MANAGE_EMPLOYEES,
+        Permission.MANAGE_LEAVE_POLICIES,
+        Permission.VIEW_TEAM_ATTENDANCE,
+        Permission.ALL_PERMISSIONS
+    ]
+    
+    return any(perm in user_permissions for perm in management_perms)
 
 async def validate_shift_or_leave(
     shift_assignment: Optional[ShiftAssignments] = None,
@@ -137,8 +134,8 @@ async def validate_shift_or_leave(
             detail="Either shift_assignment or leave_policy must be provided"
         )
     
-    has_permission = await check_permissions([Permission.MANAGE_SHIFT_ASSIGNMENTS.value, Permission.MANAGE_LEAVE_POLICIES.value], current_user, db)
-    if not has_permission and not await is_manager_or_hr(current_user, db):
+    # Check if user has management permissions
+    if not await is_manager_or_hr(current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to manage shifts or leave policies"

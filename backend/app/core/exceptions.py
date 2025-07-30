@@ -1,57 +1,119 @@
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
+from typing import Optional, Dict, Any
+
+class BaseCustomException(HTTPException):
+    """Base class for all custom exceptions with enhanced error handling."""
+    def __init__(
+        self, 
+        detail: str, 
+        status_code: int, 
+        headers: Optional[Dict[str, Any]] = None,
+        error_code: Optional[str] = None
+    ):
+        super().__init__(status_code=status_code, detail=detail, headers=headers)
+        self.error_code = error_code
 
 class DatabaseError(SQLAlchemyError):
-    """Custom exception for database-related errors."""
-    def __init__(self, message: str = "Database operation failed"):
+    """Database operation failures."""
+    def __init__(self, message: str = "Database operation failed", original_error: Optional[Exception] = None):
         super().__init__(message)
+        self.original_error = original_error
 
-class AuthenticationError(HTTPException):
-    """Custom exception for authentication failures."""
-    def __init__(self, detail: str = "Authentication failed", status_code: int = status.HTTP_401_UNAUTHORIZED):
-        super().__init__(status_code=status_code, detail=detail, headers={"WWW-Authenticate": "Bearer"})
+class AuthenticationError(BaseCustomException):
+    """Authentication failures."""
+    def __init__(self, detail: str = "Authentication failed"):
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            headers={"WWW-Authenticate": "Bearer"},
+            error_code="AUTH_FAILED"
+        )
 
-class AuthorizationError(HTTPException):
-    """Custom exception for authorization/permission errors."""
-    def __init__(self, detail: str = "Insufficient permissions", status_code: int = status.HTTP_403_FORBIDDEN):
-        super().__init__(status_code=status_code, detail=detail)
+class AuthorizationError(BaseCustomException):
+    """Authorization/permission errors."""
+    def __init__(self, detail: str = "Insufficient permissions"):
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_403_FORBIDDEN,
+            error_code="PERMISSION_DENIED"
+        )
 
-class ValidationErrorCustom(HTTPException):
-    """Custom exception for Pydantic V2 validation errors."""
-    def __init__(self, detail: str = "Invalid input data", status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY):
-        super().__init__(status_code=status_code, detail=detail)
+class ValidationError(BaseCustomException):
+    """Input validation errors."""
+    def __init__(self, detail: str = "Invalid input data", field: Optional[str] = None):
+        error_detail = f"{field}: {detail}" if field else detail
+        super().__init__(
+            detail=error_detail,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            error_code="VALIDATION_ERROR"
+        )
 
-class LeaveRequestError(HTTPException):
-    """Custom exception for leave request-related errors."""
-    def __init__(self, detail: str = "Invalid leave request", status_code: int = status.HTTP_400_BAD_REQUEST):
-        super().__init__(status_code=status_code, detail=detail)
+class ResourceNotFoundError(BaseCustomException):
+    """Generic resource not found error."""
+    def __init__(self, resource: str, identifier: Optional[str] = None):
+        detail = f"{resource} not found"
+        if identifier:
+            detail += f": {identifier}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="RESOURCE_NOT_FOUND"
+        )
 
-class AttendanceError(HTTPException):
-    """Custom exception for attendance-related errors."""
-    def __init__(self, detail: str = "Invalid attendance operation", status_code: int = status.HTTP_400_BAD_REQUEST):
-        super().__init__(status_code=status_code, detail=detail)
+class ResourceConflictError(BaseCustomException):
+    """Resource conflict errors (duplicates, constraints)."""
+    def __init__(self, detail: str = "Resource conflict"):
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="RESOURCE_CONFLICT"
+        )
 
-class UserNotFoundError(HTTPException):
-    """Custom exception for user not found errors."""
-    def __init__(self, detail: str = "User not found", status_code: int = status.HTTP_404_NOT_FOUND):
-        super().__init__(status_code=status_code, detail=detail)
+class BusinessLogicError(BaseCustomException):
+    """Business rule violations."""
+    def __init__(self, detail: str = "Business rule violation"):
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="BUSINESS_LOGIC_ERROR"
+        )
 
-class DepartmentNotFoundError(HTTPException):
-    """Custom exception for department not found errors."""
-    def __init__(self, detail: str = "Department not found", status_code: int = status.HTTP_404_NOT_FOUND):
-        super().__init__(status_code=status_code, detail=detail)
+# Specific domain exceptions
+class LeaveRequestError(BusinessLogicError):
+    """Leave request specific errors."""
+    def __init__(self, detail: str = "Invalid leave request"):
+        super().__init__(detail)
+        self.error_code = "LEAVE_REQUEST_ERROR"
 
-class RoleNotFoundError(HTTPException):
-    """Custom exception for role not found errors."""
-    def __init__(self, detail: str = "Role not found", status_code: int = status.HTTP_404_NOT_FOUND):
-        super().__init__(status_code=status_code, detail=detail)
+class AttendanceError(BusinessLogicError):
+    """Attendance operation errors."""
+    def __init__(self, detail: str = "Invalid attendance operation"):
+        super().__init__(detail)
+        self.error_code = "ATTENDANCE_ERROR"
 
-class FileUploadError(HTTPException):
-    """Custom exception for file upload errors."""
-    def __init__(self, detail: str = "File upload failed", status_code: int = status.HTTP_400_BAD_REQUEST):
-        super().__init__(status_code=status_code, detail=detail)
-        
-class LeavePolicyNotFoundError(HTTPException):
-    """Custom exception for leave policy not found errors."""
-    def __init__(self, detail: str = "Leave policy not found", status_code: int = status.HTTP_404_NOT_FOUND):
-        super().__init__(status_code=status_code, detail=detail)
+class FileUploadError(BaseCustomException):
+    """File upload errors."""
+    def __init__(self, detail: str = "File upload failed"):
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="FILE_UPLOAD_ERROR"
+        )
+
+# Convenience functions for common cases
+def user_not_found(user_id: Optional[int] = None):
+    identifier = f"ID {user_id}" if user_id else None
+    return ResourceNotFoundError("User", identifier)
+
+def department_not_found(dept_id: Optional[int] = None):
+    identifier = f"ID {dept_id}" if dept_id else None
+    return ResourceNotFoundError("Department", identifier)
+
+def role_not_found(role_id: Optional[int] = None):
+    identifier = f"ID {role_id}" if role_id else None
+    return ResourceNotFoundError("Role", identifier)
+
+def leave_policy_not_found(policy_id: Optional[int] = None):
+    identifier = f"ID {policy_id}" if policy_id else None
+    return ResourceNotFoundError("Leave policy", identifier)

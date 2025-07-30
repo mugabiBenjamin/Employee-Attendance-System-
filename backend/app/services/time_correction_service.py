@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -8,15 +8,22 @@ from app.models.attendance_records import AttendanceRecords
 from app.models.users import Users
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
-from app.core.mail import send_email, EmailSchema, get_user_email
+from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionOut, TimeCorrectionUpdate
 from app.core.config import settings
 from app.core.enums import SystemAction, CorrectionStatus
+from app.core.mail import send_email, EmailSchema, get_user_email
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
-from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionOut, TimeCorrectionUpdate
 
 logger = logging.getLogger(__name__)
 
-async def create_time_correction(db: AsyncSession, time_correction: TimeCorrectionCreate, current_user: Users) -> TimeCorrectionOut:
+async def create_time_correction(
+    db: AsyncSession,
+    time_correction: TimeCorrectionCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_time_correction"))
+) -> TimeCorrectionOut:
     """Create a new time correction request."""
     try:
         # Validate attendance record exists and is active
@@ -77,15 +84,27 @@ async def create_time_correction(db: AsyncSession, time_correction: TimeCorrecti
             detail="Failed to create time correction"
         )
 
-async def get_time_correction_by_id(db: AsyncSession, correction_id: int) -> Optional[TimeCorrectionOut]:
+async def get_time_correction_by_id(
+    db: AsyncSession,
+    correction_id: int,
+    _: str = Depends(check_permission("view_time_correction"))
+) -> Optional[TimeCorrectionOut]:
     """Retrieve a time correction by ID."""
     try:
         query = select(TimeCorrections).where(TimeCorrections.correction_id == correction_id)
         result = await db.execute(query)
         correction = result.scalar_one_or_none()
 
-        return TimeCorrectionOut.model_validate(correction) if correction else None
+        if not correction:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Time correction not found"
+            )
 
+        return TimeCorrectionOut.model_validate(correction)
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving time correction {correction_id}: {str(e)}")
         raise HTTPException(
@@ -94,10 +113,11 @@ async def get_time_correction_by_id(db: AsyncSession, correction_id: int) -> Opt
         )
 
 async def get_user_time_corrections(
-    db: AsyncSession, 
-    user_id: int, 
-    skip: int = 0, 
-    limit: int = None
+    db: AsyncSession,
+    user_id: int,
+    skip: int = 0,
+    limit: int = None,
+    _: str = Depends(check_permission("view_time_correction"))
 ) -> List[TimeCorrectionOut]:
     """Get all time corrections for a specific user."""
     try:
@@ -135,10 +155,11 @@ async def get_user_time_corrections(
         )
 
 async def update_time_correction(
-    db: AsyncSession, 
-    correction_id: int, 
-    time_correction_update: TimeCorrectionUpdate, 
-    current_user: Users
+    db: AsyncSession,
+    correction_id: int,
+    time_correction_update: TimeCorrectionUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_time_correction"))
 ) -> TimeCorrectionOut:
     """Update an existing time correction."""
     try:
@@ -151,6 +172,20 @@ async def update_time_correction(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Time correction not found"
+            )
+
+        # Check if user is authorized (manager or HR)
+        query = select(EmployeeHierarchy).where(
+            EmployeeHierarchy.employee_id == db_correction.user_id,
+            EmployeeHierarchy.manager_id == current_user.user_id,
+            EmployeeHierarchy.is_active == True,
+            EmployeeHierarchy.deleted_at == None
+        )
+        result = await db.execute(query)
+        if not result.scalar_one_or_none() and not current_user.has_role("HR"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to update this time correction"
             )
 
         # Store old values for logging
@@ -172,7 +207,11 @@ async def update_time_correction(
         if "status" in update_data and update_data["status"] == CorrectionStatus.APPROVED:
             db_correction.approved_by = current_user.user_id
             db_correction.approved_at = datetime.now(timezone.utc)
+            # Update attendance record if approved
+            await _update_attendance_record(db, db_correction)
 
+        db_correction.updated_at = datetime.now(timezone.utc)
+        db.add(db_correction)
         await db.commit()
         await db.refresh(db_correction)
 
@@ -198,7 +237,12 @@ async def update_time_correction(
             detail="Failed to update time correction"
         )
 
-async def delete_time_correction(db: AsyncSession, correction_id: int, current_user: Users) -> None:
+async def delete_time_correction(
+    db: AsyncSession,
+    correction_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_time_correction"))
+) -> None:
     """Soft delete a time correction."""
     try:
         query = select(TimeCorrections).where(TimeCorrections.correction_id == correction_id)
@@ -211,11 +255,20 @@ async def delete_time_correction(db: AsyncSession, correction_id: int, current_u
                 detail="Time correction not found"
             )
 
+        # Check if user is authorized (HR only)
+        if not current_user.has_role("HR"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only HR can delete time corrections"
+            )
+
         # Store values for logging before deletion
         old_values = {k: v for k, v in db_correction.__dict__.items() if not k.startswith('_')}
 
         # Soft delete
-        await db.delete(db_correction)
+        db_correction.is_active = False
+        db_correction.deleted_at = datetime.now(timezone.utc)
+        db.add(db_correction)
         await db.commit()
 
         # Log the action
@@ -224,7 +277,7 @@ async def delete_time_correction(db: AsyncSession, correction_id: int, current_u
             "time_corrections", correction_id, old_values, None
         )
 
-        logger.info(f"Time correction deleted: correction_id={correction_id}")
+        logger.info(f"Time correction soft deleted: correction_id={correction_id}")
 
     except HTTPException:
         raise
@@ -238,7 +291,11 @@ async def delete_time_correction(db: AsyncSession, correction_id: int, current_u
 # Helper functions
 async def _get_active_attendance(db: AsyncSession, attendance_id: int) -> Optional[AttendanceRecords]:
     """Get active attendance record by ID."""
-    query = select(AttendanceRecords).where(AttendanceRecords.attendance_id == attendance_id)
+    query = select(AttendanceRecords).where(
+        AttendanceRecords.attendance_id == attendance_id,
+        AttendanceRecords.is_active == True,
+        AttendanceRecords.deleted_at == None
+    )
     result = await db.execute(query)
     return result.scalar_one_or_none()
 
@@ -261,14 +318,18 @@ def _validate_correction_times(clock_in: Optional[datetime], clock_out: Optional
         )
 
 async def _notify_managers_of_correction(
-    db: AsyncSession, 
-    user_id: int, 
-    correction: TimeCorrections, 
+    db: AsyncSession,
+    user_id: int,
+    correction: TimeCorrections,
     user: Users
 ) -> None:
     """Send notification email to user's managers about new correction request."""
     try:
-        query = select(EmployeeHierarchy).where(EmployeeHierarchy.employee_id == user_id)
+        query = select(EmployeeHierarchy).where(
+            EmployeeHierarchy.employee_id == user_id,
+            EmployeeHierarchy.is_active == True,
+            EmployeeHierarchy.deleted_at == None
+        )
         result = await db.execute(query)
         hierarchies = result.scalars().all()
 
@@ -313,6 +374,27 @@ async def _notify_user_of_status_change(db: AsyncSession, correction: TimeCorrec
             await send_email(email_data)
     except Exception as e:
         logger.warning(f"Failed to send user notification: {str(e)}")
+
+async def _update_attendance_record(db: AsyncSession, correction: TimeCorrections) -> None:
+    """Update attendance record with approved correction times."""
+    try:
+        query = select(AttendanceRecords).where(
+            AttendanceRecords.attendance_id == correction.attendance_id,
+            AttendanceRecords.is_active == True,
+            AttendanceRecords.deleted_at == None
+        )
+        result = await db.execute(query)
+        attendance = result.scalar_one_or_none()
+        if attendance:
+            if correction.corrected_clock_in:
+                attendance.clock_in = correction.corrected_clock_in
+            if correction.corrected_clock_out:
+                attendance.clock_out = correction.corrected_clock_out
+            attendance.updated_at = datetime.now(timezone.utc)
+            db.add(attendance)
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to update attendance record {correction.attendance_id}: {str(e)}")
 
 async def _log_system_action(
     db: AsyncSession,

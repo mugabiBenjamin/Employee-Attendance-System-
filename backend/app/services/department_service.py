@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -10,11 +10,18 @@ from app.schemas.department import DepartmentCreate, DepartmentUpdate, Departmen
 from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.exceptions import DepartmentNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_department(db: AsyncSession, department: DepartmentCreate, current_user: Users) -> DepartmentOut:
+async def create_department(
+    db: AsyncSession,
+    department: DepartmentCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_department"))
+) -> DepartmentOut:
     """
     Create a new department with validation and logging.
     """
@@ -78,7 +85,11 @@ async def create_department(db: AsyncSession, department: DepartmentCreate, curr
             detail="Error creating department"
         )
 
-async def get_department_by_id(db: AsyncSession, department_id: int) -> Optional[DepartmentOut]:
+async def get_department_by_id(
+    db: AsyncSession,
+    department_id: int,
+    _: str = Depends(check_permission("view_department"))
+) -> Optional[DepartmentOut]:
     """
     Retrieve a department by ID.
     """
@@ -105,7 +116,12 @@ async def get_department_by_id(db: AsyncSession, department_id: int) -> Optional
             detail="Error retrieving department"
         )
 
-async def get_departments(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[DepartmentOut]:
+async def get_departments(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_department"))
+) -> List[DepartmentOut]:
     """
     Retrieve a list of active departments with pagination.
     """
@@ -127,7 +143,13 @@ async def get_departments(db: AsyncSession, skip: int = 0, limit: int = settings
             detail="Error retrieving departments"
         )
 
-async def update_department(db: AsyncSession, department_id: int, department_update: DepartmentUpdate, current_user: Users) -> DepartmentOut:
+async def update_department(
+    db: AsyncSession,
+    department_id: int,
+    department_update: DepartmentUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_department"))
+) -> DepartmentOut:
     """
     Update a department with validation and logging.
     """
@@ -207,7 +229,12 @@ async def update_department(db: AsyncSession, department_id: int, department_upd
             detail="Error updating department"
         )
 
-async def delete_department(db: AsyncSession, department_id: int, current_user: Users) -> None:
+async def delete_department(
+    db: AsyncSession,
+    department_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_department"))
+) -> None:
     """
     Soft delete a department with logging.
     """

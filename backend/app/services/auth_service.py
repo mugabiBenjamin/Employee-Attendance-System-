@@ -1,4 +1,4 @@
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -6,10 +6,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from jose import JWTError, jwt
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
-from app.core.security import verify_password, create_access_token, create_refresh_token
+from app.core.security import verify_password, create_access_token, create_refresh_token, get_current_user
 from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.exceptions import AuthenticationError
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,11 @@ class TokenResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-async def login_user(db: AsyncSession, credentials: LoginCredentials, ip_address: str) -> TokenResponse:
+async def login_user(
+    db: AsyncSession,
+    credentials: LoginCredentials,
+    ip_address: str = Depends(check_permission("login"))
+) -> TokenResponse:
     """
     Authenticate user and generate access/refresh tokens, logging the login action.
     """
@@ -74,7 +79,11 @@ async def login_user(db: AsyncSession, credentials: LoginCredentials, ip_address
             detail="Error processing login"
         )
 
-async def logout_user(db: AsyncSession, user: Users, ip_address: str) -> None:
+async def logout_user(
+    db: AsyncSession,
+    user: Users = Depends(get_current_user),
+    ip_address: str = Depends(check_permission("logout"))
+) -> None:
     """
     Log user logout action.
     """
@@ -102,7 +111,11 @@ async def logout_user(db: AsyncSession, user: Users, ip_address: str) -> None:
             detail="Error processing logout"
         )
 
-async def refresh_token(db: AsyncSession, refresh_token: str, ip_address: str) -> TokenResponse:
+async def refresh_token(
+    db: AsyncSession,
+    refresh_token: str,
+    ip_address: str = Depends(check_permission("refresh_token"))
+) -> TokenResponse:
     """
     Refresh access token using a valid refresh token.
     """

@@ -18,41 +18,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user-roles", tags=["User Roles"])
 
-async def is_admin_or_super_admin(db: AsyncSession, user: Users) -> bool:
-    try:
-        query = select(UserRoles).join(Roles).where(
-            UserRoles.user_id == user.user_id,
-            UserRoles.is_active == True,
-            Roles.role_name.in_(["Admin", "Super_Admin"]),
-            Roles.is_active == True
-        )
-        result = await db.execute(query)
-        return result.scalar_one_or_none() is not None
-    except Exception as e:
-        logger.error(f"Error checking admin role for user_id {user.user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
-
 @router.post("/", response_model=UserRoleOut, status_code=status.HTTP_201_CREATED, summary="Create user role assignment")
 async def create_user_role(
     user_role: UserRoleCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserRoleOut:
+    """Create a user role assignment. Requires MANAGE_ROLES permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_USER_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create user role assignments")
+        await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
 
+        # Verify user exists
         query = select(Users).where(Users.user_id == user_role.user_id, Users.is_active == True, Users.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+        # Verify role exists
         query = select(Roles).where(Roles.role_id == user_role.role_id, Roles.is_active == True, Roles.deleted_at == None)
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
 
+        # Check for existing assignment
         query = select(UserRoles).where(
             UserRoles.user_id == user_role.user_id,
             UserRoles.role_id == user_role.role_id,
@@ -62,10 +50,11 @@ async def create_user_role(
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User role assignment already exists")
 
+        # Create assignment
         db_user_role = UserRoles(
             user_id=user_role.user_id,
             role_id=user_role.role_id,
-            assigned_by=user_role.assigned_by,
+            assigned_by=current_user.user_id,
             assigned_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
             is_active=True
@@ -89,10 +78,9 @@ async def read_user_role(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserRoleOut:
+    """Get a user role assignment by ID. Requires MANAGE_ROLES permission."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_USER_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view user role assignments")
+        await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
 
         query = select(UserRoles).where(UserRoles.user_role_id == user_role_id, UserRoles.is_active == True, UserRoles.deleted_at == None)
         result = await db.execute(query)
@@ -119,10 +107,9 @@ async def read_user_roles(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[UserRoleOut]:
+    """List user role assignments with optional filters. Requires MANAGE_ROLES permission."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_USER_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view user role assignments")
+        await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
 
         query = select(UserRoles).where(UserRoles.is_active == True, UserRoles.deleted_at == None)
         if user_id:
@@ -149,11 +136,11 @@ async def update_user_role(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserRoleOut:
+    """Update a user role assignment. Requires MANAGE_ROLES permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_USER_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update user role assignments")
+        await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
 
+        # Get existing assignment
         query = select(UserRoles).where(UserRoles.user_role_id == user_role_id, UserRoles.is_active == True, UserRoles.deleted_at == None)
         result = await db.execute(query)
         user_role = result.scalar_one_or_none()
@@ -162,18 +149,22 @@ async def update_user_role(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User role assignment not found")
 
         update_data = user_role_update.model_dump(exclude_none=True)
+        
+        # Validate user if being updated
         if "user_id" in update_data:
             query = select(Users).where(Users.user_id == update_data["user_id"], Users.is_active == True, Users.deleted_at == None)
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+        # Validate role if being updated
         if "role_id" in update_data:
             query = select(Roles).where(Roles.role_id == update_data["role_id"], Roles.is_active == True, Roles.deleted_at == None)
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
 
+        # Check for duplicate assignment if user_id or role_id changing
         if update_data.get("user_id") or update_data.get("role_id"):
             query = select(UserRoles).where(
                 UserRoles.user_id == update_data.get("user_id", user_role.user_id),
@@ -185,6 +176,7 @@ async def update_user_role(
             if result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User role assignment already exists")
 
+        # Apply updates
         for key, value in update_data.items():
             setattr(user_role, key, value)
 
@@ -208,10 +200,9 @@ async def delete_user_role(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
+    """Soft delete a user role assignment. Requires MANAGE_ROLES permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_USER_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete user role assignments")
+        await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
 
         query = select(UserRoles).where(UserRoles.user_role_id == user_role_id, UserRoles.is_active == True, UserRoles.deleted_at == None)
         result = await db.execute(query)
@@ -220,8 +211,26 @@ async def delete_user_role(
         if not user_role:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User role assignment not found")
 
+        # Prevent removing user's own last admin role
+        if user_role.user_id == current_user.user_id:
+            admin_role_query = select(UserRoles).join(Roles).where(
+                UserRoles.user_id == current_user.user_id,
+                UserRoles.is_active == True,
+                Roles.role_name.in_(["Admin", "Super_Admin"]),
+                Roles.is_active == True
+            )
+            admin_roles = await db.execute(admin_role_query)
+            if len(admin_roles.scalars().all()) <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot remove your last admin role"
+                )
+
+        # Soft delete
         user_role.is_active = False
         user_role.deleted_at = datetime.now(timezone.utc)
+        user_role.updated_at = datetime.now(timezone.utc)
+        
         await db.commit()
 
         logger.info(f"User role assignment soft deleted, user_role_id: {user_role_id}")
@@ -231,3 +240,32 @@ async def delete_user_role(
     except Exception as e:
         logger.error(f"Error deleting user role assignment {user_role_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting user role assignment")
+
+# Additional endpoint to get user's roles
+@router.get("/user/{user_id}/roles", response_model=List[UserRoleOut], summary="Get all roles for a user")
+async def get_user_roles(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user)
+) -> List[UserRoleOut]:
+    """Get all active roles for a specific user. Requires MANAGE_ROLES permission or viewing own roles."""
+    try:
+        # Allow users to view their own roles
+        if current_user.user_id != user_id:
+            await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
+
+        query = select(UserRoles).where(
+            UserRoles.user_id == user_id,
+            UserRoles.is_active == True,
+            UserRoles.deleted_at == None
+        )
+        result = await db.execute(query)
+        user_roles = result.scalars().all()
+
+        return [UserRoleOut.model_validate(user_role) for user_role in user_roles]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving roles for user {user_id}: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving user roles")

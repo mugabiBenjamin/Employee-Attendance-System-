@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, time
@@ -9,11 +9,17 @@ from app.models.system_logs import SystemLogs
 from app.schemas.shift_pattern import ShiftPatternCreate, ShiftPatternUpdate, ShiftPatternOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.security import get_current_user, check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_shift_pattern(db: AsyncSession, shift_pattern: ShiftPatternCreate, current_user: Users) -> ShiftPatternOut:
+async def create_shift_pattern(
+    db: AsyncSession,
+    shift_pattern: ShiftPatternCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_shift_pattern"))
+) -> ShiftPatternOut:
     """
     Create a new shift pattern with validation and logging.
     """
@@ -31,9 +37,25 @@ async def create_shift_pattern(db: AsyncSession, shift_pattern: ShiftPatternCrea
                 detail="Shift pattern name already exists"
             )
 
-        # Create shift pattern
+        # Validate time formats and logic
         start_time = datetime.strptime(shift_pattern.start_time, "%H:%M:%S").time() if isinstance(shift_pattern.start_time, str) else shift_pattern.start_time
         end_time = datetime.strptime(shift_pattern.end_time, "%H:%M:%S").time() if isinstance(shift_pattern.end_time, str) else shift_pattern.end_time
+        
+        # Validate shift times
+        if not shift_pattern.is_overnight and start_time >= end_time:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="End time must be after start time for non-overnight shifts"
+            )
+
+        # Validate shift type
+        if shift_pattern.shift_type not in settings.VALID_SHIFT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid shift type. Must be one of: {', '.join(settings.VALID_SHIFT_TYPES)}"
+            )
+
+        # Create shift pattern
         db_shift_pattern = ShiftPatterns(
             pattern_name=shift_pattern.shift_name,
             shift_type=shift_pattern.shift_type or "standard",
@@ -75,7 +97,11 @@ async def create_shift_pattern(db: AsyncSession, shift_pattern: ShiftPatternCrea
             detail="Error creating shift pattern"
         )
 
-async def get_shift_pattern_by_id(db: AsyncSession, shift_id: int) -> Optional[ShiftPatternOut]:
+async def get_shift_pattern_by_id(
+    db: AsyncSession,
+    shift_id: int,
+    _: str = Depends(check_permission("view_shift_pattern"))
+) -> Optional[ShiftPatternOut]:
     """
     Retrieve a shift pattern by ID.
     """
@@ -105,7 +131,12 @@ async def get_shift_pattern_by_id(db: AsyncSession, shift_id: int) -> Optional[S
             detail="Error retrieving shift pattern"
         )
 
-async def get_shift_patterns(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[ShiftPatternOut]:
+async def get_shift_patterns(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_shift_pattern"))
+) -> List[ShiftPatternOut]:
     """
     Retrieve a list of active shift patterns with pagination.
     """
@@ -127,7 +158,13 @@ async def get_shift_patterns(db: AsyncSession, skip: int = 0, limit: int = setti
             detail="Error retrieving shift patterns"
         )
 
-async def update_shift_pattern(db: AsyncSession, shift_id: int, shift_pattern_update: ShiftPatternUpdate, current_user: Users) -> ShiftPatternOut:
+async def update_shift_pattern(
+    db: AsyncSession,
+    shift_id: int,
+    shift_pattern_update: ShiftPatternUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_shift_pattern"))
+) -> ShiftPatternOut:
     """
     Update a shift pattern with validation and logging.
     """
@@ -163,8 +200,31 @@ async def update_shift_pattern(db: AsyncSession, shift_id: int, shift_pattern_up
                     detail="Shift pattern name already exists"
                 )
 
+        # Validate time formats and logic if updated
+        if "start_time" in update_data or "end_time" in update_data:
+            start_time = datetime.strptime(update_data["start_time"], "%H:%M:%S").time() if "start_time" in update_data else db_shift_pattern.start_time
+            end_time = datetime.strptime(update_data["end_time"], "%H:%M:%S").time() if "end_time" in update_data else db_shift_pattern.end_time
+            is_overnight = update_data.get("is_overnight", db_shift_pattern.is_overnight)
+            if not is_overnight and start_time >= end_time:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="End time must be after start time for non-overnight shifts"
+                )
+
+        # Validate shift type if updated
+        if "shift_type" in update_data and update_data["shift_type"] not in settings.VALID_SHIFT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid shift type. Must be one of: {', '.join(settings.VALID_SHIFT_TYPES)}"
+            )
+
+        # Store old values for logging
+        old_values = db_shift_pattern.__dict__.copy()
+
         # Apply updates
         for key, value in update_data.items():
+            if key in ["start_time", "end_time"] and isinstance(value, str):
+                value = datetime.strptime(value, "%H:%M:%S").time()
             setattr(db_shift_pattern, key, value)
 
         db_shift_pattern.updated_at = datetime.now(timezone.utc)
@@ -178,7 +238,7 @@ async def update_shift_pattern(db: AsyncSession, shift_id: int, shift_pattern_up
             action=SystemAction.UPDATE,
             table_affected="shift_patterns",
             record_id=shift_id,
-            old_values=None,
+            old_values=old_values,
             new_values=db_shift_pattern.__dict__,
             ip_address=None,
             timestamp=datetime.now(timezone.utc)
@@ -198,7 +258,12 @@ async def update_shift_pattern(db: AsyncSession, shift_id: int, shift_pattern_up
             detail="Error updating shift pattern"
         )
 
-async def delete_shift_pattern(db: AsyncSession, shift_id: int, current_user: Users) -> None:
+async def delete_shift_pattern(
+    db: AsyncSession,
+    shift_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_shift_pattern"))
+) -> None:
     """
     Soft delete a shift pattern with logging.
     """

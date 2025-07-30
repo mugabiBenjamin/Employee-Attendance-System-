@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, date
@@ -10,13 +10,21 @@ from app.schemas.attendance_record import AttendanceRecordCreate, AttendanceReco
 from app.core.config import settings
 from app.core.utils import calculate_total_hours, calculate_overtime_hours
 from app.core.enums import SystemAction
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 import csv
 import io
+import uuid
 
 logger = logging.getLogger(__name__)
 
-async def clock_in(db: AsyncSession, user: Users, ip_address: str, location: Optional[str] = None) -> AttendanceRecordOut:
+async def clock_in(
+    db: AsyncSession,
+    user: Users = Depends(get_current_user),
+    ip_address: str = Depends(check_permission("clock_in")),
+    location: Optional[str] = None
+) -> AttendanceRecordOut:
     """
     Handle employee clock-in with one-click functionality, validation, and logging.
     """
@@ -79,7 +87,11 @@ async def clock_in(db: AsyncSession, user: Users, ip_address: str, location: Opt
             detail="Error processing clock-in"
         )
 
-async def clock_out(db: AsyncSession, user: Users, ip_address: str) -> AttendanceRecordOut:
+async def clock_out(
+    db: AsyncSession,
+    user: Users = Depends(get_current_user),
+    ip_address: str = Depends(check_permission("clock_out"))
+) -> AttendanceRecordOut:
     """
     Handle employee clock-out with validation, time calculations, and logging.
     """
@@ -144,7 +156,15 @@ async def clock_out(db: AsyncSession, user: Users, ip_address: str) -> Attendanc
             detail="Error processing clock-out"
         )
 
-async def get_attendance_history(db: AsyncSession, user: Users, start_date: Optional[date] = None, end_date: Optional[date] = None, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[AttendanceRecordOut]:
+async def get_attendance_history(
+    db: AsyncSession,
+    user: Users = Depends(get_current_user),
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_attendance_history"))
+) -> List[AttendanceRecordOut]:
     """
     Retrieve attendance history for a user with optional date range and pagination.
     """
@@ -173,7 +193,13 @@ async def get_attendance_history(db: AsyncSession, user: Users, start_date: Opti
             detail="Error retrieving attendance history"
         )
 
-async def export_attendance_history_csv(db: AsyncSession, user: Users, start_date: Optional[date] = None, end_date: Optional[date] = None) -> str:
+async def export_attendance_history_csv(
+    db: AsyncSession,
+    user: Users = Depends(get_current_user),
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    _: str = Depends(check_permission("export_attendance_history"))
+) -> str:
     """
     Export attendance history to CSV format.
     """

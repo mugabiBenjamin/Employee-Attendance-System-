@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -7,15 +7,23 @@ from app.models.leave_requests import LeaveRequests
 from app.models.users import Users
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
+from app.models.leave_balances import LeaveBalances
 from app.schemas.leave_request import LeaveRequestCreate, LeaveRequestOut
 from app.core.config import settings
 from app.core.enums import LeaveRequestStatus, SystemAction
 from app.core.mail import send_email
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCreate, current_user: Users) -> LeaveRequestOut:
+async def create_leave_request(
+    db: AsyncSession,
+    leave_request: LeaveRequestCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_leave_request"))
+) -> LeaveRequestOut:
     """
     Create a new leave request with validation, logging, and email notification.
     """
@@ -43,8 +51,30 @@ async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCrea
                 detail="Overlapping leave request exists"
             )
 
-        # Create leave request
+        # Validate leave balance
+        query = select(LeaveBalances).where(
+            LeaveBalances.user_id == current_user.user_id,
+            LeaveBalances.leave_type == leave_request.leave_type,
+            LeaveBalances.is_active == True,
+            LeaveBalances.deleted_at == None
+        )
+        result = await db.execute(query)
+        leave_balance = result.scalar_one_or_none()
+        if not leave_balance:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No leave balance available for this leave type"
+            )
+
         days_requested = (leave_request.end_date.date() - leave_request.start_date.date()).days + 1
+        available_days = leave_balance.allocated_days - leave_balance.used_days + leave_balance.carried_forward
+        if days_requested > available_days:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insufficient leave balance"
+            )
+
+        # Create leave request
         db_leave_request = LeaveRequests(
             user_id=current_user.user_id,
             leave_type=leave_request.leave_type,
@@ -104,16 +134,27 @@ async def create_leave_request(db: AsyncSession, leave_request: LeaveRequestCrea
             detail="Error creating leave request"
         )
 
-async def get_leave_request_by_id(db: AsyncSession, request_id: int, current_user: Users) -> Optional[LeaveRequestOut]:
+async def get_leave_request_by_id(
+    db: AsyncSession,
+    request_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("view_leave_request"))
+) -> Optional[LeaveRequestOut]:
     """
-    Retrieve a leave request by ID for the current user.
+    Retrieve a leave request by ID for the current user or their subordinates.
     """
     try:
         query = select(LeaveRequests).where(
             LeaveRequests.leave_id == request_id,
-            LeaveRequests.user_id == current_user.user_id,
             LeaveRequests.is_active == True,
             LeaveRequests.deleted_at == None
+        ).join(
+            EmployeeHierarchy,
+            EmployeeHierarchy.employee_id == LeaveRequests.user_id,
+            isouter=True
+        ).where(
+            (LeaveRequests.user_id == current_user.user_id) |
+            (EmployeeHierarchy.manager_id == current_user.user_id)
         )
         result = await db.execute(query)
         leave_request = result.scalar_one_or_none()
@@ -121,7 +162,7 @@ async def get_leave_request_by_id(db: AsyncSession, request_id: int, current_use
         if not leave_request:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave request not found"
+                detail="Leave request not found or not authorized"
             )
 
         logger.info(f"Retrieved leave request, leave_id: {request_id}, user_id: {current_user.user_id}")
@@ -136,15 +177,27 @@ async def get_leave_request_by_id(db: AsyncSession, request_id: int, current_use
             detail="Error retrieving leave request"
         )
 
-async def get_user_leave_requests(db: AsyncSession, current_user: Users, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[LeaveRequestOut]:
+async def get_user_leave_requests(
+    db: AsyncSession,
+    current_user: Users = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_leave_request"))
+) -> List[LeaveRequestOut]:
     """
-    Retrieve a list of leave requests for the current user with pagination.
+    Retrieve a list of leave requests for the current user or their subordinates with pagination.
     """
     try:
         query = select(LeaveRequests).where(
-            LeaveRequests.user_id == current_user.user_id,
             LeaveRequests.is_active == True,
             LeaveRequests.deleted_at == None
+        ).join(
+            EmployeeHierarchy,
+            EmployeeHierarchy.employee_id == LeaveRequests.user_id,
+            isouter=True
+        ).where(
+            (LeaveRequests.user_id == current_user.user_id) |
+            (EmployeeHierarchy.manager_id == current_user.user_id)
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         leave_requests = result.scalars().all()
