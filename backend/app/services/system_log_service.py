@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -7,12 +7,19 @@ from app.models.system_logs import SystemLogs
 from app.models.users import Users
 from app.schemas.system_log import SystemLogCreate, SystemLogOut
 from app.core.config import settings
+from app.core.enums import SystemAction
 from app.core.exceptions import UserNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_system_log(db: AsyncSession, log: SystemLogCreate, current_user: Optional[Users] = None) -> SystemLogOut:
+async def create_system_log(
+    db: AsyncSession,
+    log: SystemLogCreate,
+    current_user: Optional[Users] = Depends(get_current_user)
+) -> SystemLogOut:
     """
     Create a system log entry with validation and logging.
     """
@@ -27,6 +34,13 @@ async def create_system_log(db: AsyncSession, log: SystemLogCreate, current_user
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise UserNotFoundError(detail="User not found")
+
+        # Validate action
+        if log.action not in SystemAction.__members__:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid action. Must be one of: {', '.join(SystemAction.__members__)}"
+            )
 
         # Create system log
         db_log = SystemLogs(
@@ -56,7 +70,11 @@ async def create_system_log(db: AsyncSession, log: SystemLogCreate, current_user
             detail="Error creating system log"
         )
 
-async def get_system_log_by_id(db: AsyncSession, log_id: int) -> Optional[SystemLogOut]:
+async def get_system_log_by_id(
+    db: AsyncSession,
+    log_id: int,
+    _: str = Depends(check_permission("view_system_log"))
+) -> Optional[SystemLogOut]:
     """
     Retrieve a system log by ID.
     """
@@ -84,7 +102,12 @@ async def get_system_log_by_id(db: AsyncSession, log_id: int) -> Optional[System
             detail="Error retrieving system log"
         )
 
-async def get_system_logs(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[SystemLogOut]:
+async def get_system_logs(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_system_log"))
+) -> List[SystemLogOut]:
     """
     Retrieve a list of system logs with pagination.
     """
@@ -103,7 +126,13 @@ async def get_system_logs(db: AsyncSession, skip: int = 0, limit: int = settings
             detail="Error retrieving system logs"
         )
 
-async def get_system_logs_by_user(db: AsyncSession, user_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[SystemLogOut]:
+async def get_system_logs_by_user(
+    db: AsyncSession,
+    user_id: int,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_system_log"))
+) -> List[SystemLogOut]:
     """
     Retrieve system logs for a specific user with pagination.
     """

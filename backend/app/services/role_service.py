@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -9,11 +9,18 @@ from app.models.system_logs import SystemLogs
 from app.schemas.role import RoleCreate, RoleUpdate, RoleOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_role(db: AsyncSession, role: RoleCreate, current_user: Users) -> RoleOut:
+async def create_role(
+    db: AsyncSession,
+    role: RoleCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_role"))
+) -> RoleOut:
     """
     Create a new role with validation and logging.
     """
@@ -84,7 +91,11 @@ async def create_role(db: AsyncSession, role: RoleCreate, current_user: Users) -
             detail="Error creating role"
         )
 
-async def get_role_by_id(db: AsyncSession, role_id: int) -> Optional[RoleOut]:
+async def get_role_by_id(
+    db: AsyncSession,
+    role_id: int,
+    _: str = Depends(check_permission("view_role"))
+) -> Optional[RoleOut]:
     """
     Retrieve a role by ID.
     """
@@ -114,7 +125,12 @@ async def get_role_by_id(db: AsyncSession, role_id: int) -> Optional[RoleOut]:
             detail="Error retrieving role"
         )
 
-async def get_roles(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[RoleOut]:
+async def get_roles(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_role"))
+) -> List[RoleOut]:
     """
     Retrieve a list of active roles with pagination.
     """
@@ -136,7 +152,13 @@ async def get_roles(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAU
             detail="Error retrieving roles"
         )
 
-async def update_role(db: AsyncSession, role_id: int, role_update: RoleUpdate, current_user: Users) -> RoleOut:
+async def update_role(
+    db: AsyncSession,
+    role_id: int,
+    role_update: RoleUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_role"))
+) -> RoleOut:
     """
     Update a role with validation and logging.
     """
@@ -224,7 +246,12 @@ async def update_role(db: AsyncSession, role_id: int, role_update: RoleUpdate, c
             detail="Error updating role"
         )
 
-async def delete_role(db: AsyncSession, role_id: int, current_user: Users) -> None:
+async def delete_role(
+    db: AsyncSession,
+    role_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_role"))
+) -> None:
     """
     Soft delete a role with logging.
     """

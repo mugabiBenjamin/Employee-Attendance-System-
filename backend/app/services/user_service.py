@@ -188,7 +188,11 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, c
 
         # Apply updates
         for key, value in update_data.items():
-            setattr(db_user, key, value)
+            if key == "password" and value:
+                value = get_password_hash(value)
+                setattr(db_user, "password_hash", value)
+            else:
+                setattr(db_user, key, value)
 
         db_user.updated_at = datetime.now(timezone.utc)
         db.add(db_user)
@@ -223,7 +227,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, c
 
 async def delete_user(db: AsyncSession, user_id: int, current_user: Users) -> None:
     """
-    Soft delete a user with logging.
+    Soft delete a user with validation and logging.
     """
     try:
         query = select(Users).where(
@@ -236,6 +240,19 @@ async def delete_user(db: AsyncSession, user_id: int, current_user: Users) -> No
 
         if not db_user:
             raise UserNotFoundError(detail="User not found")
+
+        # Prevent deletion if user has active subordinates
+        query = select(Users).where(
+            Users.manager_id == user_id,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
+        result = await db.execute(query)
+        if result.scalars().all():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete user with active subordinates"
+            )
 
         db_user.is_active = False
         db_user.deleted_at = datetime.now(timezone.utc)

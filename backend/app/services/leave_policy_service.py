@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -10,11 +10,18 @@ from app.schemas.leave_policy import LeavePolicyCreate, LeavePolicyUpdate, Leave
 from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.exceptions import LeavePolicyNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_leave_policy(db: AsyncSession, policy: LeavePolicyCreate, current_user: Users) -> LeavePolicyOut:
+async def create_leave_policy(
+    db: AsyncSession,
+    policy: LeavePolicyCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_leave_policy"))
+) -> LeavePolicyOut:
     """
     Create a new leave policy with validation, version tracking, and logging.
     """
@@ -77,7 +84,11 @@ async def create_leave_policy(db: AsyncSession, policy: LeavePolicyCreate, curre
             detail="Error creating leave policy"
         )
 
-async def get_leave_policy_by_id(db: AsyncSession, policy_id: int) -> Optional[LeavePolicyOut]:
+async def get_leave_policy_by_id(
+    db: AsyncSession,
+    policy_id: int,
+    _: str = Depends(check_permission("view_leave_policy"))
+) -> Optional[LeavePolicyOut]:
     """
     Retrieve a leave policy by ID.
     """
@@ -104,7 +115,12 @@ async def get_leave_policy_by_id(db: AsyncSession, policy_id: int) -> Optional[L
             detail="Error retrieving leave policy"
         )
 
-async def get_leave_policies(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[LeavePolicyOut]:
+async def get_leave_policies(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_leave_policy"))
+) -> List[LeavePolicyOut]:
     """
     Retrieve a list of active leave policies with pagination.
     """
@@ -126,7 +142,13 @@ async def get_leave_policies(db: AsyncSession, skip: int = 0, limit: int = setti
             detail="Error retrieving leave policies"
         )
 
-async def update_leave_policy(db: AsyncSession, policy_id: int, policy_update: LeavePolicyUpdate, current_user: Users) -> LeavePolicyOut:
+async def update_leave_policy(
+    db: AsyncSession,
+    policy_id: int,
+    policy_update: LeavePolicyUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_leave_policy"))
+) -> LeavePolicyOut:
     """
     Update a leave policy with validation, version increment, and logging.
     """
@@ -143,11 +165,26 @@ async def update_leave_policy(db: AsyncSession, policy_id: int, policy_update: L
         if not db_policy:
             raise LeavePolicyNotFoundError()
 
+        # Check for duplicate leave type if updated
+        update_data = policy_update.model_dump(exclude_none=True)
+        if "leave_type" in update_data:
+            query = select(LeavePolicies).where(
+                LeavePolicies.leave_type == update_data["leave_type"],
+                LeavePolicies.policy_id != policy_id,
+                LeavePolicies.is_active == True,
+                LeavePolicies.deleted_at == None
+            )
+            result = await db.execute(query)
+            if result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Leave policy type already exists"
+                )
+
         # Store old values for logging
         old_values = db_policy.__dict__.copy()
 
         # Apply updates
-        update_data = policy_update.model_dump(exclude_none=True)
         for key, value in update_data.items():
             setattr(db_policy, key, value)
         db_policy.version += 1
@@ -182,7 +219,12 @@ async def update_leave_policy(db: AsyncSession, policy_id: int, policy_update: L
             detail="Error updating leave policy"
         )
 
-async def delete_leave_policy(db: AsyncSession, policy_id: int, current_user: Users) -> None:
+async def delete_leave_policy(
+    db: AsyncSession,
+    policy_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_leave_policy"))
+) -> None:
     """
     Soft delete a leave policy with logging.
     """

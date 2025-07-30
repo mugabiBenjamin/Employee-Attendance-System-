@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -11,11 +11,18 @@ from app.schemas.leave_balance import LeaveBalanceCreate, LeaveBalanceOut
 from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.exceptions import UserNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def get_leave_balance(db: AsyncSession, user: Users, leave_type: Optional[str] = None) -> List[LeaveBalanceOut]:
+async def get_leave_balance(
+    db: AsyncSession,
+    user: Users = Depends(get_current_user),
+    leave_type: Optional[str] = None,
+    _: str = Depends(check_permission("view_leave_balance"))
+) -> List[LeaveBalanceOut]:
     """
     Retrieve leave balances for a user with optional leave type filter.
     """
@@ -63,7 +70,14 @@ async def get_leave_balance(db: AsyncSession, user: Users, leave_type: Optional[
             detail="Error retrieving leave balances"
         )
 
-async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, balance_change: float, current_user: Users) -> LeaveBalanceOut:
+async def update_leave_balance(
+    db: AsyncSession,
+    user_id: int,
+    leave_type: str,
+    balance_change: float,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_leave_balance"))
+) -> LeaveBalanceOut:
     """
     Update leave balance for a user with validation and logging.
     """
@@ -85,7 +99,8 @@ async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, 
             LeavePolicies.deleted_at == None
         )
         result = await db.execute(query)
-        if not result.scalar_one_or_none():
+        policy = result.scalar_one_or_none()
+        if not policy:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid leave type"
@@ -117,7 +132,7 @@ async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, 
 
         # Update balance
         old_used_days = db_balance.used_days
-        new_used_days = max(0.0, db_balance.used_days - balance_change)  # Adjust used_days based on balance_change
+        new_used_days = max(0.0, db_balance.used_days - balance_change)
         db_balance.used_days = new_used_days
         db_balance.updated_at = datetime.now(timezone.utc)
         db.add(db_balance)
@@ -139,13 +154,6 @@ async def update_leave_balance(db: AsyncSession, user_id: int, leave_type: str, 
         await db.commit()
 
         # Fetch policy details
-        query = select(LeavePolicies).where(
-            LeavePolicies.leave_type == leave_type,
-            LeavePolicies.is_active == True,
-            LeavePolicies.deleted_at == None
-        )
-        result = await db.execute(query)
-        policy = result.scalar_one_or_none()
         balance_out = LeaveBalanceOut.model_validate(db_balance)
         balance_out.policy_details = policy.__dict__ if policy else {}
 

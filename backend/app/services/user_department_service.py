@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -10,11 +10,18 @@ from app.models.system_logs import SystemLogs
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
 from app.core.config import settings
 from app.core.enums import SystemAction
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_user_department(db: AsyncSession, user_department: UserDepartmentCreate, current_user: Users) -> UserDepartmentOut:
+async def create_user_department(
+    db: AsyncSession,
+    user_department: UserDepartmentCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_user_department"))
+) -> UserDepartmentOut:
     """Assign a user to a department."""
     try:
         # Validate user and department exist
@@ -60,15 +67,31 @@ async def create_user_department(db: AsyncSession, user_department: UserDepartme
             detail="Failed to create user department assignment"
         )
 
-async def get_user_department_by_id(db: AsyncSession, user_department_id: int) -> Optional[UserDepartmentOut]:
+async def get_user_department_by_id(
+    db: AsyncSession,
+    user_department_id: int,
+    _: str = Depends(check_permission("view_user_department"))
+) -> Optional[UserDepartmentOut]:
     """Retrieve a user-department assignment by ID."""
     try:
-        query = select(UserDepartments).where(UserDepartments.user_department_id == user_department_id)
+        query = select(UserDepartments).where(
+            UserDepartments.user_department_id == user_department_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
+        )
         result = await db.execute(query)
         user_department = result.scalar_one_or_none()
         
-        return UserDepartmentOut.model_validate(user_department) if user_department else None
+        if not user_department:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User department assignment not found"
+            )
 
+        return UserDepartmentOut.model_validate(user_department)
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving user department assignment {user_department_id}: {str(e)}")
         raise HTTPException(
@@ -76,7 +99,13 @@ async def get_user_department_by_id(db: AsyncSession, user_department_id: int) -
             detail="Failed to retrieve user department assignment"
         )
 
-async def get_user_departments(db: AsyncSession, user_id: int, skip: int = 0, limit: int = None) -> List[UserDepartmentOut]:
+async def get_user_departments(
+    db: AsyncSession,
+    user_id: int,
+    skip: int = 0,
+    limit: int = None,
+    _: str = Depends(check_permission("view_user_department"))
+) -> List[UserDepartmentOut]:
     """Get department assignments for a user."""
     try:
         await _validate_user_exists(db, user_id)
@@ -85,7 +114,11 @@ async def get_user_departments(db: AsyncSession, user_id: int, skip: int = 0, li
         
         query = (
             select(UserDepartments)
-            .where(UserDepartments.user_id == user_id)
+            .where(
+                UserDepartments.user_id == user_id,
+                UserDepartments.is_active == True,
+                UserDepartments.deleted_at == None
+            )
             .order_by(UserDepartments.is_primary.desc(), UserDepartments.assigned_at.desc())
             .offset(skip)
             .limit(limit)
@@ -106,11 +139,21 @@ async def get_user_departments(db: AsyncSession, user_id: int, skip: int = 0, li
             detail="Failed to retrieve department assignments"
         )
 
-async def update_user_department(db: AsyncSession, user_department_id: int, update_data: UserDepartmentUpdate, current_user: Users) -> UserDepartmentOut:
+async def update_user_department(
+    db: AsyncSession,
+    user_department_id: int,
+    update_data: UserDepartmentUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_user_department"))
+) -> UserDepartmentOut:
     """Update a user-department assignment."""
     try:
         # Get existing assignment
-        query = select(UserDepartments).where(UserDepartments.user_department_id == user_department_id)
+        query = select(UserDepartments).where(
+            UserDepartments.user_department_id == user_department_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
+        )
         result = await db.execute(query)
         db_user_department = result.scalar_one_or_none()
 
@@ -146,6 +189,8 @@ async def update_user_department(db: AsyncSession, user_department_id: int, upda
         for key, value in changes.items():
             setattr(db_user_department, key, value)
 
+        db_user_department.updated_at = datetime.now(timezone.utc)
+        db.add(db_user_department)
         await db.commit()
         await db.refresh(db_user_department)
 
@@ -165,10 +210,19 @@ async def update_user_department(db: AsyncSession, user_department_id: int, upda
             detail="Failed to update user department assignment"
         )
 
-async def delete_user_department(db: AsyncSession, user_department_id: int, current_user: Users) -> None:
-    """Delete a user-department assignment."""
+async def delete_user_department(
+    db: AsyncSession,
+    user_department_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_user_department"))
+) -> None:
+    """Soft delete a user-department assignment."""
     try:
-        query = select(UserDepartments).where(UserDepartments.user_department_id == user_department_id)
+        query = select(UserDepartments).where(
+            UserDepartments.user_department_id == user_department_id,
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
+        )
         result = await db.execute(query)
         db_user_department = result.scalar_one_or_none()
 
@@ -180,14 +234,16 @@ async def delete_user_department(db: AsyncSession, user_department_id: int, curr
 
         old_values = {k: v for k, v in db_user_department.__dict__.items() if not k.startswith('_')}
         
-        await db.delete(db_user_department)
+        db_user_department.is_active = False
+        db_user_department.deleted_at = datetime.now(timezone.utc)
+        db.add(db_user_department)
         await db.commit()
 
         # Log action
         await _log_action(db, current_user.user_id, SystemAction.DELETE,
                          user_department_id, old_values, None)
 
-        logger.info(f"User department assignment deleted: {user_department_id}")
+        logger.info(f"User department assignment soft deleted: {user_department_id}")
 
     except HTTPException:
         raise
@@ -215,7 +271,11 @@ async def _validate_user_exists(db: AsyncSession, user_id: int) -> None:
 
 async def _validate_department_exists(db: AsyncSession, department_id: int) -> None:
     """Validate that department exists and is active."""
-    query = select(Departments).where(Departments.department_id == department_id)
+    query = select(Departments).where(
+        Departments.department_id == department_id,
+        Departments.is_active == True,
+        Departments.deleted_at == None
+    )
     result = await db.execute(query)
     if not result.scalar_one_or_none():
         raise HTTPException(
@@ -227,7 +287,9 @@ async def _assignment_exists(db: AsyncSession, user_id: int, department_id: int,
     """Check if user is already assigned to department."""
     query = select(UserDepartments).where(
         UserDepartments.user_id == user_id,
-        UserDepartments.department_id == department_id
+        UserDepartments.department_id == department_id,
+        UserDepartments.is_active == True,
+        UserDepartments.deleted_at == None
     )
     if exclude_id:
         query = query.where(UserDepartments.user_department_id != exclude_id)
@@ -239,7 +301,9 @@ async def _clear_existing_primary(db: AsyncSession, user_id: int, exclude_id: in
     """Clear existing primary department assignments for user."""
     query = select(UserDepartments).where(
         UserDepartments.user_id == user_id,
-        UserDepartments.is_primary == True
+        UserDepartments.is_primary == True,
+        UserDepartments.is_active == True,
+        UserDepartments.deleted_at == None
     )
     if exclude_id:
         query = query.where(UserDepartments.user_department_id != exclude_id)
@@ -250,6 +314,7 @@ async def _clear_existing_primary(db: AsyncSession, user_id: int, exclude_id: in
     for assignment in existing_primary:
         assignment.is_primary = False
         db.add(assignment)
+    await db.commit()
 
 async def _log_action(db: AsyncSession, user_id: int, action: SystemAction, record_id: int, old_values: dict, new_values: dict) -> None:
     """Log system action."""

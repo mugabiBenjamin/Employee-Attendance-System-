@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -10,11 +10,18 @@ from app.schemas.employee_emergency_contact import EmployeeEmergencyContactCreat
 from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.exceptions import UserNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_emergency_contact(db: AsyncSession, contact: EmployeeEmergencyContactCreate, current_user: Users) -> EmployeeEmergencyContactOut:
+async def create_emergency_contact(
+    db: AsyncSession,
+    contact: EmployeeEmergencyContactCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_emergency_contact"))
+) -> EmployeeEmergencyContactOut:
     """
     Create a new emergency contact for an employee with validation and logging.
     """
@@ -66,7 +73,11 @@ async def create_emergency_contact(db: AsyncSession, contact: EmployeeEmergencyC
             detail="Error creating emergency contact"
         )
 
-async def get_emergency_contact_by_id(db: AsyncSession, contact_id: int) -> Optional[EmployeeEmergencyContactOut]:
+async def get_emergency_contact_by_id(
+    db: AsyncSession,
+    contact_id: int,
+    _: str = Depends(check_permission("view_emergency_contact"))
+) -> Optional[EmployeeEmergencyContactOut]:
     """
     Retrieve an emergency contact by ID.
     """
@@ -96,7 +107,13 @@ async def get_emergency_contact_by_id(db: AsyncSession, contact_id: int) -> Opti
             detail="Error retrieving emergency contact"
         )
 
-async def get_emergency_contacts_by_employee(db: AsyncSession, employee_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[EmployeeEmergencyContactOut]:
+async def get_emergency_contacts_by_employee(
+    db: AsyncSession,
+    employee_id: int,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_emergency_contact"))
+) -> List[EmployeeEmergencyContactOut]:
     """
     Retrieve a list of emergency contacts for an employee with pagination.
     """
@@ -130,7 +147,13 @@ async def get_emergency_contacts_by_employee(db: AsyncSession, employee_id: int,
             detail="Error retrieving emergency contacts"
         )
 
-async def update_emergency_contact(db: AsyncSession, contact_id: int, contact_update: EmployeeEmergencyContactUpdate, current_user: Users) -> EmployeeEmergencyContactOut:
+async def update_emergency_contact(
+    db: AsyncSession,
+    contact_id: int,
+    contact_update: EmployeeEmergencyContactUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_emergency_contact"))
+) -> EmployeeEmergencyContactOut:
     """
     Update an emergency contact with validation and logging.
     """
@@ -189,7 +212,12 @@ async def update_emergency_contact(db: AsyncSession, contact_id: int, contact_up
             detail="Error updating emergency contact"
         )
 
-async def delete_emergency_contact(db: AsyncSession, contact_id: int, current_user: Users) -> None:
+async def delete_emergency_contact(
+    db: AsyncSession,
+    contact_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_emergency_contact"))
+) -> None:
     """
     Soft delete an emergency contact with logging.
     """

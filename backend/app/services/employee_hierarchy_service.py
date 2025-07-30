@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -10,11 +10,18 @@ from app.schemas.employee_hierarchy import EmployeeHierarchyCreate, EmployeeHier
 from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.exceptions import UserNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_employee_hierarchy(db: AsyncSession, hierarchy: EmployeeHierarchyCreate, current_user: Users) -> EmployeeHierarchyOut:
+async def create_employee_hierarchy(
+    db: AsyncSession,
+    hierarchy: EmployeeHierarchyCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_employee_hierarchy"))
+) -> EmployeeHierarchyOut:
     """
     Create a new employee-manager relationship with validation and logging.
     """
@@ -87,7 +94,11 @@ async def create_employee_hierarchy(db: AsyncSession, hierarchy: EmployeeHierarc
             detail="Error creating employee hierarchy"
         )
 
-async def get_employee_hierarchy_by_id(db: AsyncSession, hierarchy_id: int) -> Optional[EmployeeHierarchyOut]:
+async def get_employee_hierarchy_by_id(
+    db: AsyncSession,
+    hierarchy_id: int,
+    _: str = Depends(check_permission("view_employee_hierarchy"))
+) -> Optional[EmployeeHierarchyOut]:
     """
     Retrieve an employee-manager relationship by ID.
     """
@@ -117,7 +128,12 @@ async def get_employee_hierarchy_by_id(db: AsyncSession, hierarchy_id: int) -> O
             detail="Error retrieving employee hierarchy"
         )
 
-async def get_employee_hierarchies(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[EmployeeHierarchyOut]:
+async def get_employee_hierarchies(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_employee_hierarchy"))
+) -> List[EmployeeHierarchyOut]:
     """
     Retrieve a list of active employee-manager relationships with pagination.
     """
@@ -139,7 +155,13 @@ async def get_employee_hierarchies(db: AsyncSession, skip: int = 0, limit: int =
             detail="Error retrieving employee hierarchies"
         )
 
-async def update_employee_hierarchy(db: AsyncSession, hierarchy_id: int, hierarchy_update: EmployeeHierarchyUpdate, current_user: Users) -> EmployeeHierarchyOut:
+async def update_employee_hierarchy(
+    db: AsyncSession,
+    hierarchy_id: int,
+    hierarchy_update: EmployeeHierarchyUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_employee_hierarchy"))
+) -> EmployeeHierarchyOut:
     """
     Update an employee-manager relationship with validation and logging.
     """
@@ -216,7 +238,12 @@ async def update_employee_hierarchy(db: AsyncSession, hierarchy_id: int, hierarc
             detail="Error updating employee hierarchy"
         )
 
-async def delete_employee_hierarchy(db: AsyncSession, hierarchy_id: int, current_user: Users) -> None:
+async def delete_employee_hierarchy(
+    db: AsyncSession,
+    hierarchy_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_employee_hierarchy"))
+) -> None:
     """
     Soft delete an employee-manager relationship with logging.
     """

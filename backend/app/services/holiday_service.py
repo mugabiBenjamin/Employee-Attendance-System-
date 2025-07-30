@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, date
@@ -11,11 +11,18 @@ from app.schemas.holiday_calendar import HolidayCalendarCreate, HolidayCalendarU
 from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.exceptions import DepartmentNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_holiday(db: AsyncSession, holiday: HolidayCalendarCreate, current_user: Users) -> HolidayCalendarOut:
+async def create_holiday(
+    db: AsyncSession,
+    holiday: HolidayCalendarCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_holiday"))
+) -> HolidayCalendarOut:
     """
     Create a new holiday with validation and logging.
     """
@@ -33,12 +40,24 @@ async def create_holiday(db: AsyncSession, holiday: HolidayCalendarCreate, curre
                 detail="Holiday already exists for this date"
             )
 
+        # Validate department_id if provided
+        if holiday.department_id:
+            query = select(Departments).where(
+                Departments.department_id == holiday.department_id,
+                Departments.is_active == True,
+                Departments.deleted_at == None
+            )
+            result = await db.execute(query)
+            if not result.scalar_one_or_none():
+                raise DepartmentNotFoundError()
+
         # Create holiday
         db_holiday = HolidayCalendar(
             holiday_name=holiday.holiday_name,
             holiday_date=holiday.date,
             is_recurring=holiday.is_recurring,
-            applies_to_all=True,
+            applies_to_all=holiday.department_id is None,
+            department_id=holiday.department_id,
             year=holiday.date.year,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
@@ -73,7 +92,11 @@ async def create_holiday(db: AsyncSession, holiday: HolidayCalendarCreate, curre
             detail="Error creating holiday"
         )
 
-async def get_holiday_by_id(db: AsyncSession, holiday_id: int) -> Optional[HolidayCalendarOut]:
+async def get_holiday_by_id(
+    db: AsyncSession,
+    holiday_id: int,
+    _: str = Depends(check_permission("view_holiday"))
+) -> Optional[HolidayCalendarOut]:
     """
     Retrieve a holiday by ID.
     """
@@ -103,7 +126,12 @@ async def get_holiday_by_id(db: AsyncSession, holiday_id: int) -> Optional[Holid
             detail="Error retrieving holiday"
         )
 
-async def get_holidays(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[HolidayCalendarOut]:
+async def get_holidays(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_holiday"))
+) -> List[HolidayCalendarOut]:
     """
     Retrieve a list of active holidays with pagination.
     """
@@ -125,7 +153,13 @@ async def get_holidays(db: AsyncSession, skip: int = 0, limit: int = settings.DE
             detail="Error retrieving holidays"
         )
 
-async def update_holiday(db: AsyncSession, holiday_id: int, holiday_update: HolidayCalendarUpdate, current_user: Users) -> HolidayCalendarOut:
+async def update_holiday(
+    db: AsyncSession,
+    holiday_id: int,
+    holiday_update: HolidayCalendarUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("update_holiday"))
+) -> HolidayCalendarOut:
     """
     Update a holiday with validation and logging.
     """
@@ -172,7 +206,9 @@ async def update_holiday(db: AsyncSession, holiday_id: int, holiday_update: Holi
             if not result.scalar_one_or_none():
                 raise DepartmentNotFoundError()
 
-        # Update year if holiday_date is updated
+        # Update applies_to_all and year if necessary
+        if "department_id" in update_data:
+            update_data["applies_to_all"] = update_data["department_id"] is None
         if "holiday_date" in update_data:
             update_data["year"] = update_data["holiday_date"].year
 
@@ -211,7 +247,12 @@ async def update_holiday(db: AsyncSession, holiday_id: int, holiday_update: Holi
             detail="Error updating holiday"
         )
 
-async def delete_holiday(db: AsyncSession, holiday_id: int, current_user: Users) -> None:
+async def delete_holiday(
+    db: AsyncSession,
+    holiday_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("delete_holiday"))
+) -> None:
     """
     Soft delete a holiday with logging.
     """

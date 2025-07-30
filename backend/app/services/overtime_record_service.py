@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, date
@@ -12,11 +12,18 @@ from app.core.config import settings
 from app.core.enums import SystemAction
 from app.core.mail import send_email
 from app.core.exceptions import UserNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import check_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_overtime_record(db: AsyncSession, overtime: OvertimeRecordCreate, current_user: Users) -> OvertimeRecordOut:
+async def create_overtime_record(
+    db: AsyncSession,
+    overtime: OvertimeRecordCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("create_overtime_record"))
+) -> OvertimeRecordOut:
     """
     Create an overtime record with validation, logging, and email notification to manager.
     """
@@ -105,7 +112,11 @@ async def create_overtime_record(db: AsyncSession, overtime: OvertimeRecordCreat
             detail="Error creating overtime record"
         )
 
-async def get_overtime_record_by_id(db: AsyncSession, overtime_id: int) -> Optional[OvertimeRecordOut]:
+async def get_overtime_record_by_id(
+    db: AsyncSession,
+    overtime_id: int,
+    _: str = Depends(check_permission("view_overtime_record"))
+) -> Optional[OvertimeRecordOut]:
     """
     Retrieve an overtime record by ID.
     """
@@ -135,7 +146,15 @@ async def get_overtime_record_by_id(db: AsyncSession, overtime_id: int) -> Optio
             detail="Error retrieving overtime record"
         )
 
-async def get_user_overtime_records(db: AsyncSession, user_id: int, start_date: Optional[date] = None, end_date: Optional[date] = None, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[OvertimeRecordOut]:
+async def get_user_overtime_records(
+    db: AsyncSession,
+    user_id: int,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_overtime_record"))
+) -> List[OvertimeRecordOut]:
     """
     Retrieve a list of overtime records for a user with optional date range and pagination.
     """
@@ -175,7 +194,15 @@ async def get_user_overtime_records(db: AsyncSession, user_id: int, start_date: 
             detail="Error retrieving overtime records"
         )
 
-async def get_team_overtime_records(db: AsyncSession, manager: Users, start_date: Optional[date] = None, end_date: Optional[date] = None, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[OvertimeRecordOut]:
+async def get_team_overtime_records(
+    db: AsyncSession,
+    manager: Users = Depends(get_current_user),
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(check_permission("view_team_overtime_records"))
+) -> List[OvertimeRecordOut]:
     """
     Retrieve overtime records for a manager's team with optional date range and pagination.
     """
