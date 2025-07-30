@@ -6,58 +6,59 @@ from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.users import Users
-from app.models.user_roles import UserRoles
-from app.models.roles import Roles
-from app.core.permissions import check_permissions
+from app.core.permissions import require_permissions, check_permissions
 from app.core.security import get_current_active_user
 from app.core.config import settings
 from app.core.enums import Permission
-from app.schemas.employee_hierarchy import EmployeeHierarchyCreate, EmployeeHierarchyUpdate, EmployeeHierarchyOut
+from app.schemas.employee_hierarchy import (
+    EmployeeHierarchyCreate, 
+    EmployeeHierarchyUpdate, 
+    EmployeeHierarchyOut
+)
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/employee-hierarchy", tags=["Employee Hierarchy"])
 
-async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
-    try:
-        query = select(UserRoles).join(Roles).where(
-            UserRoles.user_id == user.user_id,
-            UserRoles.is_active == True,
-            Roles.role_name.in_(["HR", "Admin", "Super_Admin"]),
-            Roles.is_active == True
-        )
-        result = await db.execute(query)
-        return result.scalar_one_or_none() is not None
-    except Exception as e:
-        logger.error(f"Error checking admin/hr role for user_id {user.user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
-
-@router.post("/", response_model=EmployeeHierarchyOut, status_code=status.HTTP_201_CREATED, summary="Create employee hierarchy")
+@router.post("/", response_model=EmployeeHierarchyOut, status_code=status.HTTP_201_CREATED)
+@require_permissions([Permission.MANAGE_EMPLOYEES])
 async def create_employee_hierarchy(
     hierarchy: EmployeeHierarchyCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmployeeHierarchyOut:
+    """Create employee hierarchy relationship. Requires MANAGE_EMPLOYEES permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_EMPLOYEE_HIERARCHY.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create employee hierarchy")
-
-        query = select(Users).where(Users.user_id == hierarchy.employee_id, Users.is_active == True, Users.deleted_at == None)
+        # Validate employee exists
+        query = select(Users).where(
+            Users.user_id == hierarchy.employee_id,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
-        query = select(Users).where(Users.user_id == hierarchy.manager_id, Users.is_active == True, Users.deleted_at == None)
+        # Validate manager exists
+        query = select(Users).where(
+            Users.user_id == hierarchy.manager_id,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manager not found")
 
+        # Prevent self-management
         if hierarchy.employee_id == hierarchy.manager_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee cannot be their own manager")
 
-        query = select(EmployeeHierarchy).where(EmployeeHierarchy.employee_id == hierarchy.employee_id, EmployeeHierarchy.is_active == True)
+        # Check if employee already has a manager
+        query = select(EmployeeHierarchy).where(
+            EmployeeHierarchy.employee_id == hierarchy.employee_id,
+            EmployeeHierarchy.is_active == True
+        )
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee already has a manager")
@@ -72,7 +73,7 @@ async def create_employee_hierarchy(
         await db.commit()
         await db.refresh(db_hierarchy)
 
-        logger.info(f"Employee hierarchy created, hierarchy_id: {db_hierarchy.hierarchy_id}, employee_id: {db_hierarchy.employee_id}")
+        logger.info(f"Hierarchy created: {db_hierarchy.hierarchy_id} (employee: {db_hierarchy.employee_id})")
         return EmployeeHierarchyOut.model_validate(db_hierarchy)
 
     except HTTPException:
@@ -81,17 +82,14 @@ async def create_employee_hierarchy(
         logger.error(f"Error creating employee hierarchy: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating employee hierarchy")
 
-@router.get("/{hierarchy_id}", response_model=EmployeeHierarchyOut, summary="Get employee hierarchy by ID")
-async def read_employee_hierarchy(
+@router.get("/{hierarchy_id}", response_model=EmployeeHierarchyOut)
+async def get_employee_hierarchy(
     hierarchy_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmployeeHierarchyOut:
+    """Get hierarchy by ID. Managers can view their team, HR/Admin can view all."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_EMPLOYEE_HIERARCHY.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view employee hierarchy")
-
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.hierarchy_id == hierarchy_id,
             EmployeeHierarchy.is_active == True,
@@ -103,7 +101,16 @@ async def read_employee_hierarchy(
         if not hierarchy:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee hierarchy not found")
 
-        logger.info(f"Retrieved employee hierarchy, hierarchy_id: {hierarchy_id}")
+        # Check permissions: view all, team management, or own hierarchy
+        can_view_all = await check_permissions([Permission.VIEW_ALL_ATTENDANCE], current_user, db)
+        can_view_team = await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
+        
+        if not can_view_all:
+            if can_view_team and hierarchy.manager_id != current_user.user_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this hierarchy")
+            elif not can_view_team and hierarchy.employee_id != current_user.user_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this hierarchy")
+
         return EmployeeHierarchyOut.model_validate(hierarchy)
 
     except HTTPException:
@@ -112,27 +119,44 @@ async def read_employee_hierarchy(
         logger.error(f"Error retrieving employee hierarchy {hierarchy_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving employee hierarchy")
 
-@router.get("/", response_model=List[EmployeeHierarchyOut], summary="List all employee hierarchies")
-async def read_employee_hierarchies(
+@router.get("/", response_model=List[EmployeeHierarchyOut])
+async def list_employee_hierarchies(
     employee_id: Optional[int] = None,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[EmployeeHierarchyOut]:
+    """List hierarchies. Managers see their team, HR/Admin see all."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_EMPLOYEE_HIERARCHY.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view employee hierarchies")
-
-        query = select(EmployeeHierarchy).where(EmployeeHierarchy.is_active == True, EmployeeHierarchy.deleted_at == None)
+        can_view_all = await check_permissions([Permission.VIEW_ALL_ATTENDANCE], current_user, db)
+        can_view_team = await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
+        
+        query = select(EmployeeHierarchy).where(
+            EmployeeHierarchy.is_active == True,
+            EmployeeHierarchy.deleted_at == None
+        )
+        
         if employee_id:
+            # Filter by specific employee
+            if not can_view_all and employee_id != current_user.user_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view other employees' hierarchy")
             query = query.where(EmployeeHierarchy.employee_id == employee_id)
+        elif not can_view_all:
+            if can_view_team:
+                # Show team members or own hierarchy
+                query = query.where(
+                    (EmployeeHierarchy.manager_id == current_user.user_id) |
+                    (EmployeeHierarchy.employee_id == current_user.user_id)
+                )
+            else:
+                # Show only own hierarchy
+                query = query.where(EmployeeHierarchy.employee_id == current_user.user_id)
+        
         query = query.offset(skip).limit(limit)
         result = await db.execute(query)
         hierarchies = result.scalars().all()
 
-        logger.info(f"Retrieved {len(hierarchies)} employee hierarchies")
         return [EmployeeHierarchyOut.model_validate(hierarchy) for hierarchy in hierarchies]
 
     except HTTPException:
@@ -141,18 +165,16 @@ async def read_employee_hierarchies(
         logger.error(f"Error retrieving employee hierarchies: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving employee hierarchies")
 
-@router.put("/{hierarchy_id}", response_model=EmployeeHierarchyOut, summary="Update employee hierarchy")
+@router.put("/{hierarchy_id}", response_model=EmployeeHierarchyOut)
+@require_permissions([Permission.MANAGE_EMPLOYEES])
 async def update_employee_hierarchy(
     hierarchy_id: int,
     hierarchy_update: EmployeeHierarchyUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmployeeHierarchyOut:
+    """Update employee hierarchy. Requires MANAGE_EMPLOYEES permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_EMPLOYEE_HIERARCHY.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update employee hierarchies")
-
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.hierarchy_id == hierarchy_id,
             EmployeeHierarchy.is_active == True,
@@ -165,23 +187,38 @@ async def update_employee_hierarchy(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee hierarchy not found")
 
         update_data = hierarchy_update.model_dump(exclude_none=True)
+        
+        # Validate employee if being updated
         if "employee_id" in update_data:
-            query = select(Users).where(Users.user_id == update_data["employee_id"], Users.is_active == True, Users.deleted_at == None)
+            query = select(Users).where(
+                Users.user_id == update_data["employee_id"],
+                Users.is_active == True,
+                Users.deleted_at == None
+            )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
+        # Validate manager if being updated
         if "manager_id" in update_data:
-            query = select(Users).where(Users.user_id == update_data["manager_id"], Users.is_active == True, Users.deleted_at == None)
+            query = select(Users).where(
+                Users.user_id == update_data["manager_id"],
+                Users.is_active == True,
+                Users.deleted_at == None
+            )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manager not found")
 
+        # Validate no self-management and no duplicate hierarchy
         if update_data.get("employee_id") or update_data.get("manager_id"):
             new_employee_id = update_data.get("employee_id", hierarchy.employee_id)
-            if new_employee_id == update_data.get("manager_id", hierarchy.manager_id):
+            new_manager_id = update_data.get("manager_id", hierarchy.manager_id)
+            
+            if new_employee_id == new_manager_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee cannot be their own manager")
 
+            # Check for duplicate hierarchy
             query = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == new_employee_id,
                 EmployeeHierarchy.is_active == True,
@@ -191,15 +228,15 @@ async def update_employee_hierarchy(
             if result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee already has a manager")
 
+        # Apply updates
         for key, value in update_data.items():
             setattr(hierarchy, key, value)
 
         hierarchy.updated_at = datetime.now(timezone.utc)
-        db.add(hierarchy)
         await db.commit()
         await db.refresh(hierarchy)
 
-        logger.info(f"Employee hierarchy updated, hierarchy_id: {hierarchy_id}")
+        logger.info(f"Hierarchy updated: {hierarchy_id}")
         return EmployeeHierarchyOut.model_validate(hierarchy)
 
     except HTTPException:
@@ -208,17 +245,15 @@ async def update_employee_hierarchy(
         logger.error(f"Error updating employee hierarchy {hierarchy_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating employee hierarchy")
 
-@router.delete("/{hierarchy_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete employee hierarchy")
+@router.delete("/{hierarchy_id}", status_code=status.HTTP_204_NO_CONTENT)
+@require_permissions([Permission.MANAGE_EMPLOYEES])
 async def delete_employee_hierarchy(
     hierarchy_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
+    """Soft delete employee hierarchy. Requires MANAGE_EMPLOYEES permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_EMPLOYEE_HIERARCHY.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete employee hierarchies")
-
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.hierarchy_id == hierarchy_id,
             EmployeeHierarchy.is_active == True,
@@ -234,7 +269,7 @@ async def delete_employee_hierarchy(
         hierarchy.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
-        logger.info(f"Employee hierarchy soft deleted, hierarchy_id: {hierarchy_id}")
+        logger.info(f"Hierarchy deleted: {hierarchy_id}")
 
     except HTTPException:
         raise

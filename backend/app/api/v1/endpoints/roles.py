@@ -7,7 +7,7 @@ from app.core.database import get_db
 from app.models.roles import Roles
 from app.models.users import Users
 from app.models.user_roles import UserRoles
-from app.core.permissions import check_permissions
+from app.core.permissions import require_permissions
 from app.core.security import get_current_active_user
 from app.core.config import settings
 from app.core.enums import Permission
@@ -18,35 +18,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/roles", tags=["Roles"])
 
-async def is_admin_or_super_admin(db: AsyncSession, user: Users) -> bool:
-    try:
-        query = select(UserRoles).join(Roles).where(
-            UserRoles.user_id == user.user_id,
-            UserRoles.is_active == True,
-            Roles.role_name.in_(["Admin", "Super_Admin"]),
-            Roles.is_active == True
-        )
-        result = await db.execute(query)
-        return result.scalar_one_or_none() is not None
-    except Exception as e:
-        logger.error(f"Error checking admin role for user_id {user.user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
-
-@router.post("/", response_model=RoleOut, status_code=status.HTTP_201_CREATED, summary="Create new role")
+@router.post("/", response_model=RoleOut, status_code=status.HTTP_201_CREATED)
+@require_permissions([Permission.MANAGE_ROLES])
 async def create_role(
     role: RoleCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> RoleOut:
+    """Create a new role."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create roles")
-
-        query = select(Roles).where(Roles.role_name == role.role_name, Roles.is_active == True)
+        # Check if role name already exists
+        query = select(Roles).where(
+            Roles.role_name == role.role_name,
+            Roles.is_active == True
+        )
         result = await db.execute(query)
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role name already exists")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Role name already exists"
+            )
 
         db_role = Roles(
             role_name=role.role_name,
@@ -56,145 +47,189 @@ async def create_role(
             updated_at=datetime.now(timezone.utc),
             is_active=True
         )
+        
         db.add(db_role)
         await db.commit()
         await db.refresh(db_role)
 
-        logger.info(f"Role created, role_id: {db_role.role_id}, role_name: {db_role.role_name}")
+        logger.info(f"Created role: {db_role.role_id}")
         return RoleOut.model_validate(db_role)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating role: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating role")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error creating role"
+        )
 
-@router.get("/{role_id}", response_model=RoleOut, summary="Get role by ID")
-async def read_role(
+@router.get("/{role_id}", response_model=RoleOut)
+@require_permissions([Permission.MANAGE_ROLES])
+async def get_role(
     role_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> RoleOut:
+    """Get role by ID."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view roles")
-
-        query = select(Roles).where(Roles.role_id == role_id, Roles.is_active == True, Roles.deleted_at == None)
+        query = select(Roles).where(
+            Roles.role_id == role_id,
+            Roles.is_active == True,
+            Roles.deleted_at == None
+        )
         result = await db.execute(query)
         role = result.scalar_one_or_none()
 
         if not role:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Role not found"
+            )
 
-        logger.info(f"Retrieved role, role_id: {role_id}")
         return RoleOut.model_validate(role)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error retrieving role {role_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving role")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving role"
+        )
 
-@router.get("/", response_model=List[RoleOut], summary="List all roles")
-async def read_roles(
+@router.get("/", response_model=List[RoleOut])
+@require_permissions([Permission.MANAGE_ROLES])
+async def list_roles(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[RoleOut]:
+    """List all active roles."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view roles")
-
-        query = select(Roles).where(Roles.is_active == True, Roles.deleted_at == None).offset(skip).limit(limit)
+        query = select(Roles).where(
+            Roles.is_active == True,
+            Roles.deleted_at == None
+        ).offset(skip).limit(limit)
+        
         result = await db.execute(query)
         roles = result.scalars().all()
 
-        logger.info(f"Retrieved {len(roles)} roles")
         return [RoleOut.model_validate(role) for role in roles]
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error retrieving roles: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving roles")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving roles"
+        )
 
-@router.put("/{role_id}", response_model=RoleOut, summary="Update role")
+@router.put("/{role_id}", response_model=RoleOut)
+@require_permissions([Permission.MANAGE_ROLES])
 async def update_role(
     role_id: int,
     role_update: RoleUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> RoleOut:
+    """Update an existing role."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update roles")
-
-        query = select(Roles).where(Roles.role_id == role_id, Roles.is_active == True, Roles.deleted_at == None)
+        query = select(Roles).where(
+            Roles.role_id == role_id,
+            Roles.is_active == True,
+            Roles.deleted_at == None
+        )
         result = await db.execute(query)
         role = result.scalar_one_or_none()
 
         if not role:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Role not found"
+            )
 
         update_data = role_update.model_dump(exclude_none=True)
+        
+        # Check for name conflicts if updating role_name
         if "role_name" in update_data and update_data["role_name"] != role.role_name:
-            query = select(Roles).where(Roles.role_name == update_data["role_name"], Roles.is_active == True)
+            query = select(Roles).where(
+                Roles.role_name == update_data["role_name"],
+                Roles.is_active == True
+            )
             result = await db.execute(query)
             if result.scalar_one_or_none():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role name already exists")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Role name already exists"
+                )
 
+        # Update fields
         for key, value in update_data.items():
             setattr(role, key, value)
 
         role.updated_at = datetime.now(timezone.utc)
-        db.add(role)
         await db.commit()
         await db.refresh(role)
 
-        logger.info(f"Role updated, role_id: {role_id}")
+        logger.info(f"Updated role: {role_id}")
         return RoleOut.model_validate(role)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error updating role {role_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating role")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error updating role"
+        )
 
-@router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete role")
+@router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+@require_permissions([Permission.MANAGE_ROLES])
 async def delete_role(
     role_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
+    """Soft delete a role."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_ROLES.value], current_user, db)
-        if not has_permission and not await is_admin_or_super_admin(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete roles")
-
-        query = select(Roles).where(Roles.role_id == role_id, Roles.is_active == True, Roles.deleted_at == None)
+        query = select(Roles).where(
+            Roles.role_id == role_id,
+            Roles.is_active == True,
+            Roles.deleted_at == None
+        )
         result = await db.execute(query)
         role = result.scalar_one_or_none()
 
         if not role:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Role not found"
+            )
 
-        query = select(UserRoles).where(UserRoles.role_id == role_id, UserRoles.is_active == True)
+        # Check if role is assigned to users
+        query = select(UserRoles).where(
+            UserRoles.role_id == role_id,
+            UserRoles.is_active == True
+        )
         result = await db.execute(query)
         if result.scalars().first():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete role; it is assigned to users")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete role; it is assigned to users"
+            )
 
         role.is_active = False
         role.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
-        logger.info(f"Role soft deleted, role_id: {role_id}")
+        logger.info(f"Deleted role: {role_id}")
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting role {role_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting role")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error deleting role"
+        )

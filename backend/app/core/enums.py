@@ -73,11 +73,31 @@ class ShiftType(str, Enum):
     SPLIT = "split"
 
 class Permission(str, Enum):
-    MANAGE_DEPARTMENTS = "manage_departments"
-    VIEW_DEPARTMENTS = "view_departments"
-    APPROVE_TIME_CORRECTIONS = "approve_time_corrections"
-    MANAGE_EMERGENCY_CONTACTS = "manage_emergency_contacts"
-    VIEW_EMERGENCY_CONTACTS = "view_emergency_contacts"
+    # Employee permissions
+    CLOCK_IN = "clock_in"
+    CLOCK_OUT = "clock_out"
+    REQUEST_LEAVE = "request_leave"
+    VIEW_LEAVE_BALANCE = "view_leave_balance"
+    VIEW_OWN_ATTENDANCE = "view_own_attendance"
+    
+    # Manager permissions
+    APPROVE_LEAVE = "approve_leave"
+    MANAGE_OVERTIME = "manage_overtime"
+    GENERATE_REPORTS = "generate_reports"
+    VIEW_TEAM_ATTENDANCE = "view_team_attendance"
+    
+    # HR permissions
+    MANAGE_EMPLOYEES = "manage_employees"
+    VIEW_ALL_ATTENDANCE = "view_all_attendance"
+    MANAGE_LEAVE_POLICIES = "manage_leave_policies"
+    GENERATE_COMPLIANCE_REPORTS = "generate_compliance_reports"
+    
+    # Admin permissions
+    VIEW_LOGS = "view_logs"
+    MANAGE_ROLES = "manage_roles"
     MANAGE_USERS = "manage_users"
-    VIEW_USERS = "view_users"
+    MANAGE_DEPARTMENTS = "manage_departments"
+    SYSTEM_CONFIGURATION = "system_configuration"
+    
+    # Super Admin
     ALL_PERMISSIONS = "all_permissions"

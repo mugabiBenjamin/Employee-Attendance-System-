@@ -5,8 +5,6 @@ from typing import List
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.users import Users
-from app.models.user_roles import UserRoles
-from app.models.roles import Roles
 from app.core.security import get_password_hash, get_current_active_user
 from app.core.permissions import check_permissions
 from app.core.config import settings
@@ -18,36 +16,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-async def is_admin_or_hr(db: AsyncSession, user: Users) -> bool:
-    try:
-        query = select(UserRoles).join(Roles).where(
-            UserRoles.user_id == user.user_id,
-            UserRoles.is_active == True,
-            Roles.role_name.in_(["HR", "Admin", "Super_Admin"]),
-            Roles.is_active == True
-        )
-        result = await db.execute(query)
-        return result.scalar_one_or_none() is not None
-    except Exception as e:
-        logger.error(f"Error checking admin/hr role for user_id {user.user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error checking user role")
-
 @router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED, summary="Create new user")
 async def create_new_user(
     user: UserCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserOut:
+    """Create a new user. Requires MANAGE_USERS permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create users")
+        # Check permissions using the existing system
+        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
 
+        # Check if email already exists
         query = select(Users).where(Users.email == user.email, Users.is_active == True)
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
 
+        # Create new user
         db_user = Users(
             email=user.email,
             password_hash=get_password_hash(user.password_hash),
@@ -82,10 +68,11 @@ async def read_user(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserOut:
+    """Get a user by ID. Requires MANAGE_USERS permission or viewing own profile."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_USERS.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view users")
+        # Allow users to view their own profile, otherwise require MANAGE_USERS permission
+        if current_user.user_id != user_id:
+            await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
 
         query = select(Users).where(
             Users.user_id == user_id,
@@ -114,10 +101,9 @@ async def read_users(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[UserOut]:
+    """List all users. Requires MANAGE_USERS permission."""
     try:
-        has_permission = await check_permissions([Permission.VIEW_USERS.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view users")
+        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
 
         query = select(Users).where(
             Users.is_active == True,
@@ -142,11 +128,26 @@ async def update_existing_user(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> UserOut:
+    """Update a user. Requires MANAGE_USERS permission or updating own profile (limited fields)."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update users")
+        # Check if user is updating their own profile
+        is_self_update = current_user.user_id == user_id
+        
+        if not is_self_update:
+            # Require MANAGE_USERS permission for updating other users
+            await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
+        else:
+            # For self-updates, restrict which fields can be modified
+            restricted_fields = {'salary', 'employee_type', 'manager_id', 'is_active', 'hire_date'}
+            update_data = user_update.model_dump(exclude_none=True)
+            forbidden_fields = restricted_fields.intersection(update_data.keys())
+            if forbidden_fields:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, 
+                    detail=f"Cannot modify restricted fields: {', '.join(forbidden_fields)}"
+                )
 
+        # Get the user to update
         query = select(Users).where(
             Users.user_id == user_id,
             Users.is_active == True,
@@ -158,6 +159,7 @@ async def update_existing_user(
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+        # Check email uniqueness if email is being updated
         update_data = user_update.model_dump(exclude_none=True)
         if "email" in update_data and update_data["email"] != user.email:
             query = select(Users).where(Users.email == update_data["email"], Users.is_active == True)
@@ -165,6 +167,7 @@ async def update_existing_user(
             if result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
 
+        # Apply updates
         for key, value in update_data.items():
             setattr(user, key, value)
 
@@ -188,10 +191,16 @@ async def delete_existing_user(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> None:
+    """Soft delete a user. Requires MANAGE_USERS permission."""
     try:
-        has_permission = await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-        if not has_permission and not await is_admin_or_hr(db, current_user):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete users")
+        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
+
+        # Prevent self-deletion
+        if current_user.user_id == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Cannot delete your own account"
+            )
 
         query = select(Users).where(
             Users.user_id == user_id,
@@ -204,8 +213,11 @@ async def delete_existing_user(
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+        # Soft delete
         user.is_active = False
         user.deleted_at = datetime.now(timezone.utc)
+        user.updated_at = datetime.now(timezone.utc)
+        
         await db.commit()
 
         logger.info(f"User soft deleted, user_id: {user_id}")
@@ -215,3 +227,11 @@ async def delete_existing_user(
     except Exception as e:
         logger.error(f"Error deleting user {user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting user")
+
+# Additional endpoint for user profile (self-view)
+@router.get("/me/profile", response_model=UserOut, summary="Get current user profile")
+async def get_current_user_profile(
+    current_user: Users = Depends(get_current_active_user)
+) -> UserOut:
+    """Get the current authenticated user's profile."""
+    return UserOut.model_validate(current_user)
