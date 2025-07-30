@@ -10,10 +10,12 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
-  },  
+  },
+  server: {
+    port: 3000    
+  }
 });
 
 // yarn add -D @types/node
 // This provides TypeScript declarations for Node.js modules like path and globals like __dirname.
-
 // npx shadcn@latest init
