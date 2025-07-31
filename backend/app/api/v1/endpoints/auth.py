@@ -37,7 +37,7 @@ class UserProfile(BaseModel):
     email: str
     first_name: str
     last_name: str
-    job_title: str
+    job_title: str | None  # Allow None to match database schema
     model_config = ConfigDict(from_attributes=True)
 
 async def log_system_action(db: AsyncSession, user_id: int, action: SystemAction, details: str = None):
