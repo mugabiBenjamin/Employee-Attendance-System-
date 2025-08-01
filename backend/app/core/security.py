@@ -77,3 +77,14 @@ def decode_refresh_token(refresh_token: str) -> dict:
             detail="Invalid refresh token",
             headers={"WWW-Authenticate": "Bearer"}
         )
+
+def decode_access_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid access token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )

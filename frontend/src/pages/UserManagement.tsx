@@ -102,43 +102,43 @@ function UserManagement() {
   ];
 
   const fields = [
-    {
-      name: "email",
-      label: "Email",
-      type: "email",
-      placeholder: "Enter email",
-    },
-    {
-      name: "first_name",
-      label: "First Name",
-      type: "text",
-      placeholder: "Enter first name",
-    },
-    {
-      name: "last_name",
-      label: "Last Name",
-      type: "text",
-      placeholder: "Enter last name",
-    },
-    {
-      name: "password",
-      label: "Password",
-      type: "password",
-      placeholder: "Enter password",
-      description: "Optional",
-    },
-    {
-      name: "department_id",
-      label: "Department",
-      type: "select",
-      placeholder: "Select department",
-      description: "Optional",
-      options: departments.map((d) => ({
-        value: d.id.toString(),
-        label: d.name,
-      })),
-    },
-  ];
+  {
+    name: "email" as const,
+    label: "Email",
+    type: "email" as const,
+    placeholder: "Enter email",
+  },
+  {
+    name: "first_name" as const,
+    label: "First Name", 
+    type: "text" as const,
+    placeholder: "Enter first name",
+  },
+  {
+    name: "last_name" as const,
+    label: "Last Name",
+    type: "text" as const, 
+    placeholder: "Enter last name",
+  },
+  {
+    name: "password" as const,
+    label: "Password",
+    type: "password" as const,
+    placeholder: "Enter password",
+    description: "Optional",
+  },
+  {
+    name: "department_id" as const,
+    label: "Department",
+    type: "select" as const,
+    placeholder: "Select department", 
+    description: "Optional",
+    options: departments.map((d) => ({
+      value: d.id.toString(),
+      label: d.name,
+    })),
+  },
+];
 
   if (!isAuthenticated || !user?.permissions.includes("manage_users")) {
     return <Navigate to="/" replace />;

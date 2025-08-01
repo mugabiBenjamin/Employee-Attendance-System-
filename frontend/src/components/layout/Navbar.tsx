@@ -21,7 +21,7 @@ function Navbar() {
       {user && (
         <div className="flex items-center gap-4">
           <span className="text-sm">{user.email}</span>
-          <Button variant="outline" onClick={handleLogout}>
+          <Button variant="destructive" onClick={handleLogout}>
             Log Out
           </Button>
         </div>

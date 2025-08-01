@@ -17,30 +17,68 @@ export const authApi = {
       },
     });
 
-    // Store the access token in the api client headers
-    const { access_token } = response.data;
+    const { access_token, refresh_token } = response.data;
+    
+    // Store tokens in localStorage
+    localStorage.setItem('access_token', access_token);
+    localStorage.setItem('refresh_token', refresh_token);
+    
+    // Set Authorization header for immediate use
     api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-
+    
+    // Get user profile
     const user = await authApi.getCurrentUser();
+    
     return { ...response.data, user };
   },
 
   getCurrentUser: async (): Promise<User> => {
-    const response = await api.get<User>('/auth/me');
-    return response.data;
+    const response = await api.get<{
+      user_id: number;
+      email: string;
+      first_name: string;
+      last_name: string;
+      job_title: string | null;
+      roles: string[];
+      permissions: string[];
+    }>('/auth/me');
+    
+    return {
+      id: response.data.user_id,
+      email: response.data.email,
+      first_name: response.data.first_name,
+      last_name: response.data.last_name,
+      roles: response.data.roles,
+      permissions: response.data.permissions,
+      is_active: true,
+    };
   },
 
   refreshToken: async (refreshToken: string): Promise<AuthResponse> => {
-    const response = await api.post<AuthResponse>('/auth/refresh', { refresh_token: refreshToken });
-    // Update the access token after refresh
-    const { access_token } = response.data;
+    const response = await api.post<AuthResponse>('/auth/refresh', { 
+      refresh_token: refreshToken 
+    });
+    
+    const { access_token, refresh_token: new_refresh_token } = response.data;
+    
+    // Update stored tokens
+    localStorage.setItem('access_token', access_token);
+    localStorage.setItem('refresh_token', new_refresh_token);
+    
+    // Update Authorization header
     api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+    
     return response.data;
   },
 
   logout: async (): Promise<void> => {
-    await api.post('/auth/logout');
-    // Clear the Authorization header on logout
-    delete api.defaults.headers.common['Authorization'];
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      // Always clear tokens, even if logout request fails
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      delete api.defaults.headers.common['Authorization'];
+    }
   },
 };

@@ -28,7 +28,14 @@ import {
 interface FormFieldConfig<T extends FieldValues> {
   name: Path<T>;
   label: string;
-  type: "text" | "email" | "password" | "date" | "datetime-local" | "select";
+  type:
+    | "text"
+    | "email"
+    | "password"
+    | "date"
+    | "datetime-local"
+    | "time"
+    | "select";
   placeholder?: string;
   description?: string;
   multiple?: boolean;

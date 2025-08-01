@@ -3,6 +3,7 @@ import { Provider } from "react-redux";
 import store from "./store";
 import MainLayout from "./components/layout/MainLayout";
 import ProtectedRoute from "./components/common/ProtectedRoute";
+import { ThemeProvider } from "./components/theme-provider";
 import {
   Login,
   Dashboard,
@@ -20,7 +21,6 @@ import {
   SystemLogs,
   UserManagement,
 } from "./pages/index";
-import { ThemeProvider } from "./components/theme-provider";
 
 function App() {
   return (

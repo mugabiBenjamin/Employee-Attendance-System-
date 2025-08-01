@@ -67,3 +67,9 @@ export default tseslint.config([
   },
 ])
 ```
+
+---
+
+```palintext
+Yarn, TypeScript, React, Shadcn UI, Redux, React Router, Axios, Tailwind, Zod
+```

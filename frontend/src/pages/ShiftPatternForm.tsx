@@ -4,7 +4,7 @@ import type { RootState } from "@/store";
 import { shiftsApi } from "@/api/shifts";
 import { z } from "zod";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
-import GenericForm from "@/components/common/GenericTable";
+import GenericForm from "@/components/common/GenericForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
@@ -52,7 +52,7 @@ function ShiftPatternForm() {
         await shiftsApi.createShiftPattern(data);
       }
       navigate("/shift-patterns");
-    } catch (err) {
+    } catch {
       setError("Failed to save shift pattern");
     }
   };
@@ -63,30 +63,30 @@ function ShiftPatternForm() {
 
   const fields = [
     {
-      name: "name",
+      name: "name" as const,
       label: "Name",
-      type: "text",
+      type: "text" as const,
       placeholder: "Enter shift name",
       description: "Shift pattern name",
     },
     {
-      name: "start_time",
+      name: "start_time" as const,
       label: "Start Time",
-      type: "time",
+      type: "time" as const,
       placeholder: "Select start time",
       description: "Shift start time",
     },
     {
-      name: "end_time",
+      name: "end_time" as const,
       label: "End Time",
-      type: "time",
+      type: "time" as const,
       placeholder: "Select end time",
       description: "Shift end time",
     },
     {
-      name: "days",
+      name: "days" as const,
       label: "Days",
-      type: "select",
+      type: "select" as const,
       placeholder: "Select days",
       description: "Days the shift applies to",
       multiple: true,

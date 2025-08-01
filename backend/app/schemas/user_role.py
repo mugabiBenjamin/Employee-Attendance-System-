@@ -28,4 +28,12 @@ class UserRoleOut(UserRoleBase):
     assigned_at: datetime
     updated_at: Optional[datetime] = None
     
+class UserProfile(BaseModel):
+    user_id: int
+    email: str
+    first_name: str
+    last_name: str
+    job_title: str | None
+    roles: list[str] = []
+    permissions: list[str] = []
     model_config = ConfigDict(from_attributes=True)

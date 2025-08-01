@@ -16,6 +16,10 @@ from app.core.security import (
 )
 from app.core.enums import SystemAction
 import logging
+from app.core.permissions import get_user_permissions
+from app.models.roles import Roles
+from app.models.user_roles import UserRoles
+from app.schemas.user_role import UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +34,6 @@ class Token(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
-    model_config = ConfigDict(from_attributes=True)
-
-class UserProfile(BaseModel):
-    user_id: int
-    email: str
-    first_name: str
-    last_name: str
-    job_title: str | None  # Allow None to match database schema
     model_config = ConfigDict(from_attributes=True)
 
 async def log_system_action(db: AsyncSession, user_id: int, action: SystemAction, details: str = None):
@@ -177,15 +173,29 @@ async def logout(
 
 @router.get("/me", response_model=UserProfile, summary="Get current user profile")
 async def get_current_user_profile(
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
-    """Get the current authenticated user's profile information."""
+    # Get user permissions
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    permissions_list = user_permissions
+    
+    # Get user roles
+    roles_query = select(Roles.role_name).join(UserRoles).where(
+        UserRoles.user_id == current_user.user_id,
+        UserRoles.is_active == True
+    )
+    roles_result = await db.execute(roles_query)
+    roles_list = [role[0] for role in roles_result.fetchall()]
+    
     return UserProfile(
         user_id=current_user.user_id,
         email=current_user.email,
         first_name=current_user.first_name,
         last_name=current_user.last_name,
-        job_title=current_user.job_title
+        job_title=current_user.job_title,
+        roles=roles_list,
+        permissions=permissions_list
     )
 
 @router.post("/validate-token", status_code=status.HTTP_200_OK, summary="Validate access token")

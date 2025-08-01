@@ -112,7 +112,8 @@ async def get_user_permissions(
     for perms in role_permissions:
         if isinstance(perms, dict):
             if perms.get("all_permissions") is True:
-                return ["all_permissions"]
+                # Return all defined permissions
+                return [perm.value for perm in Permission]
             
             for perm_key, perm_value in perms.items():
                 if perm_value is True:
