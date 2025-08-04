@@ -138,9 +138,23 @@ function Login() {
                       </FormItem>
                     )}
                   />
-                  <Button type="submit" className="w-full my-5 dark:text-white">
+                  <Button type="submit" className="w-full dark:text-white">
                     Login
                   </Button>
+                  <div className="after:border-border relative text-center text-sm font-medium after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">
+                    <span className="bg-card text-muted-foreground relative z-10 px-2">
+                      Or continue with
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground text-center text-sm text-balance dark:text-white">
+                    Don&apos;t have an account?{" "}
+                    <a
+                      href="#"
+                      className="underline underline-offset-4 hover:text-primary"
+                    >
+                      Sign up
+                    </a>
+                  </div>
                 </div>
               </form>
             </Form>
@@ -153,15 +167,6 @@ function Login() {
             </div>
           </CardContent>
         </Card>
-        <div className="text-muted-foreground text-center text-xs text-balance mt-4 dark:text-white">
-          Don&apos;t have an account?{" "}
-          <a
-            href="#"
-            className="underline underline-offset-4 hover:text-primary"
-          >
-            Sign up
-          </a>
-        </div>
       </div>
     </div>
   );
