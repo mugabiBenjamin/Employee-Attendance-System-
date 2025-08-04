@@ -6,7 +6,7 @@ import Navbar from './Navbar';
 function MainLayout() {
   return (
     <SidebarProvider>
-      <div className="flex h-screen">
+      <div className="flex h-screen w-full">
         <AppSidebar />
         <div className="flex-1 flex flex-col">
           <Navbar />
