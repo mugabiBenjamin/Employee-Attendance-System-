@@ -15,21 +15,29 @@ from app.core.security import (
     get_current_active_user
 )
 from app.core.enums import SystemAction
-import logging
 from app.core.permissions import get_user_permissions
 from app.models.roles import Roles
 from app.models.user_roles import UserRoles
 from app.schemas.user_role import UserProfile
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+import logging
 
 logger = logging.getLogger(__name__)
 
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+router.state.limiter = limiter
+router.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 class Token(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-    expires_in: int = 3600  # Access token expiry in seconds
+    expires_in: int = 1800  # Access token expiry reduced to 30 minutes
     model_config = ConfigDict(from_attributes=True)
 
 class RefreshTokenRequest(BaseModel):
@@ -52,6 +60,7 @@ async def log_system_action(db: AsyncSession, user_id: int, action: SystemAction
         logger.error(f"Failed to log system action: {str(e)}")
 
 @router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login")
+@limiter.limit("5/minute")  # Limit to 5 login attempts per minute per IP
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: AsyncSession = Depends(get_db)
@@ -82,9 +91,9 @@ async def login_for_access_token(
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
-        # Create tokens
-        access_token = create_access_token({"sub": str(user.user_id)})
-        refresh_token = create_refresh_token({"sub": str(user.user_id)})
+        # Create tokens with stricter expiry
+        access_token = create_access_token({"sub": str(user.user_id)}, expires_delta=1800)  # 30 minutes
+        refresh_token = create_refresh_token({"sub": str(user.user_id)}, expires_delta=604800)  # 7 days
 
         # Log successful login
         await log_system_action(db, user.user_id, SystemAction.LOGIN, f"Successful login from {form_data.username}")
@@ -110,11 +119,21 @@ async def refresh_access_token(
     try:
         payload = decode_refresh_token(token_request.refresh_token)
         user_id = payload.get("sub")
-        
         if not user_id:
+            logger.warning("Invalid refresh token provided")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid refresh token",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
+        # Verify token issuance time to prevent reuse of old tokens
+        issued_at = payload.get("iat")
+        if not issued_at or (datetime.now(timezone.utc).timestamp() - issued_at > 604800):  # 7 days expiry
+            logger.warning(f"Expired refresh token for user_id: {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token expired",
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
@@ -136,8 +155,8 @@ async def refresh_access_token(
             )
 
         # Create new tokens
-        access_token = create_access_token({"sub": str(user.user_id)})
-        new_refresh_token = create_refresh_token({"sub": str(user.user_id)})
+        access_token = create_access_token({"sub": str(user.user_id)}, expires_delta=1800)  # 30 minutes
+        new_refresh_token = create_refresh_token({"sub": str(user.user_id)}, expires_delta=604800)  # 7 days
 
         logger.info(f"Token refreshed for user_id: {user.user_id}")
         return Token(access_token=access_token, refresh_token=new_refresh_token)
@@ -176,35 +195,51 @@ async def get_current_user_profile(
     current_user: Users = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
-    # Get user permissions
-    user_permissions = await get_user_permissions(current_user.user_id, db)
-    permissions_list = user_permissions
-    
-    # Get user roles
-    roles_query = select(Roles.role_name).join(UserRoles).where(
-        UserRoles.user_id == current_user.user_id,
-        UserRoles.is_active == True
-    )
-    roles_result = await db.execute(roles_query)
-    roles_list = [role[0] for role in roles_result.fetchall()]
-    
-    return UserProfile(
-        user_id=current_user.user_id,
-        email=current_user.email,
-        first_name=current_user.first_name,
-        last_name=current_user.last_name,
-        job_title=current_user.job_title,
-        roles=roles_list,
-        permissions=permissions_list
-    )
+    """Retrieve profile information for the current user."""
+    try:
+        # Get user permissions
+        user_permissions = await get_user_permissions(current_user.user_id, db)
+        permissions_list = user_permissions
+        
+        # Get user roles
+        roles_query = select(Roles.role_name).join(UserRoles).where(
+            UserRoles.user_id == current_user.user_id,
+            UserRoles.is_active == True
+        )
+        roles_result = await db.execute(roles_query)
+        roles_list = [role[0] for role in roles_result.fetchall()]
+        
+        return UserProfile(
+            user_id=current_user.user_id,
+            email=current_user.email,
+            first_name=current_user.first_name,
+            last_name=current_user.last_name,
+            job_title=current_user.job_title,
+            roles=roles_list,
+            permissions=permissions_list
+        )
+
+    except Exception as e:
+        logger.error(f"Error retrieving user profile for user_id {current_user.user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve user profile"
+        )
 
 @router.post("/validate-token", status_code=status.HTTP_200_OK, summary="Validate access token")
 async def validate_token(
     current_user: Users = Depends(get_current_active_user)
 ):
     """Validate if the current access token is valid and user is active."""
-    return {
-        "valid": True,
-        "user_id": current_user.user_id,
-        "email": current_user.email
-    }
+    try:
+        return {
+            "valid": True,
+            "user_id": current_user.user_id,
+            "email": current_user.email
+        }
+    except Exception as e:
+        logger.error(f"Error validating token for user_id {current_user.user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token validation failed"
+        )

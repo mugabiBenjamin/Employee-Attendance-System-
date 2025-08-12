@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import INET, ENUM
 from app.core.database import Base
@@ -28,4 +28,5 @@ class AttendanceRecords(Base):
         CheckConstraint("total_hours IS NULL OR total_hours >= 0", name="total_hours_valid"),
         CheckConstraint("overtime_hours >= 0", name="overtime_hours_valid"),
         UniqueConstraint('user_id', 'date', name='unique_user_date'),
+        Index('idx_attendance_user_clock_in', 'user_id', 'clock_in_time'),
     )

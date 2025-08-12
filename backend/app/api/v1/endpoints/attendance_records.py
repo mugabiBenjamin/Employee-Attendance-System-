@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,8 @@ from app.schemas.attendance_summary import AttendanceSummaryOut
 import logging
 import csv
 import io
-import os
+import aiofiles
+import asyncio
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
@@ -40,12 +41,42 @@ class TimeCorrectionApproval(BaseModel):
     status: str  # 'approved' or 'rejected'
     model_config = ConfigDict(from_attributes=True)
 
+async def _delete_file(filename: str):
+    """Background task to delete file after response."""
+    try:
+        async with aiofiles.os.stat(filename) as _:
+            await aiofiles.os.remove(filename)
+            logger.info(f"File deleted: {filename}")
+    except FileNotFoundError:
+        logger.warning(f"File not found for deletion: {filename}")
+    except Exception as e:
+        logger.error(f"Error deleting file {filename}: {str(e)}")
+
+async def _generate_pdf(data: List[List[str]], filename: str):
+    """Generate PDF in an executor to avoid blocking."""
+    loop = asyncio.get_event_loop()
+    def build_pdf():
+        doc = SimpleDocTemplate(filename, pagesize=letter)
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        doc.build([table])
+    await loop.run_in_executor(None, build_pdf)
+
 @router.post("/clock", 
-             response_model=AttendanceRecordOut, 
-             status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_employee_permissions())],
-             summary="Clock in or out", 
-             description="Record clock-in or clock-out for an employee.")
+            response_model=AttendanceRecordOut, 
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(require_employee_permissions())],
+            summary="Clock in or out", 
+            description="Record clock-in or clock-out for an employee.")
 async def clock_in_out(
     clock_data: ClockInOut,
     db: AsyncSession = Depends(get_db),
@@ -59,7 +90,6 @@ async def clock_in_out(
             )
 
         if clock_data.action == "clock_in":
-            # Check for existing active clock-in
             query = select(AttendanceRecords).where(
                 AttendanceRecords.user_id == current_user.user_id,
                 AttendanceRecords.clock_out_time == None,
@@ -146,20 +176,19 @@ async def get_attendance_history(
         )
 
 @router.post("/time-correction", 
-             response_model=TimeCorrectionOut, 
-             status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))],
-             summary="Request time correction", 
-             description="Submit a time correction request for an attendance record.")
+            response_model=TimeCorrectionOut, 
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))],
+            summary="Request time correction", 
+            description="Submit a time correction request for an attendance record.")
 async def request_time_correction(
     correction: TimeCorrectionCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user)
 ) -> TimeCorrectionOut:
     try:
-        # Verify attendance record exists and belongs to current user
         query = select(AttendanceRecords).where(
-            AttendanceRecords.record_id == correction.attendance_id,
+            AttendanceRecords.attendance_id == correction.attendance_id,
             AttendanceRecords.user_id == current_user.user_id,
             AttendanceRecords.is_active == True
         )
@@ -172,7 +201,7 @@ async def request_time_correction(
             )
 
         db_correction = TimeCorrections(
-            record_id=correction.attendance_id,
+            attendance_id=correction.attendance_id,
             user_id=current_user.user_id,
             corrected_clock_in=correction.corrected_clock_in,
             corrected_clock_out=correction.corrected_clock_out,
@@ -185,7 +214,7 @@ async def request_time_correction(
         await db.commit()
         await db.refresh(db_correction)
 
-        logger.info(f"Time correction requested for record_id: {correction.attendance_id}")
+        logger.info(f"Time correction requested for attendance_id: {correction.attendance_id}")
         return TimeCorrectionOut.model_validate(db_correction)
 
     except HTTPException:
@@ -209,7 +238,6 @@ async def get_time_corrections(
     current_user: Users = Depends(get_current_user)
 ) -> List[TimeCorrectionOut]:
     try:
-        # Check permissions for viewing other users' corrections
         if user_id and user_id != current_user.user_id:
             await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
 
@@ -271,9 +299,8 @@ async def approve_reject_time_correction(
         correction.approved_at = datetime.now(timezone.utc)
         correction.updated_at = datetime.now(timezone.utc)
 
-        # Apply corrections if approved
         if approval_data.status == CorrectionStatus.APPROVED:
-            query = select(AttendanceRecords).where(AttendanceRecords.record_id == correction.record_id)
+            query = select(AttendanceRecords).where(AttendanceRecords.attendance_id == correction.attendance_id)
             result = await db.execute(query)
             record = result.scalar_one_or_none()
             if record:
@@ -312,7 +339,6 @@ async def get_attendance_summary(
     current_user: Users = Depends(get_current_user)
 ) -> List[AttendanceSummaryOut]:
     try:
-        # Check permissions for viewing other users' summaries
         if user_id and user_id != current_user.user_id:
             await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
 
@@ -372,9 +398,9 @@ async def export_attendance_csv(
     start_date: date = date.today().replace(day=1),
     end_date: date = date.today(),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user),
+    background_tasks: BackgroundTasks = Depends()
 ) -> FileResponse:
-    filename = None
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
@@ -395,7 +421,7 @@ async def export_attendance_csv(
         
         for record in records:
             writer.writerow([
-                record.record_id,
+                record.attendance_id,
                 record.date,
                 record.clock_in_time,
                 record.clock_out_time,
@@ -405,9 +431,10 @@ async def export_attendance_csv(
             ])
 
         filename = f"attendance_{current_user.employee_id}_{start_date}_to_{end_date}.csv"
-        with open(filename, "w", newline='', encoding='utf-8') as f:
-            f.write(output.getvalue())
+        async with aiofiles.open(filename, "w", encoding='utf-8') as f:
+            await f.write(output.getvalue())
 
+        background_tasks.add_task(_delete_file, filename)
         logger.info(f"Attendance CSV exported for user_id: {current_user.user_id}")
         return FileResponse(
             filename, 
@@ -421,9 +448,6 @@ async def export_attendance_csv(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Error exporting attendance CSV"
         )
-    finally:
-        if filename and os.path.exists(filename):
-            os.remove(filename)
 
 @router.get("/export/pdf", 
             dependencies=[Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))],
@@ -433,9 +457,9 @@ async def export_attendance_pdf(
     start_date: date = date.today().replace(day=1),
     end_date: date = date.today(),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user),
+    background_tasks: BackgroundTasks = Depends()
 ) -> FileResponse:
-    filename = None
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
@@ -448,9 +472,6 @@ async def export_attendance_pdf(
         records = result.scalars().all()
 
         filename = f"attendance_{current_user.employee_id}_{start_date}_to_{end_date}.pdf"
-        doc = SimpleDocTemplate(filename, pagesize=letter)
-        elements = []
-
         data = [[
             "Record ID", "Date", "Clock In", "Clock Out", 
             "Status", "Total Hours", "Overtime Hours"
@@ -458,7 +479,7 @@ async def export_attendance_pdf(
         
         for record in records:
             data.append([
-                str(record.record_id),
+                str(record.attendance_id),
                 str(record.date) if record.date else "",
                 str(record.clock_in_time),
                 str(record.clock_out_time) if record.clock_out_time else "",
@@ -467,21 +488,8 @@ async def export_attendance_pdf(
                 str(record.overtime_hours) if record.overtime_hours else ""
             ])
 
-        table = Table(data)
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        elements.append(table)
-
-        doc.build(elements)
-
+        await _generate_pdf(data, filename)
+        background_tasks.add_task(_delete_file, filename)
         logger.info(f"Attendance PDF exported for user_id: {current_user.user_id}")
         return FileResponse(
             filename, 
@@ -495,6 +503,3 @@ async def export_attendance_pdf(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Error exporting attendance PDF"
         )
-    finally:
-        if filename and os.path.exists(filename):
-            os.remove(filename)

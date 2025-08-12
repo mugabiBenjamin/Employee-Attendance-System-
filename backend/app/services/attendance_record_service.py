@@ -13,9 +13,6 @@ from app.core.enums import SystemAction
 from app.core.security import get_current_user
 from app.core.permissions import check_permission
 import logging
-import csv
-import io
-import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -191,53 +188,4 @@ async def get_attendance_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving attendance history"
-        )
-
-async def export_attendance_history_csv(
-    db: AsyncSession,
-    user: Users = Depends(get_current_user),
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    _: str = Depends(check_permission("export_attendance_history"))
-) -> str:
-    """
-    Export attendance history to CSV format.
-    """
-    try:
-        # Fetch records
-        query = select(AttendanceRecords).where(
-            AttendanceRecords.user_id == user.user_id,
-            AttendanceRecords.is_active == True,
-            AttendanceRecords.deleted_at == None
-        )
-        if start_date:
-            query = query.where(AttendanceRecords.date >= start_date)
-        if end_date:
-            query = query.where(AttendanceRecords.date <= end_date)
-
-        result = await db.execute(query)
-        records = result.scalars().all()
-
-        # Create CSV
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Date", "Clock In", "Clock Out", "Total Hours", "Overtime Hours", "Status"])
-        for record in records:
-            writer.writerow([
-                record.date,
-                record.clock_in_time.strftime("%Y-%m-%d %H:%M:%S") if record.clock_in_time else "",
-                record.clock_out_time.strftime("%Y-%m-%d %H:%M:%S") if record.clock_out_time else "",
-                record.total_hours or 0,
-                record.overtime_hours or 0,
-                record.status
-            ])
-
-        logger.info(f"Exported attendance history to CSV for user_id: {user.user_id}")
-        return output.getvalue()
-
-    except Exception as e:
-        logger.error(f"Error exporting attendance history for user_id {user.user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error exporting attendance history"
         )

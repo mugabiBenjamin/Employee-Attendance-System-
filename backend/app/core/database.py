@@ -6,18 +6,41 @@ from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
 import asyncio
 import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from sqlalchemy.exc import OperationalError, DatabaseError
 
 logger = logging.getLogger(__name__)
 
 # Create SQLAlchemy Base
 Base = declarative_base()
 
-# Create async engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    future=True
+# Validate DATABASE_URL for async driver
+if not settings.DATABASE_URL.startswith("postgresql+asyncpg://"):
+    logger.error("DATABASE_URL must use asyncpg driver (e.g., postgresql+asyncpg://)")
+    raise ValueError("DATABASE_URL must use asyncpg driver (e.g., postgresql+asyncpg://)")
+
+# Create async engine with retry logic
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((OperationalError, DatabaseError)),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Database connection attempt {retry_state.attempt_number} failed, retrying..."
+    )
 )
+async def create_engine_with_retry():
+    return create_async_engine(
+        settings.DATABASE_URL,
+        echo=settings.DEBUG,
+        future=True
+    )
+
+# Initialize engine
+try:
+    engine = asyncio.run(create_engine_with_retry())
+except Exception as e:
+    logger.error(f"Failed to create database engine after retries: {str(e)}")
+    raise
 
 # Create async session factory
 AsyncSessionLocal = async_sessionmaker(
@@ -27,6 +50,7 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 # Database dependency for FastAPI
+@asynccontextmanager
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
@@ -113,6 +137,7 @@ MATERIALIZED_VIEW_SQLS = [
         JOIN departments d ON ud.department_id = d.department_id
         LEFT JOIN attendance_records ar ON u.user_id = ar.user_id
     WHERE u.is_active = TRUE AND u.deleted_at IS NULL
+    WITH DATA;
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, date)
@@ -122,7 +147,15 @@ MATERIALIZED_VIEW_SQLS = [
     """
 ]
 
-# Initialize database tables and enums
+# Initialize database tables and enums with retry logic
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((OperationalError, DatabaseError)),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Database initialization attempt {retry_state.attempt_number} failed, retrying..."
+    )
+)
 async def init_db():
     async with engine.begin() as conn:
         # Create enums
@@ -151,7 +184,15 @@ async def init_db():
         
         logger.info("Database initialized with enums, tables, and materialized view")
 
-# Periodically refresh materialized view
+# Periodically refresh materialized view with retry logic
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((OperationalError, DatabaseError)),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Materialized view refresh attempt {retry_state.attempt_number} failed, retrying..."
+    )
+)
 async def refresh_materialized_view():
     while True:
         try:
@@ -161,6 +202,7 @@ async def refresh_materialized_view():
                 logger.info("Materialized view 'attendance_summary' refreshed successfully")
         except Exception as e:
             logger.error(f"Error refreshing materialized view: {str(e)}")
+            raise
         # Wait for the configured interval
         await asyncio.sleep(settings.MATERIALIZED_VIEW_REFRESH_INTERVAL)
 

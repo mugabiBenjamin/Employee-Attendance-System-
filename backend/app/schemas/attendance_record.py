@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from app.core.enums import AttendanceStatus
 
 class AttendanceRecordBase(BaseModel):
@@ -13,6 +13,13 @@ class AttendanceRecordBase(BaseModel):
     status: str = 'present'
     ip_address: Optional[str] = None
     location: Optional[str] = Field(None, max_length=255)
+
+    @field_validator('clock_out_time')
+    def validate_clock_out(cls, clock_out_time: Optional[datetime], values: dict) -> Optional[datetime]:
+        if clock_out_time and 'clock_in_time' in values and values['clock_in_time']:
+            if clock_out_time <= values['clock_in_time']:
+                raise ValueError('clock_out_time must be after clock_in_time')
+        return clock_out_time
 
 class AttendanceRecordCreate(AttendanceRecordBase):
     user_id: int
@@ -29,6 +36,13 @@ class AttendanceRecordUpdate(BaseModel):
     overtime_hours: Optional[float] = Field(None, ge=0)
     status: Optional[str] = None
     location: Optional[str] = Field(None, max_length=255)
+
+    @field_validator('clock_out_time')
+    def validate_clock_out(cls, clock_out_time: Optional[datetime], values: dict) -> Optional[datetime]:
+        if clock_out_time and 'clock_in_time' in values and values['clock_in_time']:
+            if clock_out_time <= values['clock_in_time']:
+                raise ValueError('clock_out_time must be after clock_in_time')
+        return clock_out_time
 
 class AttendanceRecordOut(AttendanceRecordBase):
     attendance_id: int
