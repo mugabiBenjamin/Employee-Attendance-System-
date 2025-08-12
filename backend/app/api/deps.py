@@ -10,6 +10,7 @@ from app.core.enums import Permission
 from app.models.users import Users
 from app.models.shift_assignments import ShiftAssignments
 from app.models.leave_policies import LeavePolicies
+from app.core.security import decode_access_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
 
@@ -17,14 +18,24 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db)
 ) -> Users:
-    # Placeholder for actual token validation logic
-    # This should include JWT decoding and user lookup
-    query = select(Users).where(Users.is_active == True)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    return user
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        query = select(Users).where(
+            Users.user_id == int(user_id),
+            Users.is_active == True,
+            Users.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
 async def get_current_active_user(current_user: Users = Depends(get_current_user)) -> Users:
     if not current_user.is_active:
