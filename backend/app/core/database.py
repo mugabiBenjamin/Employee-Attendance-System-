@@ -1,10 +1,10 @@
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
 from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
-import asyncio
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from sqlalchemy.exc import OperationalError, DatabaseError
@@ -35,19 +35,25 @@ async def create_engine_with_retry():
         future=True
     )
 
-# Initialize engine
-try:
-    engine = asyncio.run(create_engine_with_retry())
-except Exception as e:
-    logger.error(f"Failed to create database engine after retries: {str(e)}")
-    raise
+# Initialize engine (to be awaited at startup)
+engine = None
 
 # Create async session factory
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+AsyncSessionLocal = None
+
+async def initialize_engine_and_session():
+    global engine, AsyncSessionLocal
+    try:
+        engine = await create_engine_with_retry()
+        AsyncSessionLocal = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+        logger.info("Database engine and session factory initialized")
+    except Exception as e:
+        logger.error(f"Failed to create database engine after retries: {str(e)}")
+        raise
 
 # Database dependency for FastAPI
 @asynccontextmanager

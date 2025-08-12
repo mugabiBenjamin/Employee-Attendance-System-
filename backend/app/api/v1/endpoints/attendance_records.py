@@ -391,11 +391,11 @@ async def get_attendance_summary(
             summary="Export attendance history as CSV", 
             description="Export attendance history as a CSV file.")
 async def export_attendance_csv(
+    background_tasks: BackgroundTasks,
     start_date: date = date.today().replace(day=1),
     end_date: date = date.today(),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-    background_tasks: BackgroundTasks = Depends()
+    current_user: Users = Depends(get_current_user)
 ) -> FileResponse:
     try:
         query = select(AttendanceRecords).where(
@@ -450,11 +450,11 @@ async def export_attendance_csv(
             summary="Export attendance history as PDF", 
             description="Export attendance history as a PDF file.")
 async def export_attendance_pdf(
+    background_tasks: BackgroundTasks,
     start_date: date = date.today().replace(day=1),
     end_date: date = date.today(),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-    background_tasks: BackgroundTasks = Depends()
+    current_user: Users = Depends(get_current_user)
 ) -> FileResponse:
     try:
         query = select(AttendanceRecords).where(

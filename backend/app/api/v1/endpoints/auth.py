@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -19,9 +19,8 @@ from app.core.permissions import get_user_permissions
 from app.models.roles import Roles
 from app.models.user_roles import UserRoles
 from app.schemas.user_role import UserProfile
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,8 +29,6 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-router.state.limiter = limiter
-router.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 class Token(BaseModel):
     access_token: str
@@ -60,8 +57,9 @@ async def log_system_action(db: AsyncSession, user_id: int, action: SystemAction
         logger.error(f"Failed to log system action: {str(e)}")
 
 @router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login")
-@limiter.limit("5/minute")  # Limit to 5 login attempts per minute per IP
+@limiter.limit("5/minute")
 async def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: AsyncSession = Depends(get_db)
 ) -> Token:
