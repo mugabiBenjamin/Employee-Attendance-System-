@@ -18,7 +18,7 @@ from app.core.security import get_current_user
 from app.core.config import settings
 from app.core.enums import Permission, CorrectionStatus, AttendanceStatus
 from app.schemas.attendance_record import AttendanceRecordOut
-from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionOut
+from app.schemas.time_correction import TimeCorrectionApproval, TimeCorrectionCreate, TimeCorrectionOut
 from app.schemas.attendance_summary import AttendanceSummaryOut
 import logging
 import csv
@@ -35,10 +35,6 @@ router = APIRouter(prefix="/attendance-records", tags=["Attendance Records"])
 
 class ClockInOut(BaseModel):
     action: str  # 'clock_in' or 'clock_out'
-    model_config = ConfigDict(from_attributes=True)
-
-class TimeCorrectionApproval(BaseModel):
-    status: str  # 'approved' or 'rejected'
     model_config = ConfigDict(from_attributes=True)
 
 async def _delete_file(filename: str):

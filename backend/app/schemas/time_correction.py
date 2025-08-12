@@ -49,4 +49,8 @@ class TimeCorrectionOut(TimeCorrectionBase):
     updated_at: Optional[datetime] = None
     attendance_id: int
     
+
+class TimeCorrectionApproval(BaseModel):
+    status: str
+    
     model_config = ConfigDict(from_attributes=True)
