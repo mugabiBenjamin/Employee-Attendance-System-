@@ -1,5 +1,5 @@
 from typing import List, ClassVar, Set
-from pydantic import Field, field_validator, ValidationError
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -116,3 +116,7 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
+
+def get_settings() -> Settings:
+    """Dependency to provide Settings instance."""
+    return settings

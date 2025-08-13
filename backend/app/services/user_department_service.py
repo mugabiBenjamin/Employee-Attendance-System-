@@ -5,15 +5,15 @@ from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.user_departments import UserDepartments
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
-from app.core.config import settings
 from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists, validate_department_exists
-import logging
+from app.core.config import Settings, get_settings
 from app.models.users import Users
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,8 @@ async def create_user_department(
     user_department: UserDepartmentCreate,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.CREATE_USER_DEPARTMENT])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> UserDepartmentOut:
     """Assign a user to a department. Requires CREATE_USER_DEPARTMENT permission."""
     try:
@@ -79,7 +80,8 @@ async def create_user_department(
 async def get_user_department_by_id(
     db: AsyncSession,
     user_department_id: int,
-    _: str = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _: str = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT])),
+    settings: Settings = Depends(get_settings)
 ) -> Optional[UserDepartmentOut]:
     """Retrieve a user-department assignment by ID. Requires VIEW_USER_DEPARTMENT permission."""
     try:
@@ -113,7 +115,8 @@ async def get_user_departments(
     user_id: int,
     skip: int = 0,
     limit: int = None,
-    _: str = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _: str = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT])),
+    settings: Settings = Depends(get_settings)
 ) -> List[UserDepartmentOut]:
     """Get department assignments for a user. Requires VIEW_USER_DEPARTMENT permission."""
     try:
@@ -154,7 +157,8 @@ async def update_user_department(
     update_data: UserDepartmentUpdate,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.UPDATE_USER_DEPARTMENT])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> UserDepartmentOut:
     """Update a user-department assignment. Requires UPDATE_USER_DEPARTMENT permission."""
     try:
@@ -232,7 +236,8 @@ async def delete_user_department(
     user_department_id: int,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.DELETE_USER_DEPARTMENT])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> None:
     """Soft delete a user-department assignment. Requires DELETE_USER_DEPARTMENT permission."""
     try:

@@ -15,7 +15,7 @@ from app.core.permissions import (
     require_employee_permissions
 )
 from app.core.security import get_current_user
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import Permission, CorrectionStatus, AttendanceStatus
 from app.schemas.attendance_record import AttendanceRecordOut
 from app.schemas.time_correction import TimeCorrectionApproval, TimeCorrectionCreate, TimeCorrectionOut
@@ -148,15 +148,16 @@ async def clock_in_out(
             description="Retrieve attendance history for the current user with pagination.")
 async def get_attendance_history(
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user),
+    settings: Settings = Depends(get_settings)
 ) -> List[AttendanceRecordOut]:
     try:
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
             AttendanceRecords.is_active == True
-        ).order_by(AttendanceRecords.created_at.desc()).offset(skip).limit(limit)
+        ).order_by(AttendanceRecords.created_at.desc()).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         
         result = await db.execute(query)
         records = result.scalars().all()
@@ -229,9 +230,10 @@ async def request_time_correction(
 async def get_time_corrections(
     user_id: Optional[int] = None,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user),
+    settings: Settings = Depends(get_settings)
 ) -> List[TimeCorrectionOut]:
     try:
         if user_id and user_id != current_user.user_id:
@@ -240,7 +242,7 @@ async def get_time_corrections(
         query = select(TimeCorrections)
         target_user_id = user_id if user_id else current_user.user_id
         query = query.where(TimeCorrections.user_id == target_user_id)
-        query = query.order_by(TimeCorrections.created_at.desc()).offset(skip).limit(limit)
+        query = query.order_by(TimeCorrections.created_at.desc()).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         
         result = await db.execute(query)
         corrections = result.scalars().all()

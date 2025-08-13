@@ -5,13 +5,13 @@ from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.user_roles import UserRoles
 from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
-from app.core.config import settings
 from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists, validate_role_exists
+from app.core.config import Settings, get_settings
 from app.models.users import Users
 import logging
 
@@ -22,7 +22,8 @@ async def create_user_role(
     user_role: UserRoleCreate,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.CREATE_USER_ROLE])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> UserRoleOut:
     """
     Assign a role to a user with validation and logging. Requires CREATE_USER_ROLE permission.
@@ -86,7 +87,8 @@ async def create_user_role(
 async def get_user_role_by_id(
     db: AsyncSession,
     user_role_id: int,
-    _: str = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _: str = Depends(require_permissions([Permission.VIEW_USER_ROLE])),
+    settings: Settings = Depends(get_settings)
 ) -> Optional[UserRoleOut]:
     """
     Retrieve a user-role assignment by ID. Requires VIEW_USER_ROLE permission.
@@ -121,8 +123,9 @@ async def get_user_roles(
     db: AsyncSession,
     user_id: int,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    limit: int = 50,
+    _: str = Depends(require_permissions([Permission.VIEW_USER_ROLE])),
+    settings: Settings = Depends(get_settings)
 ) -> List[UserRoleOut]:
     """
     Retrieve a list of role assignments for a user with pagination. Requires VIEW_USER_ROLE permission.
@@ -134,7 +137,7 @@ async def get_user_roles(
             UserRoles.user_id == user_id,
             UserRoles.is_active == True,
             UserRoles.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         user_roles = result.scalars().all()
 
@@ -156,7 +159,8 @@ async def update_user_role(
     user_role_update: UserRoleUpdate,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.UPDATE_USER_ROLE])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> UserRoleOut:
     """
     Update a user-role assignment with validation and logging. Requires UPDATE_USER_ROLE permission.
@@ -242,7 +246,8 @@ async def delete_user_role(
     user_role_id: int,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.DELETE_USER_ROLE])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> None:
     """
     Soft delete a user-role assignment with logging. Requires DELETE_USER_ROLE permission.
