@@ -2,6 +2,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
 from app.models.users import Users
 from app.schemas.user import UserCreate, UserUpdate, UserOut
@@ -13,6 +14,7 @@ from app.services.system_log_service import SystemLogService, get_system_log_ser
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists
 from app.core.config import Settings, get_settings
+from app.core.exceptions import ValidationError, DatabaseError, ResourceNotFoundError, ResourceConflictError, BusinessLogicError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,16 +39,16 @@ async def create_user(
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
-            )
+            raise ResourceConflictError(detail="Email already registered")
 
         # Validate manager_id if provided
         if user.manager_id:
             await validate_user_exists(db, user.manager_id)
 
-        # Create user with hashed password
+        # Validate required fields
+        if not user.email or not user.password:
+            raise ValidationError(detail="Email and password are required")
+
         hashed_password = get_password_hash(user.password)
         db_user = Users(
             email=user.email,
@@ -82,13 +84,22 @@ async def create_user(
         logger.info(f"User created, user_id: {db_user.user_id}, email: {db_user.email}")
         return UserOut.model_validate(db_user)
 
+    except ValidationError as e:
+        logger.error(f"Validation error in create_user: {str(e)}")
+        raise
+    except ResourceConflictError as e:
+        logger.error(f"Conflict error in create_user: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in create_user: {str(e)}")
+        raise DatabaseError(message="Database error creating user", original_error=e)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating user: {str(e)}")
+        logger.error(f"Unexpected error in create_user: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating user"
+            detail="Unexpected error creating user"
         )
 
 async def get_user_by_id(
@@ -101,6 +112,9 @@ async def get_user_by_id(
     Retrieve a user by ID. Requires VIEW_USER permission.
     """
     try:
+        if user_id <= 0:
+            raise ValidationError(detail="Invalid user ID")
+
         query = select(Users).where(
             Users.user_id == user_id,
             Users.is_active == True,
@@ -110,20 +124,24 @@ async def get_user_by_id(
         user = result.scalar_one_or_none()
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise ResourceNotFoundError(resource="User", identifier=str(user_id))
 
         return UserOut.model_validate(user)
 
-    except HTTPException:
+    except ValidationError as e:
+        logger.error(f"Validation error in get_user_by_id for user_id {user_id}: {str(e)}")
         raise
+    except ResourceNotFoundError as e:
+        logger.error(f"Resource not found in get_user_by_id for user_id {user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in get_user_by_id for user_id {user_id}: {str(e)}")
+        raise DatabaseError(message="Database error retrieving user", original_error=e)
     except Exception as e:
-        logger.error(f"Error retrieving user {user_id}: {str(e)}")
+        logger.error(f"Unexpected error in get_user_by_id for user_id {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving user"
+            detail="Unexpected error retrieving user"
         )
 
 async def get_users(
@@ -137,6 +155,9 @@ async def get_users(
     Retrieve a list of active users with pagination. Requires VIEW_USER permission.
     """
     try:
+        if skip < 0 or limit <= 0:
+            raise ValidationError(detail="Invalid pagination parameters")
+
         query = select(Users).where(
             Users.is_active == True,
             Users.deleted_at == None
@@ -147,11 +168,17 @@ async def get_users(
         logger.info(f"Retrieved {len(users)} users")
         return [UserOut.model_validate(user) for user in users]
 
+    except ValidationError as e:
+        logger.error(f"Validation error in get_users: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in get_users: {str(e)}")
+        raise DatabaseError(message="Database error retrieving users", original_error=e)
     except Exception as e:
-        logger.error(f"Error retrieving users: {str(e)}")
+        logger.error(f"Unexpected error in get_users: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving users"
+            detail="Unexpected error retrieving users"
         )
 
 async def update_user(
@@ -167,7 +194,9 @@ async def update_user(
     Update a user with validation and logging. Requires UPDATE_USER permission.
     """
     try:
-        # Retrieve user
+        if user_id <= 0:
+            raise ValidationError(detail="Invalid user ID")
+
         query = select(Users).where(
             Users.user_id == user_id,
             Users.is_active == True,
@@ -177,12 +206,8 @@ async def update_user(
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise ResourceNotFoundError(resource="User", identifier=str(user_id))
 
-        # Check for duplicate email if updated
         update_data = user_update.model_dump(exclude_none=True)
         if "email" in update_data:
             query = select(Users).where(
@@ -193,19 +218,13 @@ async def update_user(
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email already registered"
-                )
+                raise ResourceConflictError(detail="Email already registered")
 
-        # Validate manager_id if updated
         if "manager_id" in update_data and update_data["manager_id"] is not None:
             await validate_user_exists(db, update_data["manager_id"])
 
-        # Store old values for logging
         old_values = db_user.__dict__.copy()
 
-        # Apply updates
         for key, value in update_data.items():
             if key == "password" and value:
                 value = get_password_hash(value)
@@ -218,7 +237,6 @@ async def update_user(
         await db.commit()
         await db.refresh(db_user)
 
-        # Log action
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE,
@@ -233,13 +251,23 @@ async def update_user(
         logger.info(f"User updated, user_id: {user_id}")
         return UserOut.model_validate(db_user)
 
-    except HTTPException:
+    except ValidationError as e:
+        logger.error(f"Validation error in update_user for user_id {user_id}: {str(e)}")
         raise
+    except ResourceNotFoundError as e:
+        logger.error(f"Resource not found in update_user for user_id {user_id}: {str(e)}")
+        raise
+    except ResourceConflictError as e:
+        logger.error(f"Conflict error in update_user for user_id {user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in update_user for user_id {user_id}: {str(e)}")
+        raise DatabaseError(message="Database error updating user", original_error=e)
     except Exception as e:
-        logger.error(f"Error updating user {user_id}: {str(e)}")
+        logger.error(f"Unexpected error in update_user for user_id {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error updating user"
+            detail="Unexpected error updating user"
         )
 
 async def delete_user(
@@ -254,6 +282,9 @@ async def delete_user(
     Soft delete a user with validation and logging. Requires DELETE_USER permission.
     """
     try:
+        if user_id <= 0:
+            raise ValidationError(detail="Invalid user ID")
+
         query = select(Users).where(
             Users.user_id == user_id,
             Users.is_active == True,
@@ -263,12 +294,8 @@ async def delete_user(
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise ResourceNotFoundError(resource="User", identifier=str(user_id))
 
-        # Prevent deletion if user has active subordinates
         query = select(Users).where(
             Users.manager_id == user_id,
             Users.is_active == True,
@@ -276,17 +303,13 @@ async def delete_user(
         )
         result = await db.execute(query)
         if result.scalars().all():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete user with active subordinates"
-            )
+            raise BusinessLogicError(detail="Cannot delete user with active subordinates")
 
         db_user.is_active = False
         db_user.deleted_at = datetime.now(timezone.utc)
         db.add(db_user)
         await db.commit()
 
-        # Log action
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE,
@@ -300,11 +323,21 @@ async def delete_user(
 
         logger.info(f"User soft deleted, user_id: {user_id}")
 
-    except HTTPException:
+    except ValidationError as e:
+        logger.error(f"Validation error in delete_user for user_id {user_id}: {str(e)}")
         raise
+    except ResourceNotFoundError as e:
+        logger.error(f"Resource not found in delete_user for user_id {user_id}: {str(e)}")
+        raise
+    except BusinessLogicError as e:
+        logger.error(f"Business logic error in delete_user for user_id {user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in delete_user for user_id {user_id}: {str(e)}")
+        raise DatabaseError(message="Database error deleting user", original_error=e)
     except Exception as e:
-        logger.error(f"Error deleting user {user_id}: {str(e)}")
+        logger.error(f"Unexpected error in delete_user for user_id {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error deleting user"
+            detail="Unexpected error deleting user"
         )

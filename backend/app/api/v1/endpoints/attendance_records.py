@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
 from datetime import datetime, timezone, date
 from app.core.database import get_db
@@ -20,6 +21,7 @@ from app.core.enums import Permission, CorrectionStatus, AttendanceStatus
 from app.schemas.attendance_record import AttendanceRecordOut
 from app.schemas.time_correction import TimeCorrectionApproval, TimeCorrectionCreate, TimeCorrectionOut
 from app.schemas.attendance_summary import AttendanceSummaryOut
+from app.core.exceptions import FileUploadError, ValidationError, DatabaseError, ResourceNotFoundError, AttendanceError
 import logging
 import csv
 import io
@@ -50,27 +52,37 @@ async def _delete_file(filename: str):
             logger.info(f"File deleted: {filename}")
     except FileNotFoundError:
         logger.warning(f"File not found for deletion: {filename}")
-    except Exception as e:
+    except OSError as e:
         logger.error(f"Error deleting file {filename}: {str(e)}")
 
 async def _generate_pdf(data: List[List[str]], filename: str):
     """Generate PDF in an executor to avoid blocking."""
-    loop = asyncio.get_event_loop()
-    def build_pdf():
-        doc = SimpleDocTemplate(filename, pagesize=letter)
-        table = Table(data)
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        doc.build([table])
-    await loop.run_in_executor(None, build_pdf)
+    try:
+        loop = asyncio.get_event_loop()
+        def build_pdf():
+            doc = SimpleDocTemplate(filename, pagesize=letter)
+            table = Table(data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            doc.build([table])
+        await loop.run_in_executor(None, build_pdf)
+    except ValueError as e:
+        logger.error(f"Invalid data for PDF generation: {str(e)}")
+        raise ValidationError(detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error in PDF generation: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error generating PDF"
+        )
 
 @router.post("/clock", 
             response_model=AttendanceRecordOut, 
@@ -87,10 +99,7 @@ async def clock_in_out(
 ) -> AttendanceRecordOut:
     try:
         if clock_data.action not in ["clock_in", "clock_out"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Invalid action. Must be 'clock_in' or 'clock_out'"
-            )
+            raise ValidationError(detail="Invalid action. Must be 'clock_in' or 'clock_out'")
 
         if clock_data.action == "clock_in":
             query = select(AttendanceRecords).where(
@@ -100,10 +109,7 @@ async def clock_in_out(
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, 
-                    detail="You are already clocked in"
-                )
+                raise AttendanceError(detail="You are already clocked in")
 
             record = AttendanceRecords(
                 user_id=current_user.user_id,
@@ -124,10 +130,7 @@ async def clock_in_out(
             result = await db.execute(query)
             record = result.scalar_one_or_none()
             if not record:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, 
-                    detail="No active clock-in found"
-                )
+                raise ResourceNotFoundError(resource="Attendance record", identifier="active clock-in")
 
             record.clock_out_time = datetime.now(timezone.utc)
             record.updated_at = datetime.now(timezone.utc)
@@ -139,13 +142,22 @@ async def clock_in_out(
         logger.info(f"Clock {clock_data.action} recorded for user_id: {current_user.user_id}")
         return AttendanceRecordOut.model_validate(record)
 
+    except ValidationError as e:
+        logger.error(f"Validation error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
+        raise DatabaseError(message="Database error processing clock action", original_error=e)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error recording clock {clock_data.action} for user_id {current_user.user_id}: {str(e)}")
+        logger.error(f"Unexpected error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error processing clock action"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error processing clock action"
         )
 
 @router.get("/history", 
@@ -161,6 +173,9 @@ async def get_attendance_history(
     settings: Settings = Depends(get_settings)
 ) -> List[AttendanceRecordOut]:
     try:
+        if skip < 0 or limit <= 0:
+            raise ValidationError(detail="Invalid pagination parameters")
+
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
             AttendanceRecords.is_active == True
@@ -172,11 +187,17 @@ async def get_attendance_history(
         logger.info(f"Retrieved {len(records)} attendance records for user_id: {current_user.user_id}")
         return [AttendanceRecordOut.model_validate(record) for record in records]
 
+    except ValidationError as e:
+        logger.error(f"Validation error in get_attendance_history for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in get_attendance_history for user_id {current_user.user_id}: {str(e)}")
+        raise DatabaseError(message="Database error retrieving attendance history", original_error=e)
     except Exception as e:
-        logger.error(f"Error retrieving attendance history for user_id {current_user.user_id}: {str(e)}")
+        logger.error(f"Unexpected error in get_attendance_history for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error retrieving attendance history"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error retrieving attendance history"
         )
 
 @router.post("/time-correction", 
@@ -199,10 +220,7 @@ async def request_time_correction(
         result = await db.execute(query)
         record = result.scalar_one_or_none()
         if not record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Attendance record not found"
-            )
+            raise ResourceNotFoundError(resource="Attendance record", identifier=str(correction.attendance_id))
 
         db_correction = TimeCorrections(
             attendance_id=correction.attendance_id,
@@ -221,13 +239,19 @@ async def request_time_correction(
         logger.info(f"Time correction requested for attendance_id: {correction.attendance_id}")
         return TimeCorrectionOut.model_validate(db_correction)
 
+    except ResourceNotFoundError as e:
+        logger.error(f"Resource not found in request_time_correction for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in request_time_correction for user_id {current_user.user_id}: {str(e)}")
+        raise DatabaseError(message="Database error requesting time correction", original_error=e)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error requesting time correction: {str(e)}")
+        logger.error(f"Unexpected error in request_time_correction for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error requesting time correction"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error requesting time correction"
         )
 
 @router.get("/time-corrections", 
@@ -243,6 +267,9 @@ async def get_time_corrections(
     settings: Settings = Depends(get_settings)
 ) -> List[TimeCorrectionOut]:
     try:
+        if skip < 0 or limit <= 0:
+            raise ValidationError(detail="Invalid pagination parameters")
+
         if user_id and user_id != current_user.user_id:
             await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
 
@@ -257,13 +284,19 @@ async def get_time_corrections(
         logger.info(f"Retrieved {len(corrections)} time corrections for user_id: {target_user_id}")
         return [TimeCorrectionOut.model_validate(correction) for correction in corrections]
 
+    except ValidationError as e:
+        logger.error(f"Validation error in get_time_corrections for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in get_time_corrections for user_id {current_user.user_id}: {str(e)}")
+        raise DatabaseError(message="Database error retrieving time corrections", original_error=e)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving time corrections: {str(e)}")
+        logger.error(f"Unexpected error in get_time_corrections for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error retrieving time corrections"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error retrieving time corrections"
         )
 
 @router.put("/time-corrections/{correction_id}", 
@@ -279,25 +312,16 @@ async def approve_reject_time_correction(
 ) -> TimeCorrectionOut:
     try:
         if approval_data.status not in [CorrectionStatus.APPROVED, CorrectionStatus.REJECTED]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Invalid status. Must be 'approved' or 'rejected'"
-            )
+            raise ValidationError(detail="Invalid status. Must be 'approved' or 'rejected'")
 
         query = select(TimeCorrections).where(TimeCorrections.correction_id == correction_id)
         result = await db.execute(query)
         correction = result.scalar_one_or_none()
         if not correction:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Time correction not found"
-            )
+            raise ResourceNotFoundError(resource="Time correction", identifier=str(correction_id))
 
         if correction.status != CorrectionStatus.UNDER_REVIEW:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Time correction has already been processed"
-            )
+            raise AttendanceError(detail="Time correction has already been processed")
 
         correction.status = approval_data.status
         correction.approved_by = current_user.user_id
@@ -323,13 +347,25 @@ async def approve_reject_time_correction(
         logger.info(f"Time correction {correction_id} {approval_data.status} by user_id: {current_user.user_id}")
         return TimeCorrectionOut.model_validate(correction)
 
+    except ValidationError as e:
+        logger.error(f"Validation error in approve_reject_time_correction for correction_id {correction_id}: {str(e)}")
+        raise
+    except ResourceNotFoundError as e:
+        logger.error(f"Resource not found in approve_reject_time_correction for correction_id {correction_id}: {str(e)}")
+        raise
+    except AttendanceError as e:
+        logger.error(f"Attendance error in approve_reject_time_correction for correction_id {correction_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in approve_reject_time_correction for correction_id {correction_id}: {str(e)}")
+        raise DatabaseError(message="Database error processing time correction", original_error=e)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing time correction {correction_id}: {str(e)}")
+        logger.error(f"Unexpected error in approve_reject_time_correction for correction_id {correction_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error processing time correction"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error processing time correction"
         )
 
 @router.get("/summary", 
@@ -344,12 +380,14 @@ async def get_attendance_summary(
     current_user: Users = Depends(get_current_user)
 ) -> List[AttendanceSummaryOut]:
     try:
+        if start_date > end_date:
+            raise ValidationError(detail="Start date cannot be after end date")
+
         if user_id and user_id != current_user.user_id:
             await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
 
         target_user_id = user_id if user_id else current_user.user_id
 
-        # Convert dates to datetime ranges for proper comparison
         start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
         end_datetime = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
 
@@ -391,22 +429,23 @@ async def get_attendance_summary(
                 clock_in_time=record.clock_in_time,
                 clock_out_time=record.clock_out_time
             ) for record in records]
-        except Exception as validation_error:
-            logger.error(f"Validation error: {validation_error}")
-            if records:
-                logger.error(f"Sample record data: {dict(records[0]._asdict())}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Data serialization error: {str(validation_error)}"
-            )
+        except ValueError as e:
+            logger.error(f"Validation error in attendance summary serialization for user_id {target_user_id}: {str(e)}")
+            raise ValidationError(detail=f"Data validation error: {str(e)}")
 
+    except ValidationError as e:
+        logger.error(f"Validation error in get_attendance_summary for user_id {target_user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in get_attendance_summary for user_id {target_user_id}: {str(e)}")
+        raise DatabaseError(message="Database error retrieving attendance summary", original_error=e)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving attendance summary: {str(e)}")
+        logger.error(f"Unexpected error in get_attendance_summary for user_id {target_user_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error retrieving attendance summary"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error retrieving attendance summary"
         )
 
 @router.get("/export/csv", 
@@ -421,6 +460,9 @@ async def export_attendance_csv(
     current_user: Users = Depends(get_current_user)
 ) -> FileResponse:
     try:
+        if start_date > end_date:
+            raise ValidationError(detail="Start date cannot be after end date")
+
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
             AttendanceRecords.clock_in_time >= start_date,
@@ -461,11 +503,20 @@ async def export_attendance_csv(
             filename=f"attendance_export_{start_date}_to_{end_date}.csv"
         )
 
+    except ValidationError as e:
+        logger.error(f"Validation error in export_attendance_csv for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in export_attendance_csv for user_id {current_user.user_id}: {str(e)}")
+        raise DatabaseError(message="Database error exporting attendance CSV", original_error=e)
+    except OSError as e:
+        logger.error(f"File operation error in export_attendance_csv for user_id {current_user.user_id}: {str(e)}")
+        raise FileUploadError(detail=f"File operation error: {str(e)}")
     except Exception as e:
-        logger.error(f"Error exporting attendance CSV: {str(e)}")
+        logger.error(f"Unexpected error in export_attendance_csv for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error exporting attendance CSV"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error exporting attendance CSV"
         )
 
 @router.get("/export/pdf", 
@@ -480,6 +531,9 @@ async def export_attendance_pdf(
     current_user: Users = Depends(get_current_user)
 ) -> FileResponse:
     try:
+        if start_date > end_date:
+            raise ValidationError(detail="Start date cannot be after end date")
+
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
             AttendanceRecords.clock_in_time >= start_date,
@@ -516,9 +570,18 @@ async def export_attendance_pdf(
             filename=f"attendance_export_{start_date}_to_{end_date}.pdf"
         )
 
+    except ValidationError as e:
+        logger.error(f"Validation error in export_attendance_pdf for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in export_attendance_pdf for user_id {current_user.user_id}: {str(e)}")
+        raise DatabaseError(message="Database error exporting attendance PDF", original_error=e)
+    except OSError as e:
+        logger.error(f"File operation error in export_attendance_pdf for user_id {current_user.user_id}: {str(e)}")
+        raise FileUploadError(detail=f"File operation error: {str(e)}")
     except Exception as e:
-        logger.error(f"Error exporting attendance PDF: {str(e)}")
+        logger.error(f"Unexpected error in export_attendance_pdf for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error exporting attendance PDF"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error exporting attendance PDF"
         )
