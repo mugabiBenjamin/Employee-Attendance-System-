@@ -52,7 +52,7 @@ def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) 
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> Users:
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> Users:
     """Retrieve the current user from a JWT token."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -68,13 +68,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     except (JWTError, ValueError, TypeError):
         raise credentials_exception
 
-    query = select(Users).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at.is_(None))
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
+    # ADDED: Use async context manager for database session
+    async with get_db() as db:
+        query = select(Users).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at.is_(None))
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
 
-    if user is None:
-        raise credentials_exception
-    return user
+        if user is None:
+            raise credentials_exception
+        return user
 
 async def get_current_active_user(current_user: Users = Depends(get_current_user)) -> Users:
     """Ensure the current user is active."""
