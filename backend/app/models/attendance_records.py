@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, UniqueConstraint, Index, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import INET, ENUM
 from app.core.database import Base
@@ -12,13 +12,14 @@ class AttendanceRecords(Base):
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     clock_in_time = Column(DateTime(timezone=True), nullable=False)
     clock_out_time = Column(DateTime(timezone=True))
-    break_duration = Column(Integer, default=0)  # minutes
+    break_duration = Column(Integer, default=0)
     total_hours = Column(DECIMAL(4, 2))
     overtime_hours = Column(DECIMAL(4, 2), default=0)
     date = Column(Date, nullable=False, server_default=func.current_date())
     status = Column(attendance_status_enum, default='present')
     ip_address = Column(INET)
     location = Column(String(255))
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

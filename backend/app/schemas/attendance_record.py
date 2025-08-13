@@ -13,6 +13,7 @@ class AttendanceRecordBase(BaseModel):
     status: str = 'present'
     ip_address: Optional[str] = None
     location: Optional[str] = Field(None, max_length=255)
+    is_active: bool = True  # ADDED: is_active field
 
     @field_validator('clock_out_time')
     def validate_clock_out(cls, clock_out_time: Optional[datetime], values: dict) -> Optional[datetime]:
@@ -36,6 +37,7 @@ class AttendanceRecordUpdate(BaseModel):
     overtime_hours: Optional[float] = Field(None, ge=0)
     status: Optional[str] = None
     location: Optional[str] = Field(None, max_length=255)
+    is_active: Optional[bool] = None
 
     @field_validator('clock_out_time')
     def validate_clock_out(cls, clock_out_time: Optional[datetime], values: dict) -> Optional[datetime]:

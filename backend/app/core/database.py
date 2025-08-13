@@ -56,7 +56,6 @@ async def initialize_engine_and_session():
         raise
 
 # Database dependency for FastAPI
-@asynccontextmanager
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
