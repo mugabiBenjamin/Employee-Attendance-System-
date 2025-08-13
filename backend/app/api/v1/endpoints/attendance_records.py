@@ -340,6 +340,10 @@ async def get_attendance_summary(
 
         target_user_id = user_id if user_id else current_user.user_id
 
+        # Convert dates to datetime ranges for proper comparison
+        start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_datetime = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+
         query = select(
             AttendanceRecords.user_id,
             Users.employee_id,
@@ -354,8 +358,8 @@ async def get_attendance_summary(
             Users, Users.user_id == AttendanceRecords.user_id
         ).where(
             AttendanceRecords.user_id == target_user_id,
-            AttendanceRecords.clock_in_time >= start_date,
-            AttendanceRecords.clock_in_time <= end_date,
+            AttendanceRecords.clock_in_time >= start_datetime,
+            AttendanceRecords.clock_in_time <= end_datetime,
             AttendanceRecords.is_active == True,
             Users.is_active == True,
             Users.deleted_at == None
@@ -365,17 +369,27 @@ async def get_attendance_summary(
         records = result.fetchall()
 
         logger.info(f"Attendance summary retrieved for user_id: {target_user_id}")
-        return [AttendanceSummaryOut(
-            user_id=record.user_id,
-            employee_id=record.employee_id,
-            full_name=record.full_name,
-            date=record.date,
-            status=record.status,
-            total_hours=str(record.total_hours) if record.total_hours is not None else None,
-            overtime_hours=str(record.overtime_hours) if record.overtime_hours is not None else None,
-            clock_in_time=record.clock_in_time,
-            clock_out_time=record.clock_out_time
-        ) for record in records]
+        
+        try:
+            return [AttendanceSummaryOut(
+                user_id=record.user_id,
+                employee_id=record.employee_id,
+                full_name=record.full_name,
+                date=record.date,
+                status=record.status,
+                total_hours=str(record.total_hours) if record.total_hours is not None else None,
+                overtime_hours=str(record.overtime_hours) if record.overtime_hours is not None else None,
+                clock_in_time=record.clock_in_time,
+                clock_out_time=record.clock_out_time
+            ) for record in records]
+        except Exception as validation_error:
+            logger.error(f"Validation error: {validation_error}")
+            if records:
+                logger.error(f"Sample record data: {dict(records[0]._asdict())}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Data serialization error: {str(validation_error)}"
+            )
 
     except HTTPException:
         raise
