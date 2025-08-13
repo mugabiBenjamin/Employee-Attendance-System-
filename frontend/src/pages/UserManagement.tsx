@@ -134,7 +134,7 @@ function UserManagement() {
     placeholder: "Select department", 
     description: "Optional",
     options: departments.map((d) => ({
-      value: d.id.toString(),
+      value: d.department_id.toString(),
       label: d.name,
     })),
   },

@@ -66,7 +66,7 @@ function EmergencyContactsList() {
           variant="outline"
           size="sm"
           onClick={() =>
-            navigate(`/emergency-contacts/edit/${row.original.id}`)
+            navigate(`/emergency-contacts/edit/${row.original.emergency_contact_id}`)
           }
         >
           Edit

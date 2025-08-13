@@ -88,6 +88,10 @@ class Permission(str, Enum):
     
     # HR permissions
     MANAGE_EMPLOYEES = "manage_employees"
+    CREATE_USER = "create_user"
+    VIEW_USER = "view_user"
+    UPDATE_USER = "update_user"
+    DELETE_USER = "delete_user"
     VIEW_ALL_ATTENDANCE = "view_all_attendance"
     MANAGE_LEAVE_POLICIES = "manage_leave_policies"
     GENERATE_COMPLIANCE_REPORTS = "generate_compliance_reports"
@@ -95,8 +99,16 @@ class Permission(str, Enum):
     # Admin permissions
     VIEW_LOGS = "view_logs"
     MANAGE_ROLES = "manage_roles"
+    CREATE_USER_ROLE = "create_user_role"
+    VIEW_USER_ROLE = "view_user_role"
+    UPDATE_USER_ROLE = "update_user_role"
+    DELETE_USER_ROLE = "delete_user_role"
     MANAGE_USERS = "manage_users"
     MANAGE_DEPARTMENTS = "manage_departments"
+    CREATE_USER_DEPARTMENT = "create_user_department"
+    VIEW_USER_DEPARTMENT = "view_user_department"
+    UPDATE_USER_DEPARTMENT = "update_user_department"
+    DELETE_USER_DEPARTMENT = "delete_user_department"
     SYSTEM_CONFIGURATION = "system_configuration"
     
     # Super Admin

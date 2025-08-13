@@ -31,7 +31,7 @@ function ShiftPatternForm() {
   useEffect(() => {
     if (id && user?.permissions.includes("manage_employees")) {
       shiftsApi.getShiftPatterns({}).then((data) => {
-        const shift = data.items.find((s) => s.id === parseInt(id));
+        const shift = data.items.find((s) => s.shift_pattern_id === parseInt(id));
         if (shift) {
           setDefaultValues({
             name: shift.name,

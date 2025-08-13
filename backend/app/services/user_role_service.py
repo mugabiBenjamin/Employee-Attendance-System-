@@ -1,44 +1,37 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.user_roles import UserRoles
-from app.models.users import Users
-from app.models.roles import Roles
-from app.models.system_logs import SystemLogs
 from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
-from app.core.config import settings
-from app.core.enums import SystemAction
-from app.core.exceptions import UserNotFoundError, RoleNotFoundError
+from app.core.enums import SystemAction, Permission
+from app.core.security import get_current_user
+from app.core.permissions import require_permissions
+from app.services.system_log_service import SystemLogService, get_system_log_service
+from app.schemas.system_log import SystemLogCreate
+from app.core.validators import validate_user_exists, validate_role_exists
+from app.core.config import Settings, get_settings
+from app.models.users import Users
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_user_role(db: AsyncSession, user_role: UserRoleCreate, current_user: Users) -> UserRoleOut:
+async def create_user_role(
+    db: AsyncSession,
+    user_role: UserRoleCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(require_permissions([Permission.CREATE_USER_ROLE])),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
+) -> UserRoleOut:
     """
-    Assign a role to a user with validation and logging.
+    Assign a role to a user with validation and logging. Requires CREATE_USER_ROLE permission.
     """
     try:
-        # Validate user
-        query = select(Users).where(
-            Users.user_id == user_role.user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="User not found")
-
-        # Validate role
-        query = select(Roles).where(
-            Roles.role_id == user_role.role_id,
-            Roles.is_active == True,
-            Roles.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise RoleNotFoundError(detail="Role not found")
+        # Validate user and role
+        await validate_user_exists(db, user_role.user_id)
+        await validate_role_exists(db, user_role.role_id)
 
         # Check for existing assignment
         query = select(UserRoles).where(
@@ -68,18 +61,16 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreate, current_
         await db.refresh(db_user_role)
 
         # Log action
-        system_log = SystemLogs(
+        log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.INSERT,
             table_affected="user_roles",
             record_id=db_user_role.user_role_id,
             old_values=None,
             new_values=db_user_role.__dict__,
-            ip_address=None,
-            timestamp=datetime.now(timezone.utc)
+            ip_address=None
         )
-        db.add(system_log)
-        await db.commit()
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User role assignment created, user_role_id: {db_user_role.user_role_id}, user_id: {user_role.user_id}")
         return UserRoleOut.model_validate(db_user_role)
@@ -93,9 +84,14 @@ async def create_user_role(db: AsyncSession, user_role: UserRoleCreate, current_
             detail="Error creating user role assignment"
         )
 
-async def get_user_role_by_id(db: AsyncSession, user_role_id: int) -> Optional[UserRoleOut]:
+async def get_user_role_by_id(
+    db: AsyncSession,
+    user_role_id: int,
+    _: str = Depends(require_permissions([Permission.VIEW_USER_ROLE])),
+    settings: Settings = Depends(get_settings)
+) -> Optional[UserRoleOut]:
     """
-    Retrieve a user-role assignment by ID.
+    Retrieve a user-role assignment by ID. Requires VIEW_USER_ROLE permission.
     """
     try:
         query = select(UserRoles).where(
@@ -123,25 +119,25 @@ async def get_user_role_by_id(db: AsyncSession, user_role_id: int) -> Optional[U
             detail="Error retrieving user role assignment"
         )
 
-async def get_user_roles(db: AsyncSession, user_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[UserRoleOut]:
+async def get_user_roles(
+    db: AsyncSession,
+    user_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    _: str = Depends(require_permissions([Permission.VIEW_USER_ROLE])),
+    settings: Settings = Depends(get_settings)
+) -> List[UserRoleOut]:
     """
-    Retrieve a list of role assignments for a user with pagination.
+    Retrieve a list of role assignments for a user with pagination. Requires VIEW_USER_ROLE permission.
     """
     try:
-        query = select(Users).where(
-            Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="User not found")
+        await validate_user_exists(db, user_id)
 
         query = select(UserRoles).where(
             UserRoles.user_id == user_id,
             UserRoles.is_active == True,
             UserRoles.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         user_roles = result.scalars().all()
 
@@ -157,9 +153,17 @@ async def get_user_roles(db: AsyncSession, user_id: int, skip: int = 0, limit: i
             detail="Error retrieving role assignments"
         )
 
-async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update: UserRoleUpdate, current_user: Users) -> UserRoleOut:
+async def update_user_role(
+    db: AsyncSession,
+    user_role_id: int,
+    user_role_update: UserRoleUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(require_permissions([Permission.UPDATE_USER_ROLE])),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
+) -> UserRoleOut:
     """
-    Update a user-role assignment with validation and logging.
+    Update a user-role assignment with validation and logging. Requires UPDATE_USER_ROLE permission.
     """
     try:
         # Retrieve user-role assignment
@@ -180,25 +184,11 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
         # Validate user if updated
         update_data = user_role_update.model_dump(exclude_none=True)
         if "user_id" in update_data:
-            query = select(Users).where(
-                Users.user_id == update_data["user_id"],
-                Users.is_active == True,
-                Users.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise UserNotFoundError(detail="User not found")
+            await validate_user_exists(db, update_data["user_id"])
 
         # Validate role if updated
         if "role_id" in update_data:
-            query = select(Roles).where(
-                Roles.role_id == update_data["role_id"],
-                Roles.is_active == True,
-                Roles.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise RoleNotFoundError(detail="Role not found")
+            await validate_role_exists(db, update_data["role_id"])
 
             # Check for existing assignment
             query = select(UserRoles).where(
@@ -228,18 +218,16 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
         await db.refresh(db_user_role)
 
         # Log action
-        system_log = SystemLogs(
+        log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE,
             table_affected="user_roles",
             record_id=user_role_id,
             old_values=old_values,
             new_values=db_user_role.__dict__,
-            ip_address=None,
-            timestamp=datetime.now(timezone.utc)
+            ip_address=None
         )
-        db.add(system_log)
-        await db.commit()
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User role assignment updated, user_role_id: {user_role_id}")
         return UserRoleOut.model_validate(db_user_role)
@@ -253,9 +241,16 @@ async def update_user_role(db: AsyncSession, user_role_id: int, user_role_update
             detail="Error updating user role assignment"
         )
 
-async def delete_user_role(db: AsyncSession, user_role_id: int, current_user: Users) -> None:
+async def delete_user_role(
+    db: AsyncSession,
+    user_role_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(require_permissions([Permission.DELETE_USER_ROLE])),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
+) -> None:
     """
-    Soft delete a user-role assignment with logging.
+    Soft delete a user-role assignment with logging. Requires DELETE_USER_ROLE permission.
     """
     try:
         query = select(UserRoles).where(
@@ -293,18 +288,16 @@ async def delete_user_role(db: AsyncSession, user_role_id: int, current_user: Us
         await db.commit()
 
         # Log action
-        system_log = SystemLogs(
+        log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE,
             table_affected="user_roles",
             record_id=user_role_id,
             old_values=db_user_role.__dict__,
             new_values=None,
-            ip_address=None,
-            timestamp=datetime.now(timezone.utc)
+            ip_address=None
         )
-        db.add(system_log)
-        await db.commit()
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User role assignment soft deleted, user_role_id: {user_role_id}")
 

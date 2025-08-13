@@ -1,6 +1,11 @@
 import { api } from './index';
 import type { AttendanceRecord, PaginatedResponse, TimeCorrection } from './types';
 
+// Define interfaces for request payloads
+interface ClockInOutRequest {
+  type: 'in' | 'out';
+}
+
 interface AttendanceQuery {
   user_id?: number;
   page?: number;
@@ -16,6 +21,7 @@ interface TimeCorrectionRequest {
   reason: string;
 }
 
+// Define interface for response payloads
 interface AttendanceSummary {
   total_hours: number;
   overtime_hours: number;
@@ -25,7 +31,7 @@ interface AttendanceSummary {
 }
 
 export const attendanceApi = {
-  clockInOut: async (data: { type: 'in' | 'out' }): Promise<AttendanceRecord> => {
+  clockInOut: async (data: ClockInOutRequest): Promise<AttendanceRecord> => {
     const response = await api.post<AttendanceRecord>('/attendance-records/clock', data);
     return response.data;
   },

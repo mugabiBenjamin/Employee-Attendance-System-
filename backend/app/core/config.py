@@ -1,5 +1,5 @@
 from typing import List, ClassVar, Set
-from pydantic import Field, field_validator, ValidationError
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -17,20 +17,29 @@ class Settings(BaseSettings):
     DATABASE_PASSWORD: str = Field(..., env="DATABASE_PASSWORD")
 
     SECRET_KEY: str = Field(..., env="SECRET_KEY")
+    JWT_SECRET_KEY: str = Field(..., env="JWT_SECRET_KEY")
+    JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, env="REFRESH_TOKEN_EXPIRE_DAYS")
-    ALGORITHM: str = Field(default="HS256", env="ALGORITHM")
     BCRYPT_ROUNDS: int = Field(default=12, env="BCRYPT_ROUNDS")
 
     BACKEND_CORS_ORIGINS: List[str] = Field(default_factory=list, env="BACKEND_CORS_ORIGINS")
 
-    @field_validator("SECRET_KEY")
+    @field_validator("SECRET_KEY", "JWT_SECRET_KEY")
     @classmethod
     def validate_secret_key(cls, v):
         if not v or len(v.strip()) == 0:
-            raise ValueError("SECRET_KEY cannot be empty")
+            raise ValueError("SECRET_KEY and JWT_SECRET_KEY cannot be empty")
         if len(v) < 32:
-            raise ValueError("SECRET_KEY must be at least 32 characters long")
+            raise ValueError("SECRET_KEY and JWT_SECRET_KEY must be at least 32 characters long")
+        return v
+
+    @field_validator("JWT_ALGORITHM")
+    @classmethod
+    def validate_jwt_algorithm(cls, v):
+        supported_algorithms = ["HS256", "HS384", "HS512"]
+        if v not in supported_algorithms:
+            raise ValueError(f"JWT_ALGORITHM must be one of {supported_algorithms}")
         return v
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -53,7 +62,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = Field(..., env="CELERY_RESULT_BACKEND")
 
     MAX_FILE_SIZE: int = Field(default=10485760, env="MAX_FILE_SIZE")
-    UPLOAD_FOLDER: str = Field(default="./uploads", env="UPLOAD_FOLDER")
+    UPLOAD_FOLDER: str = Field(default="./Uploads", env="UPLOAD_FOLDER")
     ALLOWED_EXTENSIONS: List[str] = Field(default_factory=lambda: ["pdf", "doc", "docx", "jpg", "jpeg", "png"], env="ALLOWED_EXTENSIONS")
 
     # Safe file extensions whitelist
@@ -88,6 +97,8 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = Field(default=100, env="MAX_PAGE_SIZE")
     DEFAULT_TIMEZONE: str = Field(default="UTC", env="DEFAULT_TIMEZONE")
 
+    MATERIALIZED_VIEW_REFRESH_INTERVAL: int = Field(default=3600, env="MATERIALIZED_VIEW_REFRESH_INTERVAL")
+
     # Static lists
     ATTENDANCE_STATUSES: List[str] = ["present", "absent", "late", "early_departure", "on_leave", "half_day", "sick"]
     LEAVE_TYPES: List[str] = ["annual", "sick", "maternity", "paternity", "emergency", "unpaid", "casual", "compensatory", "bereavement", "leave_of_absence", "public_holiday"]
@@ -98,8 +109,6 @@ class Settings(BaseSettings):
     SHIFT_TYPES: List[str] = ["morning", "afternoon", "night", "flexible", "split"]
     PERMISSION_KEYS: List[str] = ["clock_in", "clock_out", "view_own_attendance", "request_leave", "view_leave_balance", "approve_leave", "view_team_attendance", "generate_reports", "manage_overtime", "manage_employees", "generate_compliance_reports", "view_all_attendance", "manage_leave_policies", "manage_users", "manage_roles", "system_configuration", "view_logs", "manage_departments", "all_permissions"]
 
-    MATERIALIZED_VIEW_REFRESH_INTERVAL: int = Field(default=3600, env="MATERIALIZED_VIEW_REFRESH_INTERVAL")
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -107,3 +116,7 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
+
+def get_settings() -> Settings:
+    """Dependency to provide Settings instance."""
+    return settings

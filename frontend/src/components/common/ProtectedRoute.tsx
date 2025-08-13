@@ -1,30 +1,58 @@
+import React, { type ReactNode, useContext } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useSelector } from "react-redux";
+import { AuthContext } from "@/context/AuthContext";
 import type { RootState } from "@/store";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { Permission } from "@/api/enums"; // ✅ Import the backend-enum-mapped Permission type
 
 interface ProtectedRouteProps {
-  requiredPermissions: string[];
-  children?: React.ReactNode;
+  requiredPermissions: Permission[]; // ✅ Strongly typed with Permission
+  children?: ReactNode;
 }
 
-function ProtectedRoute({
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   requiredPermissions,
   children,
-}: ProtectedRouteProps) {
+}) => {
+  // Get user data from Redux
   const { user, isAuthenticated } = useSelector(
     (state: RootState) => state.auth
   );
 
-  if (!isAuthenticated || !user) {
+  // Also check AuthContext if available
+  const authContext = useContext(AuthContext);
+  const {
+    isLoading: contextLoading,
+    isAuthenticated: contextIsAuthenticated,
+    user: contextUser,
+  } = authContext || {};
+
+  const isAuth = isAuthenticated || contextIsAuthenticated || false;
+  const authUser = user || contextUser || null;
+  const isLoading = contextLoading || false;
+
+  // Loading skeleton
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Skeleton className="w-[100px] h-[20px] rounded-full" />
+      </div>
+    );
+  }
+
+  // Redirect to login if unauthenticated
+  if (!isAuth || !authUser) {
     return <Navigate to="/login" replace />;
   }
 
+  // ✅ Permission check is now type-safe
   const hasPermission =
     requiredPermissions.length === 0 ||
     requiredPermissions.every(
       (perm) =>
-        user.permissions.includes(perm) ||
-        user.permissions.includes("all_permissions")
+        authUser.permissions.includes(perm) ||
+        authUser.permissions.includes("all_permissions")
     );
 
   if (!hasPermission) {
@@ -32,6 +60,6 @@ function ProtectedRoute({
   }
 
   return children ? <>{children}</> : <Outlet />;
-}
+};
 
 export default ProtectedRoute;

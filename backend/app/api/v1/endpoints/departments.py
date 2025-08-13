@@ -6,11 +6,11 @@ from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.departments import Departments
 from app.models.users import Users
-from app.core.config import settings
 from app.core.permissions import require_permissions
 from app.core.security import get_current_active_user
 from app.core.enums import Permission
 from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentOut
+from app.core.config import Settings, get_settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,8 @@ router = APIRouter(prefix="/departments", tags=["Departments"])
 async def create_department(
     department: DepartmentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> DepartmentOut:
     """Create a new department."""
     try:
@@ -66,7 +67,8 @@ async def create_department(
 async def get_department(
     department_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> DepartmentOut:
     """Get department by ID."""
     try:
@@ -99,16 +101,17 @@ async def get_department(
 @require_permissions([Permission.MANAGE_DEPARTMENTS])
 async def list_departments(
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> List[DepartmentOut]:
     """List all active departments."""
     try:
         query = select(Departments).where(
             Departments.is_active == True,
             Departments.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         
         result = await db.execute(query)
         departments = result.scalars().all()
@@ -128,7 +131,8 @@ async def update_department(
     department_id: int,
     department_update: DepartmentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> DepartmentOut:
     """Update an existing department."""
     try:
@@ -186,7 +190,8 @@ async def update_department(
 async def delete_department(
     department_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> None:
     """Soft delete a department."""
     try:

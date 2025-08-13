@@ -27,7 +27,7 @@ function DepartmentForm() {
   useEffect(() => {
     if (id && user?.permissions.includes("manage_departments")) {
       departmentsApi.getDepartments({}).then((data) => {
-        const department = data.items.find((d) => d.id === parseInt(id));
+        const department = data.items.find((d) => d.department_id === parseInt(id));
         if (department) {
           setDefaultValues({
             name: department.name,

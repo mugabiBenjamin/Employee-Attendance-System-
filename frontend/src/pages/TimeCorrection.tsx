@@ -49,7 +49,7 @@ function TimeCorrection() {
       placeholder: "Select record",
       description: "Select the attendance record to correct",
       options: records.map((record) => ({
-        value: record.id.toString(),
+        value: record.attendance_id.toString(),
         label: `${record.date} - ${record.clock_in || "No clock in"}`,
       })),
     },

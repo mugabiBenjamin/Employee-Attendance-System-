@@ -59,7 +59,7 @@ function ShiftPatternsList() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigate(`/shift-patterns/edit/${row.original.id}`)}
+          onClick={() => navigate(`/shift-patterns/edit/${row.original.shift_pattern_id}`)}
         >
           Edit
         </Button>

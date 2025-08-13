@@ -4,14 +4,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.user_departments import UserDepartments
-from app.models.users import Users
-from app.models.departments import Departments
-from app.models.system_logs import SystemLogs
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
-from app.core.config import settings
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.services.system_log_service import SystemLogService, get_system_log_service
+from app.schemas.system_log import SystemLogCreate
+from app.core.validators import validate_user_exists, validate_department_exists
+from app.core.config import Settings, get_settings
+from app.models.users import Users
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,13 +21,15 @@ async def create_user_department(
     db: AsyncSession,
     user_department: UserDepartmentCreate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_user_department"))
+    _: str = Depends(require_permissions([Permission.CREATE_USER_DEPARTMENT])),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> UserDepartmentOut:
-    """Assign a user to a department."""
+    """Assign a user to a department. Requires CREATE_USER_DEPARTMENT permission."""
     try:
         # Validate user and department exist
-        await _validate_user_exists(db, user_department.user_id)
-        await _validate_department_exists(db, user_department.department_id)
+        await validate_user_exists(db, user_department.user_id)
+        await validate_department_exists(db, user_department.department_id)
         
         # Check for existing assignment
         if await _assignment_exists(db, user_department.user_id, user_department.department_id):
@@ -52,8 +55,15 @@ async def create_user_department(
         await db.refresh(db_user_department)
 
         # Log action
-        await _log_action(db, current_user.user_id, SystemAction.INSERT, 
-                         db_user_department.user_department_id, None, db_user_department.__dict__)
+        log = SystemLogCreate(
+            user_id=current_user.user_id,
+            action=SystemAction.INSERT,
+            table_affected="user_departments",
+            record_id=db_user_department.user_department_id,
+            old_values=None,
+            new_values=db_user_department.__dict__
+        )
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User department assignment created: {db_user_department.user_department_id}")
         return UserDepartmentOut.model_validate(db_user_department)
@@ -70,9 +80,10 @@ async def create_user_department(
 async def get_user_department_by_id(
     db: AsyncSession,
     user_department_id: int,
-    _: str = Depends(check_permission("view_user_department"))
+    _: str = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT])),
+    settings: Settings = Depends(get_settings)
 ) -> Optional[UserDepartmentOut]:
-    """Retrieve a user-department assignment by ID."""
+    """Retrieve a user-department assignment by ID. Requires VIEW_USER_DEPARTMENT permission."""
     try:
         query = select(UserDepartments).where(
             UserDepartments.user_department_id == user_department_id,
@@ -104,11 +115,12 @@ async def get_user_departments(
     user_id: int,
     skip: int = 0,
     limit: int = None,
-    _: str = Depends(check_permission("view_user_department"))
+    _: str = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT])),
+    settings: Settings = Depends(get_settings)
 ) -> List[UserDepartmentOut]:
-    """Get department assignments for a user."""
+    """Get department assignments for a user. Requires VIEW_USER_DEPARTMENT permission."""
     try:
-        await _validate_user_exists(db, user_id)
+        await validate_user_exists(db, user_id)
         
         limit = limit or settings.DEFAULT_PAGE_SIZE
         
@@ -144,9 +156,11 @@ async def update_user_department(
     user_department_id: int,
     update_data: UserDepartmentUpdate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("update_user_department"))
+    _: str = Depends(require_permissions([Permission.UPDATE_USER_DEPARTMENT])),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> UserDepartmentOut:
-    """Update a user-department assignment."""
+    """Update a user-department assignment. Requires UPDATE_USER_DEPARTMENT permission."""
     try:
         # Get existing assignment
         query = select(UserDepartments).where(
@@ -168,10 +182,10 @@ async def update_user_department(
 
         # Validate changes
         if "user_id" in changes:
-            await _validate_user_exists(db, changes["user_id"])
+            await validate_user_exists(db, changes["user_id"])
             
         if "department_id" in changes:
-            await _validate_department_exists(db, changes["department_id"])
+            await validate_department_exists(db, changes["department_id"])
             # Check for duplicate assignment
             new_user_id = changes.get("user_id", db_user_department.user_id)
             if await _assignment_exists(db, new_user_id, changes["department_id"], exclude_id=user_department_id):
@@ -195,8 +209,15 @@ async def update_user_department(
         await db.refresh(db_user_department)
 
         # Log action
-        await _log_action(db, current_user.user_id, SystemAction.UPDATE,
-                         user_department_id, old_values, db_user_department.__dict__)
+        log = SystemLogCreate(
+            user_id=current_user.user_id,
+            action=SystemAction.UPDATE,
+            table_affected="user_departments",
+            record_id=user_department_id,
+            old_values=old_values,
+            new_values=db_user_department.__dict__
+        )
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User department assignment updated: {user_department_id}")
         return UserDepartmentOut.model_validate(db_user_department)
@@ -214,9 +235,11 @@ async def delete_user_department(
     db: AsyncSession,
     user_department_id: int,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("delete_user_department"))
+    _: str = Depends(require_permissions([Permission.DELETE_USER_DEPARTMENT])),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings)
 ) -> None:
-    """Soft delete a user-department assignment."""
+    """Soft delete a user-department assignment. Requires DELETE_USER_DEPARTMENT permission."""
     try:
         query = select(UserDepartments).where(
             UserDepartments.user_department_id == user_department_id,
@@ -240,8 +263,15 @@ async def delete_user_department(
         await db.commit()
 
         # Log action
-        await _log_action(db, current_user.user_id, SystemAction.DELETE,
-                         user_department_id, old_values, None)
+        log = SystemLogCreate(
+            user_id=current_user.user_id,
+            action=SystemAction.DELETE,
+            table_affected="user_departments",
+            record_id=user_department_id,
+            old_values=old_values,
+            new_values=None
+        )
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User department assignment soft deleted: {user_department_id}")
 
@@ -255,34 +285,6 @@ async def delete_user_department(
         )
 
 # Helper functions
-async def _validate_user_exists(db: AsyncSession, user_id: int) -> None:
-    """Validate that user exists and is active."""
-    query = select(Users).where(
-        Users.user_id == user_id,
-        Users.is_active == True,
-        Users.deleted_at == None
-    )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-async def _validate_department_exists(db: AsyncSession, department_id: int) -> None:
-    """Validate that department exists and is active."""
-    query = select(Departments).where(
-        Departments.department_id == department_id,
-        Departments.is_active == True,
-        Departments.deleted_at == None
-    )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Department not found"
-        )
-
 async def _assignment_exists(db: AsyncSession, user_id: int, department_id: int, exclude_id: int = None) -> bool:
     """Check if user is already assigned to department."""
     query = select(UserDepartments).where(
@@ -315,20 +317,3 @@ async def _clear_existing_primary(db: AsyncSession, user_id: int, exclude_id: in
         assignment.is_primary = False
         db.add(assignment)
     await db.commit()
-
-async def _log_action(db: AsyncSession, user_id: int, action: SystemAction, record_id: int, old_values: dict, new_values: dict) -> None:
-    """Log system action."""
-    try:
-        system_log = SystemLogs(
-            user_id=user_id,
-            action=action,
-            table_affected="user_departments",
-            record_id=record_id,
-            old_values=old_values,
-            new_values=new_values,
-            timestamp=datetime.now(timezone.utc)
-        )
-        db.add(system_log)
-        await db.commit()
-    except Exception as e:
-        logger.warning(f"Failed to log system action: {str(e)}")

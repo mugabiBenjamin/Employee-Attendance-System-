@@ -161,7 +161,7 @@ function Dashboard() {
                 <tbody>
                   {recentAttendance.length > 0 ? (
                     recentAttendance.map((record) => (
-                      <tr key={record.id} className="border-t">
+                      <tr key={record.attendance_id} className="border-t">
                         <td className="p-2 text-xs">
                           {format(new Date(record.created_at), "MMM d, yyyy")}
                         </td>

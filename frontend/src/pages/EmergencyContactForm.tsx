@@ -35,7 +35,7 @@ function EmergencyContactForm() {
   useEffect(() => {
     if (id && user?.permissions.includes("manage_employees")) {
       emergencyApi.getEmergencyContacts({}).then((data) => {
-        const contact = data.items.find((c) => c.id === parseInt(id));
+        const contact = data.items.find((c) => c.emergency_contact_id === parseInt(id));
         if (contact) {
           setDefaultValues({
             name: contact.name,
