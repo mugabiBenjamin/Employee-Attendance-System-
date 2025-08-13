@@ -4,16 +4,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.user_roles import UserRoles
-from app.models.users import Users
-from app.models.roles import Roles
 from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
 from app.core.config import settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserNotFoundError, RoleNotFoundError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
+from app.core.validators import validate_user_exists, validate_role_exists
+from app.models.users import Users
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,25 +28,9 @@ async def create_user_role(
     Assign a role to a user with validation and logging. Requires CREATE_USER_ROLE permission.
     """
     try:
-        # Validate user
-        query = select(Users).where(
-            Users.user_id == user_role.user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="User not found")
-
-        # Validate role
-        query = select(Roles).where(
-            Roles.role_id == user_role.role_id,
-            Roles.is_active == True,
-            Roles.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise RoleNotFoundError(detail="Role not found")
+        # Validate user and role
+        await validate_user_exists(db, user_role.user_id)
+        await validate_role_exists(db, user_role.role_id)
 
         # Check for existing assignment
         query = select(UserRoles).where(
@@ -145,14 +128,7 @@ async def get_user_roles(
     Retrieve a list of role assignments for a user with pagination. Requires VIEW_USER_ROLE permission.
     """
     try:
-        query = select(Users).where(
-            Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="User not found")
+        await validate_user_exists(db, user_id)
 
         query = select(UserRoles).where(
             UserRoles.user_id == user_id,
@@ -204,25 +180,11 @@ async def update_user_role(
         # Validate user if updated
         update_data = user_role_update.model_dump(exclude_none=True)
         if "user_id" in update_data:
-            query = select(Users).where(
-                Users.user_id == update_data["user_id"],
-                Users.is_active == True,
-                Users.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise UserNotFoundError(detail="User not found")
+            await validate_user_exists(db, update_data["user_id"])
 
         # Validate role if updated
         if "role_id" in update_data:
-            query = select(Roles).where(
-                Roles.role_id == update_data["role_id"],
-                Roles.is_active == True,
-                Roles.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise RoleNotFoundError(detail="Role not found")
+            await validate_role_exists(db, update_data["role_id"])
 
             # Check for existing assignment
             query = select(UserRoles).where(

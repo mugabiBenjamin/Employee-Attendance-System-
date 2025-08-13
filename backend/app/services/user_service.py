@@ -12,6 +12,7 @@ from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
+from app.core.validators import validate_user_exists
 import logging
 
 logger = logging.getLogger(__name__)
@@ -42,17 +43,7 @@ async def create_user(
 
         # Validate manager_id if provided
         if user.manager_id:
-            query = select(Users).where(
-                Users.user_id == user.manager_id,
-                Users.is_active == True,
-                Users.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Manager not found"
-                )
+            await validate_user_exists(db, user.manager_id)
 
         # Create user with hashed password
         hashed_password = get_password_hash(user.password)
@@ -205,17 +196,7 @@ async def update_user(
 
         # Validate manager_id if updated
         if "manager_id" in update_data and update_data["manager_id"] is not None:
-            query = select(Users).where(
-                Users.user_id == update_data["manager_id"],
-                Users.is_active == True,
-                Users.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Manager not found"
-                )
+            await validate_user_exists(db, update_data["manager_id"])
 
         # Store old values for logging
         old_values = db_user.__dict__.copy()

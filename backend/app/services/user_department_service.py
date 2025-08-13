@@ -4,8 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.user_departments import UserDepartments
-from app.models.users import Users
-from app.models.departments import Departments
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
 from app.core.config import settings
 from app.core.enums import SystemAction, Permission
@@ -13,7 +11,9 @@ from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
+from app.core.validators import validate_user_exists, validate_department_exists
 import logging
+from app.models.users import Users
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,8 @@ async def create_user_department(
     """Assign a user to a department. Requires CREATE_USER_DEPARTMENT permission."""
     try:
         # Validate user and department exist
-        await _validate_user_exists(db, user_department.user_id)
-        await _validate_department_exists(db, user_department.department_id)
+        await validate_user_exists(db, user_department.user_id)
+        await validate_department_exists(db, user_department.department_id)
         
         # Check for existing assignment
         if await _assignment_exists(db, user_department.user_id, user_department.department_id):
@@ -117,7 +117,7 @@ async def get_user_departments(
 ) -> List[UserDepartmentOut]:
     """Get department assignments for a user. Requires VIEW_USER_DEPARTMENT permission."""
     try:
-        await _validate_user_exists(db, user_id)
+        await validate_user_exists(db, user_id)
         
         limit = limit or settings.DEFAULT_PAGE_SIZE
         
@@ -178,10 +178,10 @@ async def update_user_department(
 
         # Validate changes
         if "user_id" in changes:
-            await _validate_user_exists(db, changes["user_id"])
+            await validate_user_exists(db, changes["user_id"])
             
         if "department_id" in changes:
-            await _validate_department_exists(db, changes["department_id"])
+            await validate_department_exists(db, changes["department_id"])
             # Check for duplicate assignment
             new_user_id = changes.get("user_id", db_user_department.user_id)
             if await _assignment_exists(db, new_user_id, changes["department_id"], exclude_id=user_department_id):
@@ -280,34 +280,6 @@ async def delete_user_department(
         )
 
 # Helper functions
-async def _validate_user_exists(db: AsyncSession, user_id: int) -> None:
-    """Validate that user exists and is active."""
-    query = select(Users).where(
-        Users.user_id == user_id,
-        Users.is_active == True,
-        Users.deleted_at == None
-    )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-async def _validate_department_exists(db: AsyncSession, department_id: int) -> None:
-    """Validate that department exists and is active."""
-    query = select(Departments).where(
-        Departments.department_id == department_id,
-        Departments.is_active == True,
-        Departments.deleted_at == None
-    )
-    result = await db.execute(query)
-    if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Department not found"
-        )
-
 async def _assignment_exists(db: AsyncSession, user_id: int, department_id: int, exclude_id: int = None) -> bool:
     """Check if user is already assigned to department."""
     query = select(UserDepartments).where(
