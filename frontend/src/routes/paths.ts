@@ -1,0 +1,19 @@
+// Centralized route paths
+export const ROUTES = {
+  LOGIN: "/login",
+  DASHBOARD: "/",
+  ATTENDANCE_CLOCK: "/attendance/clock",
+  ATTENDANCE_HISTORY: "/attendance/history",
+  TIME_CORRECTION: "/attendance/time-correction",
+  ATTENDANCE_SUMMARY: "/attendance/summary",
+  DEPARTMENTS: "/departments",
+  DEPARTMENT_EDIT: "/departments/edit/:id?",
+  EMERGENCY_CONTACTS: "/emergency-contacts",
+  EMERGENCY_CONTACT_EDIT: "/emergency-contacts/edit/:id?",
+  EMPLOYEE_HIERARCHY: "/employee-hierarchy",
+  SHIFT_PATTERNS: "/shift-patterns",
+  SHIFT_PATTERN_EDIT: "/shift-patterns/edit/:id?",
+  SYSTEM_LOGS: "/system-logs",
+  USER_MANAGEMENT: "/user-management",
+  NOT_FOUND: "*",
+};
