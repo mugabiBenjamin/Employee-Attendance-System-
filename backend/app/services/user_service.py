@@ -93,8 +93,6 @@ async def create_user(
     except SQLAlchemyError as e:
         logger.error(f"Database error in create_user: {str(e)}")
         raise DatabaseError(message="Database error creating user", original_error=e)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Unexpected error in create_user: {str(e)}")
         raise HTTPException(

@@ -94,12 +94,12 @@ async def get_department(
     except ValidationError as e:
         logger.error(f"Validation error in get_department for department_id {department_id}: {str(e)}")
         raise
-    except SQLAlchemyError as e:
-        logger.error(f"Database error in get_department for department_id {department_id}: {str(e)}")
-        raise DatabaseError(message="Database error retrieving department", original_error=e)
     except ResourceNotFoundError as e:
         logger.error(f"Resource not found in get_department for department_id {department_id}: {str(e)}")
         raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in get_department for department_id {department_id}: {str(e)}")
+        raise DatabaseError(message="Database error retrieving department", original_error=e)
     except Exception as e:
         logger.error(f"Unexpected error in get_department for department_id {department_id}: {str(e)}")
         raise HTTPException(
@@ -116,7 +116,7 @@ async def list_departments(
     current_user: Users = Depends(get_current_active_user),
     settings: Settings = Depends(get_settings)
 ) -> List[DepartmentOut]:
-    """List all active departments."""
+    """List all active departments with pagination."""
     try:
         if skip < 0 or limit <= 0:
             raise ValidationError(detail="Invalid pagination parameters")
@@ -129,6 +129,7 @@ async def list_departments(
         result = await db.execute(query)
         departments = result.scalars().all()
 
+        logger.info(f"Retrieved {len(departments)} departments")
         return [DepartmentOut.model_validate(dept) for dept in departments]
 
     except ValidationError as e:
