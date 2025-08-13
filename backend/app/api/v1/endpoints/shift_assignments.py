@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/shift-assignments", tags=["Shift Assignments"])
 
 @router.post("/", 
-             response_model=ShiftAssignmentOut, 
-             status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_permissions([Permission.MANAGE_USERS]))],
-             summary="Create new shift assignment")
+            response_model=ShiftAssignmentOut, 
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(require_permissions([Permission.MANAGE_USERS]))],
+            summary="Create new shift assignment")
 async def create_shift_assignment(
     shift_assignment: ShiftAssignmentCreate,
     db: AsyncSession = Depends(get_db),
@@ -277,9 +277,9 @@ async def update_shift_assignment(
         )
 
 @router.delete("/{assignment_id}", 
-               status_code=status.HTTP_204_NO_CONTENT,
-               dependencies=[Depends(require_permissions([Permission.MANAGE_USERS]))],
-               summary="Delete shift assignment")
+            status_code=status.HTTP_204_NO_CONTENT,
+            dependencies=[Depends(require_permissions([Permission.MANAGE_USERS]))],
+            summary="Delete shift assignment")
 async def delete_shift_assignment(
     assignment_id: int,
     db: AsyncSession = Depends(get_db),

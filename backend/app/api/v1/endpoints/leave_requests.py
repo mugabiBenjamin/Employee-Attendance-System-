@@ -43,10 +43,10 @@ class LeaveApprovalUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 @router.post("/", 
-             response_model=LeaveRequestOut, 
-             status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_permissions([Permission.REQUEST_LEAVE]))],
-             summary="Create leave request")
+            response_model=LeaveRequestOut, 
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(require_permissions([Permission.REQUEST_LEAVE]))],
+            summary="Create leave request")
 async def create_leave_request(
     leave_request: LeaveRequestCreate,
     db: AsyncSession = Depends(get_db),
@@ -211,10 +211,10 @@ async def get_leave_balance(
         )
 
 @router.post("/policies", 
-             response_model=LeavePolicyOut, 
-             status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_permissions([Permission.MANAGE_LEAVE_POLICIES]))],
-             summary="Create leave policy")
+            response_model=LeavePolicyOut, 
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(require_permissions([Permission.MANAGE_LEAVE_POLICIES]))],
+            summary="Create leave policy")
 async def create_leave_policy(
     policy: LeavePolicyCreate,
     db: AsyncSession = Depends(get_db),
@@ -298,10 +298,10 @@ async def get_leave_policies(
         )
 
 @router.post("/holidays", 
-             response_model=HolidayCalendarOut, 
-             status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_hr_permissions())],
-             summary="Create holiday")
+            response_model=HolidayCalendarOut, 
+            status_code=status.HTTP_201_CREATED,
+            dependencies=[Depends(require_hr_permissions())],
+            summary="Create holiday")
 async def create_holiday(
     holiday: HolidayCalendarCreate,
     db: AsyncSession = Depends(get_db),

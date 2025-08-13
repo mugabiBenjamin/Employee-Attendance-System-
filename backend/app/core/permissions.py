@@ -16,12 +16,12 @@ permission_cache = cachetools.TTLCache(maxsize=1000, ttl=300)
 
 class PermissionCheck(BaseModel):
     user_id: int
-    required_permissions: List[str]
+    required_permissions: List[Permission]
 
     model_config = ConfigDict(from_attributes=True)
 
 async def check_permissions(
-    required_permissions: List[str],
+    required_permissions: List[Permission],
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> bool:
@@ -34,6 +34,9 @@ async def check_permissions(
                 detail="User account is inactive"
             )
         
+        # Convert enum list to string list for processing
+        required_perms_str = [perm.value for perm in required_permissions]
+        
         # Check cache first
         cache_key = f"user_{current_user.user_id}_permissions"
         cached_permissions = permission_cache.get(cache_key)
@@ -41,7 +44,7 @@ async def check_permissions(
             if cached_permissions.get("all_permissions", False):
                 return True
             user_permissions = set(cached_permissions.get("permissions", []))
-            missing_permissions = [perm for perm in required_permissions if perm not in user_permissions]
+            missing_permissions = [perm for perm in required_perms_str if perm not in user_permissions]
             if missing_permissions:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -74,7 +77,7 @@ async def check_permissions(
         for perms in role_permissions:
             if isinstance(perms, dict):
                 # Check for all_permissions wildcard first
-                if perms.get("all_permissions") is True:
+                if perms.get(Permission.ALL_PERMISSIONS.value) is True:
                     has_all_permissions = True
                     break
                 
@@ -94,7 +97,7 @@ async def check_permissions(
             return True
 
         # Check if all required permissions are present and enabled
-        missing_permissions = [perm for perm in required_permissions if perm not in user_permissions]
+        missing_permissions = [perm for perm in required_perms_str if perm not in user_permissions]
         if missing_permissions:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -111,7 +114,7 @@ async def check_permissions(
             detail=f"Permission check failed: {str(e)}"
         )
 
-def require_permissions(required_permissions: List[str]):
+def require_permissions(required_permissions: List[Permission]):
     """Decorator to enforce permission checks for FastAPI routes."""
     def decorator(func):
         async def wrapper(*args, current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db), **kwargs):
@@ -150,7 +153,7 @@ async def get_user_permissions(
         has_all_permissions = False
         for perms in role_permissions:
             if isinstance(perms, dict):
-                if perms.get("all_permissions") is True:
+                if perms.get(Permission.ALL_PERMISSIONS.value) is True:
                     has_all_permissions = True
                     break
                 for perm_key, perm_value in perms.items():
