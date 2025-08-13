@@ -51,7 +51,7 @@ function DepartmentsList() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigate(`/departments/edit/${row.original.id}`)}
+          onClick={() => navigate(`/departments/edit/${row.original.department_id}`)}
         >
           Edit
         </Button>
