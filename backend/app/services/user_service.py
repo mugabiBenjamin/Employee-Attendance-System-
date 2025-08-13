@@ -8,7 +8,6 @@ from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserNotFoundError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
@@ -50,7 +49,10 @@ async def create_user(
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
-                raise UserNotFoundError(detail="Manager not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Manager not found"
+                )
 
         # Create user with hashed password
         hashed_password = get_password_hash(user.password)
@@ -115,7 +117,10 @@ async def get_user_by_id(
         user = result.scalar_one_or_none()
 
         if not user:
-            raise UserNotFoundError(detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
 
         return UserOut.model_validate(user)
 
@@ -177,7 +182,10 @@ async def update_user(
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise UserNotFoundError(detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
 
         # Check for duplicate email if updated
         update_data = user_update.model_dump(exclude_none=True)
@@ -204,7 +212,10 @@ async def update_user(
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
-                raise UserNotFoundError(detail="Manager not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Manager not found"
+                )
 
         # Store old values for logging
         old_values = db_user.__dict__.copy()
@@ -266,7 +277,10 @@ async def delete_user(
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise UserNotFoundError(detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
 
         # Prevent deletion if user has active subordinates
         query = select(Users).where(

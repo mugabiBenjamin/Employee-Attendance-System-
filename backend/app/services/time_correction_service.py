@@ -403,13 +403,23 @@ async def _update_attendance_record(db: AsyncSession, correction: TimeCorrection
         )
         result = await db.execute(query)
         attendance = result.scalar_one_or_none()
-        if attendance:
-            if correction.corrected_clock_in:
-                attendance.clock_in = correction.corrected_clock_in
-            if correction.corrected_clock_out:
-                attendance.clock_out = correction.corrected_clock_out
-            attendance.updated_at = datetime.now(timezone.utc)
-            db.add(attendance)
-            await db.commit()
+        if not attendance:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Attendance record {correction.attendance_id} not found"
+            )
+        if correction.corrected_clock_in:
+            attendance.clock_in = correction.corrected_clock_in
+        if correction.corrected_clock_out:
+            attendance.clock_out = correction.corrected_clock_out
+        attendance.updated_at = datetime.now(timezone.utc)
+        db.add(attendance)
+        await db.commit()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Failed to update attendance record {correction.attendance_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update attendance record {correction.attendance_id}"
+        )
