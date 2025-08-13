@@ -36,7 +36,6 @@ function App() {
           <Suspense fallback={<div>Loading...</div>}>
             <Routes>
               <Route path={ROUTES.LOGIN} element={<Login />} />
-
               <Route element={<MainLayout />}>
                 <Route
                   path={ROUTES.DASHBOARD}

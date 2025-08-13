@@ -9,10 +9,7 @@ import {
   type Permission
 } from "./enums";
 
-/** =========================
- *  CORE MODELS
- *  ========================= */
-
+// CORE MODELS
 export interface User {
   id: number;
   email: string;
@@ -43,9 +40,7 @@ export interface RefreshTokenResponse {
   token_type: string;
 }
 
-/** =========================
- *  ATTENDANCE & TIME TRACKING
- *  ========================= */
+// ATTENDANCE & TIME TRACKING
 export interface AttendanceRecord {
   attendance_id: number;
   date: string;
@@ -76,9 +71,7 @@ export interface TimeCorrection {
   updated_at?: string;
 }
 
-/** =========================
- *  LEAVE MANAGEMENT
- *  ========================= */
+// LEAVE MANAGEMENT
 export interface LeaveRequest {
   leave_request_id: number;
   user_id: number;
@@ -90,9 +83,7 @@ export interface LeaveRequest {
   created_at: string;
 }
 
-/** =========================
- *  DEPARTMENTS & ROLES
- *  ========================= */
+// DEPARTMENTS & ROLES
 export interface Department {
   department_id: number;
   name: string;
@@ -117,9 +108,7 @@ export interface UserRole {
   role_id: number;
 }
 
-/** =========================
- *  EMERGENCY CONTACTS
- *  ========================= */
+// EMERGENCY CONTACTS
 export interface EmergencyContact {
   emergency_contact_id: number;
   user_id: number;
@@ -130,18 +119,14 @@ export interface EmergencyContact {
   address?: string;
 }
 
-/** =========================
- *  EMPLOYEE HIERARCHY
- *  ========================= */
+// EMPLOYEE HIERARCHY
 export interface EmployeeHierarchy {
   hierarchy_id: number;
   employee_id: number;
   manager_id: number;
 }
 
-/** =========================
- *  SHIFTS
- *  ========================= */
+// SHIFTS
 export interface ShiftPattern {
   shift_pattern_id: number;
   name: string;
@@ -159,9 +144,7 @@ export interface ShiftAssignment {
   end_date?: string;
 }
 
-/** =========================
- *  SYSTEM LOGS
- *  ========================= */
+// SYSTEM LOGS
 export interface SystemLog {
   system_log_id: number;
   user_id?: number;
@@ -171,9 +154,7 @@ export interface SystemLog {
   created_at: string;
 }
 
-/** =========================
- *  API RESPONSE WRAPPERS
- *  ========================= */
+//API RESPONSE WRAPPERS
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
