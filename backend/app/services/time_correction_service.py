@@ -7,13 +7,14 @@ from app.models.time_corrections import TimeCorrections
 from app.models.attendance_records import AttendanceRecords
 from app.models.users import Users
 from app.models.employee_hierarchy import EmployeeHierarchy
-from app.models.system_logs import SystemLogs
 from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionOut, TimeCorrectionUpdate
 from app.core.config import settings
-from app.core.enums import SystemAction, CorrectionStatus
+from app.core.enums import Permission, SystemAction, CorrectionStatus
 from app.core.mail import send_email, EmailSchema, get_user_email
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.services.system_log_service import SystemLogService, get_system_log_service
+from app.schemas.system_log import SystemLogCreate
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,9 +23,10 @@ async def create_time_correction(
     db: AsyncSession,
     time_correction: TimeCorrectionCreate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_time_correction"))
+    _: str = Depends(require_permissions([Permission.CREATE_TIME_CORRECTION])),
+    log_service: SystemLogService = Depends(get_system_log_service)
 ) -> TimeCorrectionOut:
-    """Create a new time correction request."""
+    """Create a new time correction request. Requires CREATE_TIME_CORRECTION permission."""
     try:
         # Validate attendance record exists and is active
         attendance = await _get_active_attendance(db, time_correction.attendance_id)
@@ -66,11 +68,15 @@ async def create_time_correction(
         await _notify_managers_of_correction(db, time_correction.user_id, db_time_correction, user)
 
         # Log the action
-        await _log_system_action(
-            db, current_user.user_id, SystemAction.INSERT, 
-            "time_corrections", db_time_correction.correction_id, 
-            None, db_time_correction.__dict__
+        log = SystemLogCreate(
+            user_id=current_user.user_id,
+            action=SystemAction.INSERT,
+            table_affected="time_corrections",
+            record_id=db_time_correction.correction_id,
+            old_values=None,
+            new_values=db_time_correction.__dict__
         )
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"Time correction created: correction_id={db_time_correction.correction_id}, user_id={time_correction.user_id}")
         return TimeCorrectionOut.model_validate(db_time_correction)
@@ -87,9 +93,9 @@ async def create_time_correction(
 async def get_time_correction_by_id(
     db: AsyncSession,
     correction_id: int,
-    _: str = Depends(check_permission("view_time_correction"))
+    _: str = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
 ) -> Optional[TimeCorrectionOut]:
-    """Retrieve a time correction by ID."""
+    """Retrieve a time correction by ID. Requires VIEW_TIME_CORRECTION permission."""
     try:
         query = select(TimeCorrections).where(TimeCorrections.correction_id == correction_id)
         result = await db.execute(query)
@@ -117,9 +123,9 @@ async def get_user_time_corrections(
     user_id: int,
     skip: int = 0,
     limit: int = None,
-    _: str = Depends(check_permission("view_time_correction"))
+    _: str = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
 ) -> List[TimeCorrectionOut]:
-    """Get all time corrections for a specific user."""
+    """Get all time corrections for a specific user. Requires VIEW_TIME_CORRECTION permission."""
     try:
         # Validate user exists
         user = await _get_active_user(db, user_id)
@@ -159,9 +165,10 @@ async def update_time_correction(
     correction_id: int,
     time_correction_update: TimeCorrectionUpdate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("update_time_correction"))
+    _: str = Depends(require_permissions([Permission.UPDATE_TIME_CORRECTION])),
+    log_service: SystemLogService = Depends(get_system_log_service)
 ) -> TimeCorrectionOut:
-    """Update an existing time correction."""
+    """Update an existing time correction. Requires UPDATE_TIME_CORRECTION permission."""
     try:
         # Get existing time correction
         query = select(TimeCorrections).where(TimeCorrections.correction_id == correction_id)
@@ -220,10 +227,15 @@ async def update_time_correction(
             await _notify_user_of_status_change(db, db_correction, correction_id)
 
         # Log the action
-        await _log_system_action(
-            db, current_user.user_id, SystemAction.UPDATE,
-            "time_corrections", correction_id, old_values, db_correction.__dict__
+        log = SystemLogCreate(
+            user_id=current_user.user_id,
+            action=SystemAction.UPDATE,
+            table_affected="time_corrections",
+            record_id=correction_id,
+            old_values=old_values,
+            new_values=db_correction.__dict__
         )
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"Time correction updated: correction_id={correction_id}")
         return TimeCorrectionOut.model_validate(db_correction)
@@ -241,9 +253,10 @@ async def delete_time_correction(
     db: AsyncSession,
     correction_id: int,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("delete_time_correction"))
+    _: str = Depends(require_permissions([Permission.DELETE_TIME_CORRECTION])),
+    log_service: SystemLogService = Depends(get_system_log_service)
 ) -> None:
-    """Soft delete a time correction."""
+    """Soft delete a time correction. Requires DELETE_TIME_CORRECTION permission."""
     try:
         query = select(TimeCorrections).where(TimeCorrections.correction_id == correction_id)
         result = await db.execute(query)
@@ -272,10 +285,15 @@ async def delete_time_correction(
         await db.commit()
 
         # Log the action
-        await _log_system_action(
-            db, current_user.user_id, SystemAction.DELETE,
-            "time_corrections", correction_id, old_values, None
+        log = SystemLogCreate(
+            user_id=current_user.user_id,
+            action=SystemAction.DELETE,
+            table_affected="time_corrections",
+            record_id=correction_id,
+            old_values=old_values,
+            new_values=None
         )
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"Time correction soft deleted: correction_id={correction_id}")
 
@@ -395,28 +413,3 @@ async def _update_attendance_record(db: AsyncSession, correction: TimeCorrection
             await db.commit()
     except Exception as e:
         logger.warning(f"Failed to update attendance record {correction.attendance_id}: {str(e)}")
-
-async def _log_system_action(
-    db: AsyncSession,
-    user_id: int,
-    action: SystemAction,
-    table_name: str,
-    record_id: int,
-    old_values: Optional[dict],
-    new_values: Optional[dict]
-) -> None:
-    """Log system action to audit trail."""
-    try:
-        system_log = SystemLogs(
-            user_id=user_id,
-            action=action,
-            table_affected=table_name,
-            record_id=record_id,
-            old_values=old_values,
-            new_values=new_values,
-            timestamp=datetime.now(timezone.utc)
-        )
-        db.add(system_log)
-        await db.commit()
-    except Exception as e:
-        logger.warning(f"Failed to log system action: {str(e)}")

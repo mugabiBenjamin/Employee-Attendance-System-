@@ -1,22 +1,31 @@
 from typing import List, Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.users import Users
-from app.models.system_logs import SystemLogs
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.config import settings
 from app.core.security import get_password_hash
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError
+from app.core.security import get_current_user
+from app.core.permissions import require_permissions
+from app.services.system_log_service import SystemLogService, get_system_log_service
+from app.schemas.system_log import SystemLogCreate
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def create_user(db: AsyncSession, user: UserCreate, current_user: Users) -> UserOut:
+async def create_user(
+    db: AsyncSession,
+    user: UserCreate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(require_permissions([Permission.CREATE_USER])),
+    log_service: SystemLogService = Depends(get_system_log_service)
+) -> UserOut:
     """
-    Create a new user with validation and logging.
+    Create a new user with validation and logging. Requires CREATE_USER permission.
     """
     try:
         # Check for existing email
@@ -65,18 +74,16 @@ async def create_user(db: AsyncSession, user: UserCreate, current_user: Users) -
         await db.refresh(db_user)
 
         # Log action
-        system_log = SystemLogs(
+        log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.INSERT,
             table_affected="users",
             record_id=db_user.user_id,
             old_values=None,
             new_values=db_user.__dict__,
-            ip_address=None,
-            timestamp=datetime.now(timezone.utc)
+            ip_address=None
         )
-        db.add(system_log)
-        await db.commit()
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User created, user_id: {db_user.user_id}, email: {db_user.email}")
         return UserOut.model_validate(db_user)
@@ -90,9 +97,13 @@ async def create_user(db: AsyncSession, user: UserCreate, current_user: Users) -
             detail="Error creating user"
         )
 
-async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[UserOut]:
+async def get_user_by_id(
+    db: AsyncSession,
+    user_id: int,
+    _: str = Depends(require_permissions([Permission.VIEW_USER]))
+) -> Optional[UserOut]:
     """
-    Retrieve a user by ID.
+    Retrieve a user by ID. Requires VIEW_USER permission.
     """
     try:
         query = select(Users).where(
@@ -117,9 +128,14 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[UserOut]:
             detail="Error retrieving user"
         )
 
-async def get_users(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE) -> List[UserOut]:
+async def get_users(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = settings.DEFAULT_PAGE_SIZE,
+    _: str = Depends(require_permissions([Permission.VIEW_USER]))
+) -> List[UserOut]:
     """
-    Retrieve a list of active users with pagination.
+    Retrieve a list of active users with pagination. Requires VIEW_USER permission.
     """
     try:
         query = select(Users).where(
@@ -139,9 +155,16 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = settings.DEFAU
             detail="Error retrieving users"
         )
 
-async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, current_user: Users) -> UserOut:
+async def update_user(
+    db: AsyncSession,
+    user_id: int,
+    user_update: UserUpdate,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(require_permissions([Permission.UPDATE_USER])),
+    log_service: SystemLogService = Depends(get_system_log_service)
+) -> UserOut:
     """
-    Update a user with validation and logging.
+    Update a user with validation and logging. Requires UPDATE_USER permission.
     """
     try:
         # Retrieve user
@@ -200,18 +223,16 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, c
         await db.refresh(db_user)
 
         # Log action
-        system_log = SystemLogs(
+        log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE,
             table_affected="users",
             record_id=user_id,
             old_values=old_values,
             new_values=db_user.__dict__,
-            ip_address=None,
-            timestamp=datetime.now(timezone.utc)
+            ip_address=None
         )
-        db.add(system_log)
-        await db.commit()
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User updated, user_id: {user_id}")
         return UserOut.model_validate(db_user)
@@ -225,9 +246,15 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, c
             detail="Error updating user"
         )
 
-async def delete_user(db: AsyncSession, user_id: int, current_user: Users) -> None:
+async def delete_user(
+    db: AsyncSession,
+    user_id: int,
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(require_permissions([Permission.DELETE_USER])),
+    log_service: SystemLogService = Depends(get_system_log_service)
+) -> None:
     """
-    Soft delete a user with validation and logging.
+    Soft delete a user with validation and logging. Requires DELETE_USER permission.
     """
     try:
         query = select(Users).where(
@@ -260,18 +287,16 @@ async def delete_user(db: AsyncSession, user_id: int, current_user: Users) -> No
         await db.commit()
 
         # Log action
-        system_log = SystemLogs(
+        log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE,
             table_affected="users",
             record_id=user_id,
             old_values=db_user.__dict__,
             new_values=None,
-            ip_address=None,
-            timestamp=datetime.now(timezone.utc)
+            ip_address=None
         )
-        db.add(system_log)
-        await db.commit()
+        await log_service.create_system_log(log, current_user)
 
         logger.info(f"User soft deleted, user_id: {user_id}")
 
