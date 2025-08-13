@@ -20,7 +20,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { ModeToggle } from "@/components/mode-toggle";
+import type { AuthResponse, User } from "@/api/types";
 
+// Define schema for form values
 const loginSchema = z.object({
   email: z.string().email({ message: "Invalid email address" }),
   password: z
@@ -28,15 +30,21 @@ const loginSchema = z.object({
     .min(6, { message: "Password must be at least 6 characters" }),
 });
 
-type LoginFormData = z.infer<typeof loginSchema>;
+// Define type for form values
+type LoginFormValues = z.infer<typeof loginSchema>;
 
-function Login() {
+// Define type for login response
+interface LoginResponse extends AuthResponse {
+  user: User;
+}
+
+const Login: React.FC = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState<boolean>(false);
 
-  const form = useForm<LoginFormData>({
+  const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
       email: "",
@@ -44,9 +52,9 @@ function Login() {
     },
   });
 
-  const onSubmit = async (data: LoginFormData) => {
+  const onSubmit = async (data: LoginFormValues): Promise<void> => {
     try {
-      const response = await authApi.login(data);
+      const response: LoginResponse = await authApi.login(data);
       dispatch(setAuth(response));
       navigate("/");
     } catch {
@@ -170,6 +178,6 @@ function Login() {
       </div>
     </div>
   );
-}
+};
 
 export default Login;
