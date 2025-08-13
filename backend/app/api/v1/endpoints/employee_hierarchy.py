@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.users import Users
-from app.core.permissions import require_permissions, check_permissions
+from app.core.permissions import require_permissions
 from app.core.security import get_current_active_user
 from app.core.config import settings
 from app.core.enums import Permission
@@ -83,12 +83,13 @@ async def create_employee_hierarchy(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating employee hierarchy")
 
 @router.get("/{hierarchy_id}", response_model=EmployeeHierarchyOut)
+@require_permissions([Permission.VIEW_ALL_ATTENDANCE, Permission.VIEW_TEAM_ATTENDANCE, Permission.VIEW_OWN_ATTENDANCE])
 async def get_employee_hierarchy(
     hierarchy_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> EmployeeHierarchyOut:
-    """Get hierarchy by ID. Managers can view their team, HR/Admin can view all."""
+    """Get hierarchy by ID. Requires VIEW_ALL_ATTENDANCE for all, VIEW_TEAM_ATTENDANCE for team, or VIEW_OWN_ATTENDANCE for own hierarchy."""
     try:
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.hierarchy_id == hierarchy_id,
@@ -101,15 +102,9 @@ async def get_employee_hierarchy(
         if not hierarchy:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee hierarchy not found")
 
-        # Check permissions: view all, team management, or own hierarchy
-        can_view_all = await check_permissions([Permission.VIEW_ALL_ATTENDANCE], current_user, db)
-        can_view_team = await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
-        
-        if not can_view_all:
-            if can_view_team and hierarchy.manager_id != current_user.user_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this hierarchy")
-            elif not can_view_team and hierarchy.employee_id != current_user.user_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this hierarchy")
+        # Check if user is viewing their own hierarchy, their team's, or has VIEW_ALL_ATTENDANCE
+        if hierarchy.employee_id != current_user.user_id and hierarchy.manager_id != current_user.user_id:
+            await require_permissions([Permission.VIEW_ALL_ATTENDANCE])(get_employee_hierarchy)(hierarchy_id=hierarchy_id, db=db, current_user=current_user)
 
         return EmployeeHierarchyOut.model_validate(hierarchy)
 
@@ -120,6 +115,7 @@ async def get_employee_hierarchy(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving employee hierarchy")
 
 @router.get("/", response_model=List[EmployeeHierarchyOut])
+@require_permissions([Permission.VIEW_ALL_ATTENDANCE, Permission.VIEW_TEAM_ATTENDANCE, Permission.VIEW_OWN_ATTENDANCE])
 async def list_employee_hierarchies(
     employee_id: Optional[int] = None,
     skip: int = 0,
@@ -127,31 +123,25 @@ async def list_employee_hierarchies(
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ) -> List[EmployeeHierarchyOut]:
-    """List hierarchies. Managers see their team, HR/Admin see all."""
+    """List hierarchies. Requires VIEW_ALL_ATTENDANCE for all, VIEW_TEAM_ATTENDANCE for team, or VIEW_OWN_ATTENDANCE for own hierarchy."""
     try:
-        can_view_all = await check_permissions([Permission.VIEW_ALL_ATTENDANCE], current_user, db)
-        can_view_team = await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
-        
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.is_active == True,
             EmployeeHierarchy.deleted_at == None
         )
         
         if employee_id:
-            # Filter by specific employee
-            if not can_view_all and employee_id != current_user.user_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view other employees' hierarchy")
+            # Only allow viewing specific employee if authorized
+            if employee_id != current_user.user_id:
+                await require_permissions([Permission.VIEW_ALL_ATTENDANCE])(list_employee_hierarchies)(employee_id=employee_id, skip=skip, limit=limit, db=db, current_user=current_user)
             query = query.where(EmployeeHierarchy.employee_id == employee_id)
-        elif not can_view_all:
-            if can_view_team:
-                # Show team members or own hierarchy
+        else:
+            # Restrict to team or own hierarchy if not VIEW_ALL_ATTENDANCE
+            if not (await require_permissions([Permission.VIEW_ALL_ATTENDANCE])(list_employee_hierarchies)(employee_id=employee_id, skip=skip, limit=limit, db=db, current_user=current_user)):
                 query = query.where(
                     (EmployeeHierarchy.manager_id == current_user.user_id) |
                     (EmployeeHierarchy.employee_id == current_user.user_id)
                 )
-            else:
-                # Show only own hierarchy
-                query = query.where(EmployeeHierarchy.employee_id == current_user.user_id)
         
         query = query.offset(skip).limit(limit)
         result = await db.execute(query)

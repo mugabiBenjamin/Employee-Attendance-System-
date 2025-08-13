@@ -1,16 +1,14 @@
-from typing import List, Optional
+from typing import List
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict
 from app.core.database import get_db
-from app.core.config import settings
-from app.core.exceptions import AuthorizationError
 from app.core.enums import Permission
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
-from app.core.security import get_current_user, oauth2_scheme
+from app.core.security import get_current_user
 import cachetools
 
 # Initialize in-memory cache with TTL of 5 minutes
