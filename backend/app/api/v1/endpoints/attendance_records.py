@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,8 +28,13 @@ import asyncio
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/attendance-records", tags=["Attendance Records"])
 
@@ -73,7 +78,9 @@ async def _generate_pdf(data: List[List[str]], filename: str):
             dependencies=[Depends(require_employee_permissions())],
             summary="Clock in or out", 
             description="Record clock-in or clock-out for an employee.")
+@limiter.limit("5/minute")
 async def clock_in_out(
+    request: Request,
     clock_data: ClockInOut,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user)

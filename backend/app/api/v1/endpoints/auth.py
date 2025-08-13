@@ -112,7 +112,9 @@ async def login_for_access_token(
         )
 
 @router.post("/refresh", response_model=Token, status_code=status.HTTP_200_OK, summary="Refresh access token")
+@limiter.limit("5/minute")
 async def refresh_access_token(
+    request: Request,
     token_request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db)
 ) -> Token:

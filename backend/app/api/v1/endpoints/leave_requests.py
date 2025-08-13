@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -32,8 +32,13 @@ import os
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/leave-requests", tags=["Leave Requests"])
 
@@ -47,7 +52,9 @@ class LeaveApprovalUpdate(BaseModel):
             status_code=status.HTTP_201_CREATED,
             dependencies=[Depends(require_permissions([Permission.REQUEST_LEAVE]))],
             summary="Create leave request")
+@limiter.limit("5/minute")
 async def create_leave_request(
+    request: Request,
     leave_request: LeaveRequestCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user)
