@@ -10,7 +10,7 @@ from app.core.enums import Permission
 from app.models.users import Users
 from app.models.shift_assignments import ShiftAssignments
 from app.models.leave_policies import LeavePolicies
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, is_token_blacklisted
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
 
@@ -19,10 +19,22 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db)
 ) -> Users:
     try:
+        # Check if token is blacklisted
+        if await is_token_blacklisted(token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token is blacklisted",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
         payload = decode_access_token(token)
         user_id = payload.get("sub")
         if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
         
         query = select(Users).where(
             Users.user_id == int(user_id),
@@ -32,10 +44,18 @@ async def get_current_user(
         result = await db.execute(query)
         user = result.scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=401, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
         return user
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
 
 async def get_current_active_user(current_user: Users = Depends(get_current_user)) -> Users:
     if not current_user.is_active:

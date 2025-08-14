@@ -9,10 +9,13 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.core.security import (
     create_access_token, 
-    create_refresh_token, 
+    create_refresh_token,
+    decode_access_token, 
     verify_password, 
     decode_refresh_token,
-    get_current_active_user
+    get_current_active_user,
+    blacklist_token,
+    oauth2_scheme
 )
 from app.core.enums import SystemAction
 from app.core.permissions import get_user_permissions
@@ -34,7 +37,7 @@ class Token(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-    expires_in: int = 1800  # Access token expiry reduced to 30 minutes
+    expires_in: int = 1800  # Access token expiry (30 minutes)
     model_config = ConfigDict(from_attributes=True)
 
 class RefreshTokenRequest(BaseModel):
@@ -94,7 +97,7 @@ async def login_for_access_token(
         )
         refresh_token = create_refresh_token(
             {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=604800)  # 7 days
+            expires_delta=timedelta(seconds=86400)  # 1 day
         )
 
         await log_system_action(db, user.user_id, SystemAction.LOGIN, f"Successful login from {form_data.username}")
@@ -132,11 +135,20 @@ async def refresh_access_token(
 
         # Verify token issuance time to prevent reuse of old tokens
         issued_at = payload.get("iat")
-        if not issued_at or (datetime.now(timezone.utc).timestamp() - issued_at > 604800):  # 7 days expiry
+        if not issued_at or (datetime.now(timezone.utc).timestamp() - issued_at > 86400):  # 1 day expiry
             logger.warning(f"Expired refresh token for user_id: {user_id}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token expired",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
+        # Check if refresh token is blacklisted
+        if await blacklist_token(token_request.refresh_token):
+            logger.warning(f"Blacklisted refresh token used for user_id: {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token is invalid",
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
@@ -163,7 +175,7 @@ async def refresh_access_token(
         )
         new_refresh_token = create_refresh_token(
             {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=604800)  # 7 days
+            expires_delta=timedelta(seconds=86400)  # 1 day
         )
 
         logger.info(f"Token refreshed for user_id: {user.user_id}")
@@ -181,10 +193,18 @@ async def refresh_access_token(
 @router.post("/logout", status_code=status.HTTP_200_OK, summary="User logout")
 async def logout(
     current_user: Users = Depends(get_current_active_user),
+    token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db)
 ):
-    """Log out current user and record logout action."""
+    """Log out current user, blacklist tokens, and record logout action."""
     try:
+        # Decode access token to get expiry
+        payload = decode_access_token(token)
+        expires_at = payload.get("exp", datetime.now(timezone.utc).timestamp() + 1800)
+
+        # Blacklist access token
+        await blacklist_token(token, expires_at)
+
         # Log logout action
         await log_system_action(db, current_user.user_id, SystemAction.LOGOUT, "User logged out")
         await db.commit()

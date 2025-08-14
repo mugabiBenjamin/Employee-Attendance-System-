@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.config import settings
 from app.models.users import Users
-from app.core.database import get_db
+from app.core.database import get_db, redis
 import logging
 
 logger = logging.getLogger(__name__)
@@ -63,15 +63,20 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # Check if token is blacklisted
+        if await is_token_blacklisted(token):
+            logger.warning("Blacklisted token used")
+            raise credentials_exception
+
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         user_id_str = payload.get("sub")
         if user_id_str is None:
             raise credentials_exception
         user_id = int(user_id_str)
     except (JWTError, ValueError, TypeError):
+        logger.warning("Invalid token provided")
         raise credentials_exception
 
-    # Use injected db session instead of manual context manager
     query = select(Users).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at.is_(None))
     result = await db.execute(query)
     user = result.scalar_one_or_none()
@@ -87,11 +92,12 @@ async def get_current_active_user(current_user: Users = Depends(get_current_user
     return current_user
 
 def decode_refresh_token(refresh_token: str) -> dict:
-    """Decode a refresh token and validate it."""
+    """Decode a refresh token with signature verification."""
     try:
         payload = jwt.decode(refresh_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         return payload
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"Invalid refresh token: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
@@ -99,13 +105,34 @@ def decode_refresh_token(refresh_token: str) -> dict:
         )
 
 def decode_access_token(token: str) -> dict:
-    """Decode an access token and validate it."""
+    """Decode an access token with signature verification."""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         return payload
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"Invalid access token: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
+
+async def blacklist_token(token: str, expires_at: float) -> None:
+    """Add a token to the Redis blacklist with TTL based on its expiry."""
+    try:
+        if redis:
+            ttl = max(1, int(expires_at - datetime.now(timezone.utc).timestamp()))
+            await redis.setex(f"blacklist:{token}", ttl, "1")
+            logger.debug(f"Token blacklisted with TTL {ttl}s")
+    except Exception as e:
+        logger.error(f"Error blacklisting token: {str(e)}")
+
+async def is_token_blacklisted(token: str) -> bool:
+    """Check if a token is blacklisted in Redis."""
+    try:
+        if redis:
+            return await redis.exists(f"blacklist:{token}")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking token blacklist: {str(e)}")
+        return False
