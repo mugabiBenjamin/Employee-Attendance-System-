@@ -6,7 +6,7 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
 from datetime import datetime, timezone, date
-from app.core.database import get_db
+from app.core.database import get_db, invalidate_cache_prefix
 from app.models.attendance_records import AttendanceRecords
 from app.models.time_corrections import TimeCorrections
 from app.models.users import Users
@@ -114,6 +114,7 @@ async def clock_in_out(
             record = AttendanceRecords(
                 user_id=current_user.user_id,
                 clock_in_time=datetime.now(timezone.utc),
+                date=date.today(),
                 status=AttendanceStatus.PRESENT,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -132,12 +133,18 @@ async def clock_in_out(
             if not record:
                 raise ResourceNotFoundError(resource="Attendance record", identifier="active clock-in")
 
-            record.clock_out_time = datetime.now(timezone.utc)
+            clock_out_time = datetime.now(timezone.utc)
+            if clock_out_time <= record.clock_in_time:
+                raise ValidationError(detail="clock_out_time must be after clock_in_time")
+            record.clock_out_time = clock_out_time
             record.updated_at = datetime.now(timezone.utc)
             db.add(record)
 
         await db.commit()
         await db.refresh(record)
+
+        # Invalidate cache for attendance history
+        await invalidate_cache_prefix(f"attendance_history:{current_user.user_id}")
 
         logger.info(f"Clock {clock_data.action} recorded for user_id: {current_user.user_id}")
         return AttendanceRecordOut.model_validate(record)
@@ -145,14 +152,15 @@ async def clock_in_out(
     except ValidationError as e:
         logger.error(f"Validation error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
+    except AttendanceError as e:
+        logger.error(f"Attendance error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
+        raise
+    except ResourceNotFoundError as e:
+        logger.error(f"Resource not found in clock_in_out for user_id {current_user.user_id}: {str(e)}")
         raise
     except SQLAlchemyError as e:
         logger.error(f"Database error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
         raise DatabaseError(message="Database error processing clock action", original_error=e)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Unexpected error in clock_in_out for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
@@ -236,6 +244,9 @@ async def request_time_correction(
         await db.commit()
         await db.refresh(db_correction)
 
+        # Invalidate cache for attendance history
+        await invalidate_cache_prefix(f"attendance_history:{current_user.user_id}")
+
         logger.info(f"Time correction requested for attendance_id: {correction.attendance_id}")
         return TimeCorrectionOut.model_validate(db_correction)
 
@@ -245,8 +256,6 @@ async def request_time_correction(
     except SQLAlchemyError as e:
         logger.error(f"Database error in request_time_correction for user_id {current_user.user_id}: {str(e)}")
         raise DatabaseError(message="Database error requesting time correction", original_error=e)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Unexpected error in request_time_correction for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
@@ -290,8 +299,6 @@ async def get_time_corrections(
     except SQLAlchemyError as e:
         logger.error(f"Database error in get_time_corrections for user_id {current_user.user_id}: {str(e)}")
         raise DatabaseError(message="Database error retrieving time corrections", original_error=e)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Unexpected error in get_time_corrections for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
@@ -334,8 +341,14 @@ async def approve_reject_time_correction(
             record = result.scalar_one_or_none()
             if record:
                 if correction.corrected_clock_in:
+                    if correction.corrected_clock_in > datetime.now(timezone.utc):
+                        raise ValidationError(detail="corrected_clock_in cannot be in the future")
                     record.clock_in_time = correction.corrected_clock_in
                 if correction.corrected_clock_out:
+                    if correction.corrected_clock_out > datetime.now(timezone.utc):
+                        raise ValidationError(detail="corrected_clock_out cannot be in the future")
+                    if correction.corrected_clock_in and correction.corrected_clock_out <= correction.corrected_clock_in:
+                        raise ValidationError(detail="corrected_clock_out must be after corrected_clock_in")
                     record.clock_out_time = correction.corrected_clock_out
                 record.updated_at = datetime.now(timezone.utc)
                 db.add(record)
@@ -343,6 +356,9 @@ async def approve_reject_time_correction(
         db.add(correction)
         await db.commit()
         await db.refresh(correction)
+
+        # Invalidate cache for attendance history
+        await invalidate_cache_prefix(f"attendance_history:{correction.user_id}")
 
         logger.info(f"Time correction {correction_id} {approval_data.status} by user_id: {current_user.user_id}")
         return TimeCorrectionOut.model_validate(correction)
@@ -359,8 +375,6 @@ async def approve_reject_time_correction(
     except SQLAlchemyError as e:
         logger.error(f"Database error in approve_reject_time_correction for correction_id {correction_id}: {str(e)}")
         raise DatabaseError(message="Database error processing time correction", original_error=e)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Unexpected error in approve_reject_time_correction for correction_id {correction_id}: {str(e)}")
         raise HTTPException(
@@ -382,6 +396,8 @@ async def get_attendance_summary(
     try:
         if start_date > end_date:
             raise ValidationError(detail="Start date cannot be after end date")
+        if start_date > date.today() or end_date > date.today():
+            raise ValidationError(detail="Start and end dates cannot be in the future")
 
         if user_id and user_id != current_user.user_id:
             await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
@@ -439,8 +455,6 @@ async def get_attendance_summary(
     except SQLAlchemyError as e:
         logger.error(f"Database error in get_attendance_summary for user_id {target_user_id}: {str(e)}")
         raise DatabaseError(message="Database error retrieving attendance summary", original_error=e)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Unexpected error in get_attendance_summary for user_id {target_user_id}: {str(e)}")
         raise HTTPException(
@@ -462,6 +476,8 @@ async def export_attendance_csv(
     try:
         if start_date > end_date:
             raise ValidationError(detail="Start date cannot be after end date")
+        if start_date > date.today() or end_date > date.today():
+            raise ValidationError(detail="Start and end dates cannot be in the future")
 
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
@@ -533,6 +549,8 @@ async def export_attendance_pdf(
     try:
         if start_date > end_date:
             raise ValidationError(detail="Start date cannot be after end date")
+        if start_date > date.today() or end_date > date.today():
+            raise ValidationError(detail="Start and end dates cannot be in the future")
 
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == current_user.user_id,
