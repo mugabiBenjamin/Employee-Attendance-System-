@@ -12,7 +12,7 @@ class AttendanceRecordBase(BaseModel):
     total_hours: Optional[float] = Field(None, ge=0)
     overtime_hours: float = Field(0, ge=0)
     date: date
-    status: str = 'present'
+    status: AttendanceStatus = AttendanceStatus.PRESENT
     ip_address: Optional[str] = None
     location: Optional[str] = Field(None, max_length=255)
     is_active: bool = True
@@ -58,7 +58,7 @@ class AttendanceRecordCreate(AttendanceRecordBase):
     clock_in_time: datetime
     ip_address: str
     location: Optional[str] = None
-    status: AttendanceStatus = AttendanceStatus.PRESENT
+    status: AttendanceStatus = AttendanceStatus.PRESENT  # Already uses AttendanceStatus
 
 class AttendanceRecordUpdate(BaseModel):
     clock_in_time: Optional[datetime] = None
@@ -66,7 +66,7 @@ class AttendanceRecordUpdate(BaseModel):
     break_duration: Optional[int] = Field(None, ge=0)
     total_hours: Optional[float] = Field(None, ge=0)
     overtime_hours: Optional[float] = Field(None, ge=0)
-    status: Optional[str] = None
+    status: Optional[AttendanceStatus] = None  # Changed to use AttendanceStatus enum
     location: Optional[str] = Field(None, max_length=255)
     is_active: Optional[bool] = None
 

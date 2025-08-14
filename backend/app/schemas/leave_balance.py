@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
+from app.core.enums import LeaveType
 
 class LeaveBalanceBase(BaseModel):
     user_id: int
-    leave_type: str
+    leave_type: LeaveType
     allocated_days: int = Field(0, ge=0)
     used_days: int = Field(0, ge=0)
     carried_forward: int = Field(0, ge=0)
@@ -16,10 +17,8 @@ class LeaveBalanceCreate(LeaveBalanceBase):
     pass
 
 class LeaveBalanceUpdate(BaseModel):
-    user_id: int
-    leave_type: str
-    balance: float
-    last_updated: datetime
+    user_id: Optional[int] = None
+    leave_type: Optional[LeaveType] = None
     allocated_days: Optional[int] = Field(None, ge=0)
     used_days: Optional[int] = Field(None, ge=0)
     carried_forward: Optional[int] = Field(None, ge=0)

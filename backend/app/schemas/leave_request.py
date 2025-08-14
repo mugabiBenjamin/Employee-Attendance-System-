@@ -2,11 +2,11 @@ from datetime import datetime, date, timezone
 import re
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from app.core.enums import LeaveRequestStatus
+from app.core.enums import LeaveRequestStatus, LeaveType
 from app.core.exceptions import ValidationError
 
 class LeaveRequestBase(BaseModel):
-    leave_type: str
+    leave_type: LeaveType
     start_date: date
     end_date: date
     days_requested: Optional[int] = Field(None, gt=0)
@@ -48,13 +48,13 @@ class LeaveRequestBase(BaseModel):
         return days
 
 class LeaveRequestCreate(LeaveRequestBase):
-    leave_type: str
+    leave_type: LeaveType
     start_date: date
     end_date: date
     reason: Optional[str] = None
 
 class LeaveRequestUpdate(BaseModel):
-    leave_type: Optional[str] = None
+    leave_type: Optional[LeaveType] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     days_requested: Optional[int] = Field(None, gt=0)

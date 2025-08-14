@@ -7,7 +7,7 @@ class LeaveApprovalWorkflowBase(BaseModel):
     leave_id: int
     approver_id: int
     level: int = Field(..., ge=1, le=5)
-    status: str = 'under_review'
+    status: LeaveRequestStatus = LeaveRequestStatus.UNDER_REVIEW
     comments: Optional[str] = None
     action_taken_at: Optional[datetime] = None
 
@@ -18,7 +18,7 @@ class LeaveApprovalWorkflowCreate(LeaveApprovalWorkflowBase):
     comments: Optional[str] = None
 
 class LeaveApprovalWorkflowUpdate(BaseModel):
-    status: Optional[str] = None
+    status: Optional[LeaveRequestStatus] = None
     comments: Optional[str] = None
     action_taken_at: Optional[datetime] = None
 
