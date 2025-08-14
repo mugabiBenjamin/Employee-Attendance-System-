@@ -80,12 +80,22 @@ class Permission(str, Enum):
     REQUEST_LEAVE = "request_leave"
     VIEW_LEAVE_BALANCE = "view_leave_balance"
     VIEW_OWN_ATTENDANCE = "view_own_attendance"
+    CREATE_LEAVE_REQUEST = "create_leave_request"
+    CREATE_TIME_CORRECTION = "create_time_correction"
+    VIEW_TIME_CORRECTION = "view_time_correction"
+    REFRESH_TOKEN = "refresh_token"
+    VIEW_HOLIDAY = "view_holiday"
     
     # Manager permissions
     APPROVE_LEAVE = "approve_leave"
     MANAGE_OVERTIME = "manage_overtime"
     GENERATE_REPORTS = "generate_reports"
     VIEW_TEAM_ATTENDANCE = "view_team_attendance"
+    VIEW_LEAVE_APPROVAL = "view_leave_approval"
+    CREATE_OVERTIME_RECORD = "create_overtime_record"
+    VIEW_OVERTIME_RECORD = "view_overtime_record"
+    VIEW_TEAM_OVERTIME_RECORDS = "view_team_overtime_records"
+    UPDATE_TIME_CORRECTION = "update_time_correction"
     
     # HR permissions
     MANAGE_EMPLOYEES = "manage_employees"
@@ -96,6 +106,18 @@ class Permission(str, Enum):
     VIEW_ALL_ATTENDANCE = "view_all_attendance"
     MANAGE_LEAVE_POLICIES = "manage_leave_policies"
     GENERATE_COMPLIANCE_REPORTS = "generate_compliance_reports"
+    UPDATE_LEAVE_BALANCE = "update_leave_balance"
+    CREATE_LEAVE_POLICY = "create_leave_policy"
+    VIEW_LEAVE_POLICY = "view_leave_policy"
+    UPDATE_LEAVE_POLICY = "update_leave_policy"
+    DELETE_LEAVE_POLICY = "delete_leave_policy"
+    CREATE_HOLIDAY = "create_holiday"
+    UPDATE_HOLIDAY = "update_holiday"
+    DELETE_HOLIDAY = "delete_holiday"
+    CREATE_SHIFT_PATTERN = "create_shift_pattern"
+    VIEW_SHIFT_PATTERN = "view_shift_pattern"
+    UPDATE_SHIFT_PATTERN = "update_shift_pattern"
+    DELETE_SHIFT_PATTERN = "delete_shift_pattern"
     
     # Admin permissions
     VIEW_LOGS = "view_logs"
@@ -111,56 +133,12 @@ class Permission(str, Enum):
     UPDATE_USER_DEPARTMENT = "update_user_department"
     DELETE_USER_DEPARTMENT = "delete_user_department"
     SYSTEM_CONFIGURATION = "system_configuration"
-    
-    # Time correction permissions
-    CREATE_TIME_CORRECTION = "create_time_correction"
-    VIEW_TIME_CORRECTION = "view_time_correction"
-    UPDATE_TIME_CORRECTION = "update_time_correction"
     DELETE_TIME_CORRECTION = "delete_time_correction"
-    
-    # Authentication and token permissions
-    REFRESH_TOKEN = "refresh_token"
-    
-    # Holiday permissions
-    CREATE_HOLIDAY = "create_holiday"
-    VIEW_HOLIDAY = "view_holiday"
-    UPDATE_HOLIDAY = "update_holiday"
-    DELETE_HOLIDAY = "delete_holiday"
-    
-    # Leave approval permissions
-    VIEW_LEAVE_APPROVAL = "view_leave_approval"
-    
-    # Leave balance permissions
-    UPDATE_LEAVE_BALANCE = "update_leave_balance"
-    
-    # Leave policy permissions
-    CREATE_LEAVE_POLICY = "create_leave_policy"
-    VIEW_LEAVE_POLICY = "view_leave_policy"
-    UPDATE_LEAVE_POLICY = "update_leave_policy"
-    DELETE_LEAVE_POLICY = "delete_leave_policy"
-    
-    # Leave request permissions
-    CREATE_LEAVE_REQUEST = "create_leave_request"
-    
-    # Overtime record permissions
-    CREATE_OVERTIME_RECORD = "create_overtime_record"
-    VIEW_OVERTIME_RECORD = "view_overtime_record"
-    VIEW_TEAM_OVERTIME_RECORDS = "view_team_overtime_records"
-    
-    # Role permissions
     CREATE_ROLE = "create_role"
     VIEW_ROLE = "view_role"
     UPDATE_ROLE = "update_role"
     DELETE_ROLE = "delete_role"
-    
-    # Shift pattern permissions
-    CREATE_SHIFT_PATTERN = "create_shift_pattern"
-    VIEW_SHIFT_PATTERN = "view_shift_pattern"
-    UPDATE_SHIFT_PATTERN = "update_shift_pattern"
-    DELETE_SHIFT_PATTERN = "delete_shift_pattern"
-    
-    # Log permissions
     CREATE_LOGS = "create_logs"
     
-    # Super Admin
+    # Super Admin permissions
     ALL_PERMISSIONS = "all_permissions"
