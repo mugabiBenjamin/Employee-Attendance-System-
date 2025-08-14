@@ -8,9 +8,8 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.core.security import verify_password, create_access_token, create_refresh_token, get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import SystemAction, Permission
+from app.core.enums import SystemAction
 from app.core.exceptions import AuthenticationError
-from app.core.permissions import require_permissions
 from app.core.database import get_db
 import logging
 
@@ -20,20 +19,19 @@ class LoginCredentials(BaseModel):
     email: EmailStr
     password: str
 
-    model_config = ConfigDict(from_attributes=True)
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
-    model_config = ConfigDict(from_attributes=True)
-
 async def login_user(
+    credentials: LoginCredentials,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    credentials: LoginCredentials = Depends(),
-    request: Request = None,
-    settings: Settings = Depends(get_settings)  # Inject Settings
+    settings: Settings = Depends(get_settings)
 ) -> TokenResponse:
     """
     Authenticate user and generate access/refresh tokens, logging the login action.
@@ -50,6 +48,10 @@ async def login_user(
 
         if not user or not verify_password(credentials.password, user.password_hash):
             raise AuthenticationError(detail="Invalid email or password")
+
+        # Update last login
+        user.last_login = datetime.now(timezone.utc)
+        db.add(user)
 
         # Generate tokens
         access_token = create_access_token(data={"sub": str(user.user_id)})
@@ -83,10 +85,9 @@ async def login_user(
         )
 
 async def logout_user(
-    db: AsyncSession = Depends(get_db),
-    request: Request = None,
+    request: Request,
     user: Users = Depends(get_current_user),
-    _: bool = Depends(require_permissions([Permission.LOGOUT]))
+    db: AsyncSession = Depends(get_db)
 ) -> None:
     """
     Log user logout action.
@@ -117,11 +118,10 @@ async def logout_user(
         )
 
 async def refresh_token(
+    token_request: RefreshTokenRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    refresh_token: str = Depends(),
-    request: Request = None,
-    settings: Settings = Depends(get_settings),  # Inject Settings
-    _: bool = Depends(require_permissions([Permission.REFRESH_TOKEN]))
+    settings: Settings = Depends(get_settings)
 ) -> TokenResponse:
     """
     Refresh access token using a valid refresh token.
@@ -129,7 +129,7 @@ async def refresh_token(
     try:
         # Decode refresh token
         try:
-            payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])  # Updated to use injected settings
+            payload = jwt.decode(token_request.refresh_token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
             user_id: str = payload.get("sub")
             if user_id is None:
                 raise AuthenticationError(detail="Invalid refresh token")
@@ -147,7 +147,7 @@ async def refresh_token(
         if not user:
             raise AuthenticationError(detail="User not found or inactive")
 
-        # Generate new access token
+        # Generate new tokens
         access_token = create_access_token(data={"sub": str(user.user_id)})
         new_refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
 

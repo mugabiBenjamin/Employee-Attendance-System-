@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Text, ForeignKey, CheckConstraint
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Date, Text, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 from app.core.db_enums import leave_type_enum, leave_request_status_enum
@@ -18,6 +18,8 @@ class LeaveRequests(Base):
     approved_at = Column(DateTime(timezone=True))
     comments = Column(Text)
     attachment_url = Column(String(500))
+    is_active = Column(Boolean, default=True)  # Added
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # Added
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

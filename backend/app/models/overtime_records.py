@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, DECIMAL, ForeignKey, CheckConstraint
+from sqlalchemy import Boolean, Column, Integer, DateTime, DECIMAL, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -13,6 +13,8 @@ class OvertimeRecords(Base):
     overtime_amount = Column(DECIMAL(10, 2))
     approved_by = Column(Integer, ForeignKey('users.user_id', ondelete='SET NULL'))
     approved_at = Column(DateTime(timezone=True))
+    is_active = Column(Boolean, default=True)  # Added
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # Added
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     
     __table_args__ = (

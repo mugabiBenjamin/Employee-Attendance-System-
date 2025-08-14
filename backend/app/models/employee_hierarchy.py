@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, Date, ForeignKey, CheckConstraint
+from sqlalchemy import Boolean, Column, Integer, DateTime, Date, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -11,7 +11,10 @@ class EmployeeHierarchy(Base):
     level = Column(Integer, nullable=False, default=1)
     effective_from = Column(Date, nullable=False, server_default=func.current_date())
     effective_to = Column(Date)
+    is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True) 
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
+    updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     
     __table_args__ = (
         CheckConstraint("level >= 1 AND level <= 10", name="level_valid"),

@@ -13,6 +13,8 @@ class EmployeeEmergencyContacts(Base):
     email = Column(String(255))
     address = Column(Text)
     is_primary = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

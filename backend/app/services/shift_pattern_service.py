@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone
 from app.models.shift_patterns import ShiftPatterns
 from app.models.users import Users
 from app.models.system_logs import SystemLogs

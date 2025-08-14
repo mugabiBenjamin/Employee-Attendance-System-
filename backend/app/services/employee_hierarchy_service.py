@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def create_employee_hierarchy(
     hierarchy: EmployeeHierarchyCreate,
+    request: Request,  # Added Request parameter
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -71,7 +72,8 @@ async def create_employee_hierarchy(
             record_id=db_hierarchy.hierarchy_id,
             old_values=None,
             new_values=db_hierarchy.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Updated to use request
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -122,9 +124,9 @@ async def get_employee_hierarchy_by_id(
 
 async def get_employee_hierarchies(
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> List[EmployeeHierarchyOut]:
     """
@@ -134,7 +136,7 @@ async def get_employee_hierarchies(
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.is_active == True,
             EmployeeHierarchy.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         hierarchies = result.scalars().all()
 
@@ -151,6 +153,7 @@ async def get_employee_hierarchies(
 async def update_employee_hierarchy(
     hierarchy_id: int,
     hierarchy_update: EmployeeHierarchyUpdate,
+    request: Request,  # Added Request parameter
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -207,7 +210,8 @@ async def update_employee_hierarchy(
             record_id=hierarchy_id,
             old_values=old_values,
             new_values=db_hierarchy.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Updated to use request
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -227,6 +231,7 @@ async def update_employee_hierarchy(
 
 async def delete_employee_hierarchy(
     hierarchy_id: int,
+    request: Request,  # Added Request parameter
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -258,7 +263,8 @@ async def delete_employee_hierarchy(
             record_id=hierarchy_id,
             old_values=db_hierarchy.__dict__,
             new_values=None,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Updated to use request
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)

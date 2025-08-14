@@ -10,6 +10,8 @@ class UserDepartments(Base):
     department_id = Column(Integer, ForeignKey('departments.department_id', ondelete='CASCADE'), nullable=False)
     assigned_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     is_primary = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)  # Added
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # Added
     
     __table_args__ = (
         UniqueConstraint('user_id', 'department_id', name='unique_user_department'),

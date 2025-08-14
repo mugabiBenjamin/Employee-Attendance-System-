@@ -14,6 +14,7 @@ class ShiftPatterns(Base):
     break_duration = Column(Integer, default=0)  # minutes
     is_overnight = Column(Boolean, default=False)  # for night shifts crossing midnight
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # Added
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     
     __table_args__ = (

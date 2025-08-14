@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def create_department(
     department: DepartmentCreate,
+    request: Request,  # Added Request parameter
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
@@ -68,7 +69,8 @@ async def create_department(
             record_id=db_department.department_id,
             old_values=None,
             new_values=db_department.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Updated to use request
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -119,9 +121,9 @@ async def get_department_by_id(
 
 async def get_departments(
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[DepartmentOut]:
     """
@@ -131,7 +133,7 @@ async def get_departments(
         query = select(Departments).where(
             Departments.is_active == True,
             Departments.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         departments = result.scalars().all()
 
@@ -148,6 +150,7 @@ async def get_departments(
 async def update_department(
     department_id: int,
     department_update: DepartmentUpdate,
+    request: Request,  # Added Request parameter
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
@@ -196,6 +199,9 @@ async def update_department(
                     detail="Manager not found"
                 )
 
+        # Store old values for logging
+        old_values = db_department.__dict__.copy()
+
         # Apply updates
         for key, value in update_data.items():
             setattr(db_department, key, value)
@@ -211,9 +217,10 @@ async def update_department(
             action=SystemAction.UPDATE,
             table_affected="departments",
             record_id=db_department.department_id,
-            old_values=None,
+            old_values=old_values,
             new_values=db_department.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Updated to use request
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -233,6 +240,7 @@ async def update_department(
 
 async def delete_department(
     department_id: int,
+    request: Request,  # Added Request parameter
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
@@ -264,7 +272,8 @@ async def delete_department(
             record_id=db_department.department_id,
             old_values=db_department.__dict__,
             new_values=None,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Updated to use request
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)

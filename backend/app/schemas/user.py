@@ -2,8 +2,9 @@ from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 
-class UserBase(BaseModel):
+class UserCreate(BaseModel):
     email: EmailStr = Field(..., description="User email address", pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    password: str = Field(..., description="User password")
     first_name: str = Field(..., max_length=100, description="User first name")
     last_name: str = Field(..., max_length=100, description="User last name")
     phone: Optional[str] = Field(None, pattern=r'^[\+]?[0-9\s\-\(\)]+$', description="User phone number")
@@ -39,7 +40,7 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = Field(None, description="User active status")
     hire_date: date = Field(..., description="User hire date")
 
-class UserOut(UserBase):
+class UserOut(BaseModel):
     user_id: int = Field(..., description="User ID")
     employee_id: str = Field(..., description="User employee ID")
     last_login: Optional[datetime] = Field(None, description="User last login timestamp")

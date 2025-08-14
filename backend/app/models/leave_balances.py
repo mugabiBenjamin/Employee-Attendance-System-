@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, ForeignKey, CheckConstraint, UniqueConstraint
+from sqlalchemy import Boolean, Column, Integer, DateTime, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 from app.core.db_enums import leave_type_enum
@@ -13,6 +13,8 @@ class LeaveBalances(Base):
     used_days = Column(Integer, nullable=False, default=0)
     carried_forward = Column(Integer, nullable=False, default=0)
     year = Column(Integer, nullable=False, server_default=func.extract('year', func.current_date()))
+    is_active = Column(Boolean, default=True)  # Added
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # Added
     updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     
     __table_args__ = (

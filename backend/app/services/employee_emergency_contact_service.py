@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def create_emergency_contact(
     contact: EmployeeEmergencyContactCreate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -27,20 +28,20 @@ async def create_emergency_contact(
     Create a new emergency contact for an employee with validation and logging.
     """
     try:
-        # Validate employee_id
+        # Validate user_id
         query = select(Users).where(
-            Users.user_id == contact.employee_id,
+            Users.user_id == contact.user_id,
             Users.is_active == True,
             Users.deleted_at == None
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise UserNotFoundError(user_id=contact.employee_id)
+            raise UserNotFoundError(user_id=contact.user_id)
 
         # Create emergency contact
         db_contact = EmployeeEmergencyContacts(
-            user_id=contact.employee_id,
-            **EmployeeEmergencyContactCreate(**contact.model_dump(exclude={'employee_id'})).model_dump(),
+            user_id=contact.user_id,
+            **EmployeeEmergencyContactCreate(**contact.model_dump(exclude={'user_id'})).model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -56,13 +57,14 @@ async def create_emergency_contact(
             record_id=db_contact.contact_id,
             old_values=None,
             new_values=db_contact.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
         await db.commit()
 
-        logger.info(f"Emergency contact created, contact_id: {db_contact.contact_id}, user_id: {contact.employee_id}")
+        logger.info(f"Emergency contact created, contact_id: {db_contact.contact_id}, user_id: {contact.user_id}")
         return EmployeeEmergencyContactOut.model_validate(db_contact)
 
     except HTTPException:
@@ -108,9 +110,9 @@ async def get_emergency_contact_by_id(
 async def get_emergency_contacts_by_employee(
     employee_id: int,
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> List[EmployeeEmergencyContactOut]:
     """
@@ -130,7 +132,7 @@ async def get_emergency_contacts_by_employee(
             EmployeeEmergencyContacts.user_id == employee_id,
             EmployeeEmergencyContacts.is_active == True,
             EmployeeEmergencyContacts.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         contacts = result.scalars().all()
 
@@ -149,6 +151,7 @@ async def get_emergency_contacts_by_employee(
 async def update_emergency_contact(
     contact_id: int,
     contact_update: EmployeeEmergencyContactUpdate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -190,7 +193,8 @@ async def update_emergency_contact(
             record_id=contact_id,
             old_values=old_values,
             new_values=db_contact.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -210,6 +214,7 @@ async def update_emergency_contact(
 
 async def delete_emergency_contact(
     contact_id: int,
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -241,7 +246,8 @@ async def delete_emergency_contact(
             record_id=contact_id,
             old_values=db_contact.__dict__,
             new_values=None,
-            ip_address=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)

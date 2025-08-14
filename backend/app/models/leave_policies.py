@@ -17,6 +17,8 @@ class LeavePolicies(Base):
     accrual_rate = Column(DECIMAL(4, 2), default=0)  # days per month
     effective_from = Column(Date, nullable=False, server_default=func.current_date())
     effective_to = Column(Date)
+    is_active = Column(Boolean, default=True)  # Added
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # Added
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

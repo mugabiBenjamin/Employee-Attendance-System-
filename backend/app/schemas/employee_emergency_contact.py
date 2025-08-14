@@ -10,6 +10,8 @@ class EmployeeEmergencyContactBase(BaseModel):
     email: Optional[str] = Field(None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
     address: Optional[str] = None
     is_primary: bool = False
+    is_active: bool = True
+    deleted_at: Optional[datetime] = None
 
 class EmployeeEmergencyContactCreate(EmployeeEmergencyContactBase):
     user_id: int
