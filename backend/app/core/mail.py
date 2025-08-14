@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.models.users import Users
 from app.core.exceptions import DatabaseError
+from datetime import datetime
 
 class EmailSchema(BaseModel):
     to_email: EmailStr
@@ -74,6 +75,37 @@ async def send_leave_notification(
         f"Leave Type: {leave_type.capitalize()}\n"
         f"Start Date: {start_date}\n"
         f"End Date: {end_date}\n\n"
+        f"Please contact HR for any questions.\n\n"
+        f"Best regards,\nEmployee Management System"
+    )
+
+    email_data = EmailSchema(
+        to_email=email,
+        subject=subject,
+        body=body
+    )
+    await send_email(email_data)
+
+async def send_time_correction_notification(
+    user_id: int,
+    correction_id: int,
+    status: str,
+    clock_in: Optional[datetime] = None,
+    clock_out: Optional[datetime] = None,
+    db: AsyncSession = None
+) -> None:
+    """Send time correction notification email to user."""
+    email = await get_user_email(user_id, db)
+    if not email:
+        raise HTTPException(status_code=404, detail="User email not found")
+
+    subject = f"Time Correction Request {status.capitalize()} (ID: {correction_id})"
+    body = (
+        f"Dear User,\n\n"
+        f"Your time correction request (ID: {correction_id}) has been {status}.\n"
+        f"Details:\n"
+        f"Clock In: {clock_in.strftime('%Y-%m-%d %H:%M:%S') if clock_in else 'Not modified'}\n"
+        f"Clock Out: {clock_out.strftime('%Y-%m-%d %H:%M:%S') if clock_out else 'Not modified'}\n\n"
         f"Please contact HR for any questions.\n\n"
         f"Best regards,\nEmployee Management System"
     )

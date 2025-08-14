@@ -17,6 +17,7 @@ from app.services.time_correction_service import (
     update_time_correction,
     delete_time_correction
 )
+from app.core.mail import send_time_correction_notification
 import logging
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,21 @@ async def approve_reject_time_correction(
             )
         status_enum = CorrectionStatus.APPROVED if approval_data.status.lower() == "approved" else CorrectionStatus.REJECTED
         update_data = TimeCorrectionUpdate(status=status_enum)
-        return await update_time_correction(db, correction_id, update_data, current_user)
+        correction = await update_time_correction(db, correction_id, update_data, current_user)
+
+        # Send email notification to user
+        await send_time_correction_notification(
+            user_id=correction.user_id,
+            correction_id=correction_id,
+            status=status_enum.value,
+            clock_in=correction.corrected_clock_in,
+            clock_out=correction.corrected_clock_out,
+            db=db
+        )
+
+        logger.info(f"Time correction {correction_id} {status_enum.value} by user_id: {current_user.user_id}")
+        return correction
+
     except HTTPException:
         raise
     except Exception as e:

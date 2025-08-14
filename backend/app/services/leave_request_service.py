@@ -11,7 +11,7 @@ from app.models.leave_balances import LeaveBalances
 from app.schemas.leave_request import LeaveRequestCreate, LeaveRequestOut
 from app.core.config import settings
 from app.core.enums import LeaveRequestStatus, SystemAction
-from app.core.mail import send_email
+from app.core.mail import EmailSchema, send_email, get_user_email
 from app.core.security import get_current_user
 from app.core.permissions import check_permission
 import logging
@@ -210,4 +210,119 @@ async def get_user_leave_requests(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving leave requests"
+        )
+
+async def approve_leave(
+    db: AsyncSession,
+    leave_id: int,
+    status: LeaveRequestStatus,
+    comments: Optional[str],
+    current_user: Users = Depends(get_current_user),
+    _: str = Depends(check_permission("approve_leave"))
+) -> LeaveRequestOut:
+    """
+    Approve or reject a leave request, update balance, and notify user.
+    """
+    try:
+        # Fetch leave request
+        query = select(LeaveRequests).where(
+            LeaveRequests.leave_id == leave_id,
+            LeaveRequests.is_active == True,
+            LeaveRequests.deleted_at == None
+        )
+        result = await db.execute(query)
+        leave_request = result.scalar_one_or_none()
+        if not leave_request:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Leave request not found"
+            )
+
+        # Check if the user is authorized to approve (manager of the requester)
+        query = select(EmployeeHierarchy).where(
+            EmployeeHierarchy.employee_id == leave_request.user_id,
+            EmployeeHierarchy.manager_id == current_user.user_id,
+            EmployeeHierarchy.is_active == True,
+            EmployeeHierarchy.deleted_at == None
+        )
+        result = await db.execute(query)
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to approve this leave request"
+            )
+
+        # Update leave request status
+        old_values = leave_request.__dict__.copy()
+        leave_request.status = status
+        leave_request.approved_by = current_user.user_id
+        leave_request.approved_at = datetime.now(timezone.utc)
+        leave_request.comments = comments
+        leave_request.updated_at = datetime.now(timezone.utc)
+
+        # Update leave balance if approved
+        if status == LeaveRequestStatus.APPROVED:
+            query = select(LeaveBalances).where(
+                LeaveBalances.user_id == leave_request.user_id,
+                LeaveBalances.leave_type == leave_request.leave_type,
+                LeaveBalances.is_active == True,
+                LeaveBalances.deleted_at == None
+            )
+            result = await db.execute(query)
+            leave_balance = result.scalar_one_or_none()
+            if not leave_balance:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No leave balance available for this leave type"
+                )
+            leave_balance.used_days += leave_request.days_requested
+            leave_balance.updated_at = datetime.now(timezone.utc)
+            db.add(leave_balance)
+
+        db.add(leave_request)
+        await db.commit()
+        await db.refresh(leave_request)
+
+        # Log action
+        system_log = SystemLogs(
+            user_id=current_user.user_id,
+            action=SystemAction.UPDATE,
+            table_affected="leave_requests",
+            record_id=leave_request.leave_id,
+            old_values=old_values,
+            new_values=leave_request.__dict__,
+            ip_address=None,
+            timestamp=datetime.now(timezone.utc)
+        )
+        db.add(system_log)
+        await db.commit()
+
+        # Send email notification to user
+        email_data = {
+            "to_email": await get_user_email(leave_request.user_id, db),
+            "subject": f"Leave Request {status.value.capitalize()} (ID: {leave_request.leave_id})",
+            "body": (
+                f"Dear User,\n\n"
+                f"Your leave request (ID: {leave_request.leave_id}) has been {status.value}.\n"
+                f"Details:\n"
+                f"Leave Type: {leave_request.leave_type.capitalize()}\n"
+                f"Start Date: {leave_request.start_date.date()}\n"
+                f"End Date: {leave_request.end_date.date()}\n"
+                f"Comments: {comments or 'None'}\n\n"
+                f"Please contact HR for any questions.\n\n"
+                f"Best regards,\nEmployee Management System"
+            )
+        }
+        await send_email(EmailSchema(**email_data))
+
+        logger.info(f"Leave request {leave_id} {status.value} by user_id: {current_user.user_id}")
+        return LeaveRequestOut.model_validate(leave_request)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error approving leave request {leave_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing leave request"
         )
