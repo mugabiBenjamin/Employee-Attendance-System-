@@ -5,6 +5,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.enums import SystemAction
 from app.models.system_logs import SystemLogs
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,10 @@ def setup_middleware(app: FastAPI) -> None:
     
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
+        # Generate unique request_id
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+        
         response = await call_next(request)
         
         # Determine the action based on request method and path
@@ -82,14 +87,15 @@ def setup_middleware(app: FastAPI) -> None:
                         record_id=None,  # Could be extracted from path for specific endpoints
                         old_values=None,
                         new_values=None,
-                        ip_address=str(request.client.host),
-                        user_agent=request.headers.get("user-agent")
+                        ip_address=str(request.client.host) if request.client else None,
+                        user_agent=request.headers.get("user-agent"),
+                        request_id=request_id
                     )
                     session.add(system_log)
                     await session.commit()
-                    logger.info(f"Logged system action: {action} for user_id: {user_id}")
+                    logger.info(f"Logged system action: {action} for user_id: {user_id}", extra={"request_id": request_id})
                 except Exception as e:
-                    logger.error(f"Failed to log system action: {str(e)}")
+                    logger.error(f"Failed to log system action: {str(e)}", extra={"request_id": request_id})
                     await session.rollback()
 
         return response

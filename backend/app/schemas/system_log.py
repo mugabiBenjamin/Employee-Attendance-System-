@@ -13,6 +13,8 @@ class SystemLogBase(BaseModel):
     new_values: Optional[dict] = None
     ip_address: Optional[IPvAnyAddress | str] = None
     user_agent: Optional[str] = None
+    request_id: Optional[str] = None
+    is_active: bool = True
 
 class SystemLogCreate(SystemLogBase):
     user_id: Optional[int] = None
@@ -22,6 +24,8 @@ class SystemLogCreate(SystemLogBase):
     old_values: Optional[dict] = None
     new_values: Optional[dict] = None
     ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    request_id: Optional[str] = None
 
 class SystemLogOut(SystemLogBase):
     log_id: int

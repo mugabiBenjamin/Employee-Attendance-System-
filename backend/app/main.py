@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
+from pythonjsonlogger import jsonlogger
 from app.core.config import settings
 from app.core.database import init_db, start_materialized_view_refresh, AsyncSessionLocal, initialize_engine_and_session, redis
 from app.api.v1.api import api_router
@@ -12,13 +13,16 @@ from ipaddress import ip_address
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-# Configure logging
-logging.basicConfig(
-    filename=settings.LOG_FILE,
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Configure JSON logging
 logger = logging.getLogger(__name__)
+log_handler = logging.FileHandler(settings.LOG_FILE)
+formatter = jsonlogger.JsonFormatter(
+    fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
+    json_ensure_ascii=False
+)
+log_handler.setFormatter(formatter)
+logger.handlers = [log_handler]
+logger.setLevel(getattr(logging, settings.LOG_LEVEL))
 
 # Action mapping: (path_suffix, method) -> SystemAction
 ACTION_MAPPING = {
@@ -43,17 +47,17 @@ def determine_system_action(path: str, method: str) -> str | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🔄 Application startup: initializing database and views...")
+    logger.info("Application startup: initializing database and views...", extra={"request_id": None})
     await initialize_engine_and_session()  # Initialize engine, session, and Redis
     await init_db()
     await start_materialized_view_refresh()
-    logger.info("✅ Startup complete.")
+    logger.info("Startup complete.", extra={"request_id": None})
     yield
-    logger.info("🛑 Application shutdown...")
+    logger.info("Application shutdown...", extra={"request_id": None})
     if redis:
         redis.close()
         await redis.wait_closed()
-        logger.info("Redis connection closed")
+        logger.info("Redis connection closed", extra={"request_id": None})
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -74,6 +78,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def log_system_actions(request: Request, call_next):
+    import uuid
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
     response = await call_next(request)
     user = getattr(request.state, "user", None)
     user_id = getattr(user, "user_id", None)
@@ -90,7 +97,7 @@ async def log_system_actions(request: Request, call_next):
                     try:
                         ip_addr = str(ip_address(request.client.host))
                     except ValueError:
-                        logger.warning(f"Invalid IP address: {request.client.host}")
+                        logger.warning(f"Invalid IP address: {request.client.host}", extra={"request_id": request_id})
                         ip_addr = None
 
                 system_log = SystemLogs(
@@ -102,13 +109,14 @@ async def log_system_actions(request: Request, call_next):
                     new_values=None,
                     ip_address=ip_addr,
                     user_agent=request.headers.get("user-agent"),
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(timezone.utc),
+                    request_id=request_id
                 )
                 session.add(system_log)
                 await session.commit()
-                logger.info(f"📋 Logged action: {action} by user_id={user_id}")
+                logger.info(f"Logged action: {action} by user_id={user_id}", extra={"request_id": request_id})
         except Exception as e:
-            logger.error(f"⚠️ Failed to log action: {str(e)}")
+            logger.error(f"Failed to log action: {str(e)}", extra={"request_id": request_id})
 
     return response
 
