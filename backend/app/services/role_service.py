@@ -8,12 +8,16 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.role import RoleCreate, RoleUpdate, RoleOut
 from app.core.config import settings
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
 from app.core.permissions import check_permission
+from cachetools import TTLCache
 import logging
 
 logger = logging.getLogger(__name__)
+
+# External reference to permission cache
+externals = {"permission_cache": TTLCache(maxsize=1000, ttl=300), "role_permission_cache": TTLCache(maxsize=100, ttl=300)}
 
 async def create_role(
     db: AsyncSession,
@@ -46,7 +50,7 @@ async def create_role(
             )
 
         # Validate permissions
-        invalid_permissions = [p for p in role.permissions.keys() if p not in settings.PERMISSION_KEYS]
+        invalid_permissions = [p for p in role.permissions.keys() if p not in [perm.value for perm in Permission]]
         if invalid_permissions:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -64,6 +68,10 @@ async def create_role(
         db.add(db_role)
         await db.commit()
         await db.refresh(db_role)
+
+        # Clear role permission cache
+        externals["role_permission_cache"].clear()
+        logger.debug("Role permission cache cleared after role creation")
 
         # Log action
         system_log = SystemLogs(
@@ -201,7 +209,7 @@ async def update_role(
 
         # Validate permissions if updated
         if "permissions" in update_data:
-            invalid_permissions = [p for p in update_data["permissions"].keys() if p not in settings.PERMISSION_KEYS]
+            invalid_permissions = [p for p in update_data["permissions"].keys() if p not in [perm.value for perm in Permission]]
             if invalid_permissions:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -219,6 +227,10 @@ async def update_role(
         db.add(db_role)
         await db.commit()
         await db.refresh(db_role)
+
+        # Clear role permission cache
+        externals["role_permission_cache"].clear()
+        logger.debug("Role permission cache cleared after role update")
 
         # Log action
         system_log = SystemLogs(
@@ -273,6 +285,10 @@ async def delete_role(
         db_role.is_active = False
         db_role.deleted_at = datetime.now(timezone.utc)
         await db.commit()
+
+        # Clear role permission cache
+        externals["role_permission_cache"].clear()
+        logger.debug("Role permission cache cleared after role deletion")
 
         # Log action
         system_log = SystemLogs(

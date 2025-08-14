@@ -10,15 +10,51 @@ from app.models.user_roles import UserRoles
 from app.models.roles import Roles
 from app.core.security import get_current_user
 import cachetools
+import logging
 
-# Initialize in-memory cache with TTL of 5 minutes
-permission_cache = cachetools.TTLCache(maxsize=1000, ttl=300)
+logger = logging.getLogger(__name__)
+
+# Initialize in-memory caches with TTL of 5 minutes
+user_permission_cache = cachetools.TTLCache(maxsize=1000, ttl=300)
+role_permission_cache = cachetools.TTLCache(maxsize=100, ttl=300)
 
 class PermissionCheck(BaseModel):
     user_id: int
     required_permissions: List[Permission]
 
     model_config = ConfigDict(from_attributes=True)
+
+async def get_role_permissions(role_id: int, db: AsyncSession) -> List[str]:
+    """Retrieve and cache permissions for a specific role."""
+    cache_key = f"role_{role_id}_permissions"
+    cached_permissions = role_permission_cache.get(cache_key)
+    if cached_permissions is not None:
+        return cached_permissions
+
+    try:
+        query = select(Roles.permissions).where(
+            Roles.role_id == role_id,
+            Roles.is_active == True,
+            Roles.deleted_at == None
+        )
+        result = await db.execute(query)
+        permissions = result.scalar_one_or_none()
+
+        if not permissions:
+            return []
+
+        role_permissions = []
+        if isinstance(permissions, dict):
+            if permissions.get(Permission.ALL_PERMISSIONS.value, False):
+                role_permissions = [perm.value for perm in Permission]
+            else:
+                role_permissions = [key for key, value in permissions.items() if value is True]
+
+        role_permission_cache[cache_key] = role_permissions
+        return role_permissions
+    except Exception as e:
+        logger.error(f"Error retrieving permissions for role_id {role_id}: {str(e)}")
+        return []
 
 async def check_permissions(
     required_permissions: List[Permission],
@@ -33,17 +69,17 @@ async def check_permissions(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is inactive"
             )
-        
+
         # Convert enum list to string list for processing
         required_perms_str = [perm.value for perm in required_permissions]
-        
-        # Check cache first
+
+        # Check user permission cache
         cache_key = f"user_{current_user.user_id}_permissions"
-        cached_permissions = permission_cache.get(cache_key)
+        cached_permissions = user_permission_cache.get(cache_key)
         if cached_permissions is not None:
-            if cached_permissions.get("all_permissions", False):
+            if Permission.ALL_PERMISSIONS.value in cached_permissions:
                 return True
-            user_permissions = set(cached_permissions.get("permissions", []))
+            user_permissions = set(cached_permissions)
             missing_permissions = [perm for perm in required_perms_str if perm not in user_permissions]
             if missing_permissions:
                 raise HTTPException(
@@ -52,51 +88,34 @@ async def check_permissions(
                 )
             return True
 
-        # Query user roles with proper joins
-        query = (
-            select(Roles.permissions)
-            .join(UserRoles, UserRoles.role_id == Roles.role_id)
-            .where(
-                UserRoles.user_id == current_user.user_id,
-                UserRoles.is_active == True
-            )
+        # Query user roles
+        query = select(UserRoles.role_id).where(
+            UserRoles.user_id == current_user.user_id,
+            UserRoles.is_active == True
         )
         result = await db.execute(query)
-        role_permissions = result.scalars().all()
-        
-        if not role_permissions:
+        role_ids = result.scalars().all()
+
+        if not role_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No active roles assigned to user"
             )
 
-        # Combine all permissions from user's roles
+        # Aggregate permissions from all roles
         user_permissions = set()
-        has_all_permissions = False
-        
-        for perms in role_permissions:
-            if isinstance(perms, dict):
-                # Check for all_permissions wildcard first
-                if perms.get(Permission.ALL_PERMISSIONS.value) is True:
-                    has_all_permissions = True
-                    break
-                
-                # Add permissions that are explicitly set to True
-                for perm_key, perm_value in perms.items():
-                    if perm_value is True:
-                        user_permissions.add(perm_key)
+        for role_id in role_ids:
+            role_permissions = await get_role_permissions(role_id, db)
+            user_permissions.update(role_permissions)
 
-        # Cache the permissions
-        permission_cache[cache_key] = {
-            "all_permissions": has_all_permissions,
-            "permissions": list(user_permissions)
-        }
+        # Cache the aggregated permissions
+        user_permission_cache[cache_key] = list(user_permissions)
 
-        # If user has all_permissions, they can do anything
-        if has_all_permissions:
+        # Check for ALL_PERMISSIONS wildcard
+        if Permission.ALL_PERMISSIONS.value in user_permissions:
             return True
 
-        # Check if all required permissions are present and enabled
+        # Check if all required permissions are present
         missing_permissions = [perm for perm in required_perms_str if perm not in user_permissions]
         if missing_permissions:
             raise HTTPException(
@@ -109,9 +128,10 @@ async def check_permissions(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Permission check failed for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Permission check failed: {str(e)}"
+            detail="Permission check failed"
         )
 
 def require_permissions(required_permissions: List[Permission]):
@@ -129,52 +149,31 @@ async def get_user_permissions(
 ) -> List[str]:
     """Get all permissions for a specific user."""
     try:
-        # Check cache first
         cache_key = f"user_{user_id}_permissions"
-        cached_permissions = permission_cache.get(cache_key)
+        cached_permissions = user_permission_cache.get(cache_key)
         if cached_permissions is not None:
-            if cached_permissions.get("all_permissions", False):
-                return [perm.value for perm in Permission]
-            return cached_permissions.get("permissions", [])
+            return cached_permissions
 
-        # Query user roles
-        query = (
-            select(Roles.permissions)
-            .join(UserRoles, UserRoles.role_id == Roles.role_id)
-            .where(
-                UserRoles.user_id == user_id,
-                UserRoles.is_active == True
-            )
+        query = select(UserRoles.role_id).where(
+            UserRoles.user_id == user_id,
+            UserRoles.is_active == True
         )
         result = await db.execute(query)
-        role_permissions = result.scalars().all()
-        
-        user_permissions = set()
-        has_all_permissions = False
-        for perms in role_permissions:
-            if isinstance(perms, dict):
-                if perms.get(Permission.ALL_PERMISSIONS.value) is True:
-                    has_all_permissions = True
-                    break
-                for perm_key, perm_value in perms.items():
-                    if perm_value is True:
-                        user_permissions.add(perm_key)
-        
-        # Cache the result
-        permission_cache[cache_key] = {
-            "all_permissions": has_all_permissions,
-            "permissions": list(user_permissions)
-        }
+        role_ids = result.scalars().all()
 
-        if has_all_permissions:
-            return [perm.value for perm in Permission]
-        
+        user_permissions = set()
+        for role_id in role_ids:
+            role_permissions = await get_role_permissions(role_id, db)
+            user_permissions.update(role_permissions)
+
+        user_permission_cache[cache_key] = list(user_permissions)
         return list(user_permissions)
 
     except Exception as e:
+        logger.error(f"Failed to retrieve permissions for user_id {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve user permissions: {str(e)}"
+            detail="Failed to retrieve user permissions"
         )
 
 def require_employee_permissions():

@@ -24,8 +24,8 @@ async def create_new_user(
 ) -> UserOut:
     """Create a new user. Requires MANAGE_USERS permission."""
     try:
-        # Check permissions using the existing system
-        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
+        # Check permissions using the refactored RBAC system
+        await check_permissions([Permission.MANAGE_USERS], current_user, db)
 
         # Check if email already exists
         query = select(Users).where(Users.email == user.email, Users.is_active == True)
@@ -72,7 +72,7 @@ async def read_user(
     try:
         # Allow users to view their own profile, otherwise require MANAGE_USERS permission
         if current_user.user_id != user_id:
-            await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
+            await check_permissions([Permission.MANAGE_USERS], current_user, db)
 
         query = select(Users).where(
             Users.user_id == user_id,
@@ -103,7 +103,7 @@ async def read_users(
 ) -> List[UserOut]:
     """List all users. Requires MANAGE_USERS permission."""
     try:
-        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
+        await check_permissions([Permission.MANAGE_USERS], current_user, db)
 
         query = select(Users).where(
             Users.is_active == True,
@@ -135,7 +135,7 @@ async def update_existing_user(
         
         if not is_self_update:
             # Require MANAGE_USERS permission for updating other users
-            await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
+            await check_permissions([Permission.MANAGE_USERS], current_user, db)
         else:
             # For self-updates, restrict which fields can be modified
             restricted_fields = {'salary', 'employee_type', 'manager_id', 'is_active', 'hire_date'}
@@ -193,7 +193,7 @@ async def delete_existing_user(
 ) -> None:
     """Soft delete a user. Requires MANAGE_USERS permission."""
     try:
-        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
+        await check_permissions([Permission.MANAGE_USERS], current_user, db)
 
         # Prevent self-deletion
         if current_user.user_id == user_id:
@@ -228,7 +228,6 @@ async def delete_existing_user(
         logger.error(f"Error deleting user {user_id}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting user")
 
-# Additional endpoint for user profile (self-view)
 @router.get("/me/profile", response_model=UserOut, summary="Get current user profile")
 async def get_current_user_profile(
     current_user: Users = Depends(get_current_active_user)
