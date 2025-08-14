@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 async def create_leave_request(
     db: AsyncSession,
     leave_request: LeaveRequestCreate,
+    request: Request,  # Added Request dependency
     current_user: Users = Depends(get_current_user),
     _: str = Depends(check_permission("create_leave_request"))
 ) -> LeaveRequestOut:
@@ -98,7 +99,8 @@ async def create_leave_request(
             record_id=db_leave_request.leave_id,
             old_values=None,
             new_values=db_leave_request.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Added user_agent
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -217,6 +219,7 @@ async def approve_leave(
     leave_id: int,
     status: LeaveRequestStatus,
     comments: Optional[str],
+    request: Request,  # Added Request dependency
     current_user: Users = Depends(get_current_user),
     _: str = Depends(check_permission("approve_leave"))
 ) -> LeaveRequestOut:
@@ -291,7 +294,8 @@ async def approve_leave(
             record_id=leave_request.leave_id,
             old_values=old_values,
             new_values=leave_request.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Added user_agent
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)

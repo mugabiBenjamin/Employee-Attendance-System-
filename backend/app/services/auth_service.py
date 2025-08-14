@@ -1,4 +1,4 @@
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -31,6 +31,7 @@ class TokenResponse(BaseModel):
 async def login_user(
     db: AsyncSession,
     credentials: LoginCredentials,
+    request: Request,
     ip_address: str = Depends(check_permission("login"))
 ) -> TokenResponse:
     """
@@ -62,6 +63,7 @@ async def login_user(
             old_values=None,
             new_values=None,
             ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -81,6 +83,7 @@ async def login_user(
 
 async def logout_user(
     db: AsyncSession,
+    request: Request,
     user: Users = Depends(get_current_user),
     ip_address: str = Depends(check_permission("logout"))
 ) -> None:
@@ -97,6 +100,7 @@ async def logout_user(
             old_values=None,
             new_values=None,
             ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -114,6 +118,7 @@ async def logout_user(
 async def refresh_token(
     db: AsyncSession,
     refresh_token: str,
+    request: Request,
     ip_address: str = Depends(check_permission("refresh_token"))
 ) -> TokenResponse:
     """
@@ -138,7 +143,7 @@ async def refresh_token(
         result = await db.execute(query)
         user = result.scalar_one_or_none()
         if not user:
-            raise AuthenticationError(detail="User not found")
+            raise AuthenticationError(detail="User not found or inactive")
 
         # Generate new access token
         access_token = create_access_token(data={"sub": str(user.user_id)})
@@ -153,6 +158,7 @@ async def refresh_token(
             old_values=None,
             new_values=None,
             ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)

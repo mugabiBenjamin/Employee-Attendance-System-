@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -10,11 +10,11 @@ from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
 from app.schemas.leave_approval_workflow import LeaveApprovalWorkflowCreate, LeaveApprovalWorkflowOut
 from app.core.config import settings
-from app.core.enums import SystemAction, CorrectionStatus
+from app.core.enums import SystemAction, CorrectionStatus, Permission
 from app.core.mail import send_email
-from app.core.exceptions import UserNotFoundError
+from app.core.exceptions import UserNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import check_permission, require_permissions
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 async def approve_or_reject_leave(
     db: AsyncSession,
     approval: LeaveApprovalWorkflowCreate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("approve_leave"))
+    _: str = Depends(require_permissions([Permission.APPROVE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
     """
     Approve or reject a leave request with validation, logging, and email notification.
@@ -54,7 +55,7 @@ async def approve_or_reject_leave(
         if not approver:
             raise UserNotFoundError(detail="Approver not found")
 
-        # Check if approver is authorized (e.g., manager of the employee)
+        # Check if approver is in the employee's hierarchy
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.employee_id == leave_request.user_id,
             EmployeeHierarchy.manager_id == approval.approver_id,
@@ -63,17 +64,18 @@ async def approve_or_reject_leave(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to approve this leave request"
-            )
+            raise ValidationError(detail="Approver is not in the employee's hierarchy")
+
+        # Validate approver has APPROVE_LEAVE permission
+        from app.services.user_role_service import UserRoleService, get_user_role_service
+        user_role_service = get_user_role_service(db)
+        user_permissions = await user_role_service.get_user_permissions(approval.approver_id)
+        if Permission.APPROVE_LEAVE not in user_permissions:
+            raise ValidationError(detail="Approver lacks APPROVE_LEAVE permission")
 
         # Validate status
         if approval.status not in [CorrectionStatus.APPROVED, CorrectionStatus.REJECTED]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid status for leave approval"
-            )
+            raise ValidationError(detail="Invalid status for leave approval")
 
         # Create approval workflow entry
         db_approval = LeaveApprovalWorkflow(
@@ -100,7 +102,8 @@ async def approve_or_reject_leave(
             record_id=db_approval.workflow_id,
             old_values=None,
             new_values=db_approval.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent"),  # Added user_agent
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -121,6 +124,9 @@ async def approve_or_reject_leave(
         return LeaveApprovalWorkflowOut.model_validate(db_approval)
 
     except HTTPException:
+        raise
+    except ValidationError as e:
+        logger.error(f"Validation error processing leave approval for leave_id {approval.request_id}: {str(e)}")
         raise
     except Exception as e:
         logger.error(f"Error processing leave approval for leave_id {approval.request_id}: {str(e)}")

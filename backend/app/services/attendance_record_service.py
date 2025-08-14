@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, date
@@ -19,6 +19,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 async def clock_in(
+    request: Request,
     user: Users = Depends(get_current_user),
     ip_address: str = Depends(check_permission("clock_in")),
     location: Optional[str] = None
@@ -66,6 +67,7 @@ async def clock_in(
                 old_values=None,
                 new_values=db_record.__dict__,
                 ip_address=ip_address,
+                user_agent=request.headers.get("user-agent"),
                 timestamp=datetime.now(timezone.utc)
             )
             db.add(system_log)
@@ -91,6 +93,7 @@ async def clock_in(
             )
 
 async def clock_out(
+    request: Request,  # Added Request dependency
     user: Users = Depends(get_current_user),
     ip_address: str = Depends(check_permission("clock_out"))
 ) -> AttendanceRecordOut:
@@ -138,6 +141,7 @@ async def clock_out(
                 old_values=None,
                 new_values=db_record.__dict__,
                 ip_address=ip_address,
+                user_agent=request.headers.get("user-agent"),
                 timestamp=datetime.now(timezone.utc)
             )
             db.add(system_log)

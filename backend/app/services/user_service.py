@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from app.models.users import Users
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.security import get_password_hash
-from app.core.enums import SystemAction, Permission
+from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 async def create_user(
     db: AsyncSession,
     user: UserCreate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.CREATE_USER])),
     log_service: SystemLogService = Depends(get_system_log_service),
@@ -31,6 +32,10 @@ async def create_user(
     Create a new user with validation and logging. Requires CREATE_USER permission.
     """
     try:
+        # Validate employee_type
+        if user.employee_type not in [e.value for e in EmployeeType]:
+            raise ValidationError(detail=f"Invalid employee_type. Must be one of: {[e.value for e in EmployeeType]}")
+
         # Check for existing email
         query = select(Users).where(
             Users.email == user.email,
@@ -77,7 +82,8 @@ async def create_user(
             record_id=db_user.user_id,
             old_values=None,
             new_values=db_user.__dict__,
-            ip_address=None
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent")
         )
         await log_service.create_system_log(log, current_user)
 
@@ -183,6 +189,7 @@ async def update_user(
     db: AsyncSession,
     user_id: int,
     user_update: UserUpdate,
+    request: Request,  # Added Request dependency
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.UPDATE_USER])),
     log_service: SystemLogService = Depends(get_system_log_service),
@@ -221,6 +228,10 @@ async def update_user(
         if "manager_id" in update_data and update_data["manager_id"] is not None:
             await validate_user_exists(db, update_data["manager_id"])
 
+        if "employee_type" in update_data and update_data["employee_type"] is not None:
+            if update_data["employee_type"] not in [e.value for e in EmployeeType]:
+                raise ValidationError(detail=f"Invalid employee_type. Must be one of: {[e.value for e in EmployeeType]}")
+
         old_values = db_user.__dict__.copy()
 
         for key, value in update_data.items():
@@ -242,7 +253,8 @@ async def update_user(
             record_id=user_id,
             old_values=old_values,
             new_values=db_user.__dict__,
-            ip_address=None
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent")  # Added user_agent
         )
         await log_service.create_system_log(log, current_user)
 
@@ -271,6 +283,7 @@ async def update_user(
 async def delete_user(
     db: AsyncSession,
     user_id: int,
+    request: Request,
     current_user: Users = Depends(get_current_user),
     _: str = Depends(require_permissions([Permission.DELETE_USER])),
     log_service: SystemLogService = Depends(get_system_log_service),
@@ -315,7 +328,8 @@ async def delete_user(
             record_id=user_id,
             old_values=db_user.__dict__,
             new_values=None,
-            ip_address=None
+            ip_address=request.client.host,  # Updated to use request
+            user_agent=request.headers.get("user-agent")  # Added user_agent
         )
         await log_service.create_system_log(log, current_user)
 
