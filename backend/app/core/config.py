@@ -1,6 +1,7 @@
 from typing import List, ClassVar, Set
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.core.enums import AttendanceStatus, LeaveType, LeaveRequestStatus, CorrectionStatus, SystemAction, EmployeeType, ShiftType, Permission
 
 class Settings(BaseSettings):
     APP_NAME: str = Field(default="Employee Management System", env="APP_NAME")
@@ -96,18 +97,20 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = Field(default=50, env="DEFAULT_PAGE_SIZE")
     MAX_PAGE_SIZE: int = Field(default=100, env="MAX_PAGE_SIZE")
     DEFAULT_TIMEZONE: str = Field(default="UTC", env="DEFAULT_TIMEZONE")
+    OVERTIME_THRESHOLD: float = Field(default=8.0, env="OVERTIME_THRESHOLD")
 
     MATERIALIZED_VIEW_REFRESH_INTERVAL: int = Field(default=3600, env="MATERIALIZED_VIEW_REFRESH_INTERVAL")
 
-    # Static lists
-    ATTENDANCE_STATUSES: List[str] = ["present", "absent", "late", "early_departure", "on_leave", "half_day", "sick"]
-    LEAVE_TYPES: List[str] = ["annual", "sick", "maternity", "paternity", "emergency", "unpaid", "casual", "compensatory", "bereavement", "leave_of_absence", "public_holiday"]
-    LEAVE_REQUEST_STATUSES: List[str] = ["draft", "under_review", "approved", "rejected", "cancelled", "completed"]
-    CORRECTION_STATUSES: List[str] = ["draft", "under_review", "approved", "rejected", "cancelled", "completed"]
-    SYSTEM_ACTIONS: List[str] = ["INSERT", "UPDATE", "DELETE", "LOGIN", "LOGOUT", "CLOCK_IN", "CLOCK_OUT", "password_change", "profile_update", "data_export", "data_import", "assign_role", "revoke_role", "view_report", "approve_leave", "reject_leave", "create_department", "delete_department"]
-    EMPLOYEE_TYPES: List[str] = ["full_time", "part_time", "contract", "intern", "temporary"]
-    SHIFT_TYPES: List[str] = ["morning", "afternoon", "night", "flexible", "split"]
-    PERMISSION_KEYS: List[str] = ["clock_in", "clock_out", "view_own_attendance", "request_leave", "view_leave_balance", "approve_leave", "view_team_attendance", "generate_reports", "manage_overtime", "manage_employees", "generate_compliance_reports", "view_all_attendance", "manage_leave_policies", "manage_users", "manage_roles", "system_configuration", "view_logs", "manage_departments", "all_permissions"]
+    # Static lists for validation
+    ATTENDANCE_STATUSES: List[str] = Field(default_factory=lambda: [e.value for e in AttendanceStatus])
+    LEAVE_TYPES: List[str] = Field(default_factory=lambda: [e.value for e in LeaveType])
+    LEAVE_REQUEST_STATUSES: List[str] = Field(default_factory=lambda: [e.value for e in LeaveRequestStatus])
+    CORRECTION_STATUSES: List[str] = Field(default_factory=lambda: [e.value for e in CorrectionStatus])
+    SYSTEM_ACTIONS: List[str] = Field(default_factory=lambda: [e.value for e in SystemAction])
+    EMPLOYEE_TYPES: List[str] = Field(default_factory=lambda: [e.value for e in EmployeeType])
+    SHIFT_TYPES: List[str] = Field(default_factory=lambda: [e.value for e in ShiftType])
+    VALID_SHIFT_TYPES: List[str] = Field(default_factory=lambda: [e.value for e in ShiftType])
+    PERMISSION_KEYS: List[str] = Field(default_factory=lambda: [e.value for e in Permission])
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -115,8 +118,6 @@ class Settings(BaseSettings):
         case_sensitive=True
     )
 
-settings = Settings()
-
 def get_settings() -> Settings:
     """Dependency to provide Settings instance."""
-    return settings
+    return Settings()

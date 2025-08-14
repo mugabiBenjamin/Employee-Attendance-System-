@@ -9,6 +9,7 @@ from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
 from app.core.security import get_current_user
+from app.core.exceptions import AuthorizationError
 import cachetools
 import logging
 
@@ -65,10 +66,7 @@ async def check_permissions(
     try:
         # Verify user is active
         if not current_user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is inactive"
-            )
+            raise AuthorizationError(detail="User account is inactive")
 
         # Convert enum list to string list for processing
         required_perms_str = [perm.value for perm in required_permissions]
@@ -82,9 +80,9 @@ async def check_permissions(
             user_permissions = set(cached_permissions)
             missing_permissions = [perm for perm in required_perms_str if perm not in user_permissions]
             if missing_permissions:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Missing required permissions: {', '.join(missing_permissions)}"
+                raise AuthorizationError(
+                    detail="Missing required permissions",
+                    missing_permissions=missing_permissions
                 )
             return True
 
@@ -97,10 +95,7 @@ async def check_permissions(
         role_ids = result.scalars().all()
 
         if not role_ids:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No active roles assigned to user"
-            )
+            raise AuthorizationError(detail="No active roles assigned to user")
 
         # Aggregate permissions from all roles
         user_permissions = set()
@@ -118,14 +113,14 @@ async def check_permissions(
         # Check if all required permissions are present
         missing_permissions = [perm for perm in required_perms_str if perm not in user_permissions]
         if missing_permissions:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Missing required permissions: {', '.join(missing_permissions)}"
+            raise AuthorizationError(
+                detail="Missing required permissions",
+                missing_permissions=missing_permissions
             )
 
         return True
 
-    except HTTPException:
+    except AuthorizationError:
         raise
     except Exception as e:
         logger.error(f"Permission check failed for user_id {current_user.user_id}: {str(e)}")
