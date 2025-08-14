@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
 from sqlalchemy.ext.declarative import declarative_base
@@ -8,6 +8,9 @@ from app.core.config import settings
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from sqlalchemy.exc import OperationalError, DatabaseError
+import aioredis
+from aioredis.exceptions import ConnectionError, RedisError
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,23 @@ engine = None
 # Create async session factory
 AsyncSessionLocal = None
 
+# Redis client
+redis = None
+
+# Initialize Redis with retry logic
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((ConnectionError, RedisError)),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Redis connection attempt {retry_state.attempt_number} failed, retrying..."
+    )
+)
+async def initialize_redis():
+    global redis
+    redis = await aioredis.create_redis_pool(settings.REDIS_URL)
+    logger.info("Redis client initialized")
+
 async def initialize_engine_and_session():
     global engine, AsyncSessionLocal
     try:
@@ -50,9 +70,10 @@ async def initialize_engine_and_session():
             class_=AsyncSession,
             expire_on_commit=False
         )
-        logger.info("Database engine and session factory initialized")
+        await initialize_redis()
+        logger.info("Database engine, session factory, and Redis initialized")
     except Exception as e:
-        logger.error(f"Failed to create database engine after retries: {str(e)}")
+        logger.error(f"Failed to initialize database or Redis: {str(e)}")
         raise
 
 # Database dependency for FastAPI
@@ -65,6 +86,37 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+# Cache utility functions
+async def get_cache(key: str) -> Optional[dict]:
+    try:
+        if redis:
+            cached = await redis.get(key)
+            if cached:
+                logger.debug(f"Cache hit for key: {key}")
+                return json.loads(cached)
+        return None
+    except RedisError as e:
+        logger.error(f"Error retrieving cache for key {key}: {str(e)}")
+        return None
+
+async def set_cache(key: str, value: dict, ttl: int):
+    try:
+        if redis:
+            await redis.set(key, json.dumps(value), expire=ttl)
+            logger.debug(f"Cache set for key: {key} with TTL {ttl}s")
+    except RedisError as e:
+        logger.error(f"Error setting cache for key {key}: {str(e)}")
+
+async def invalidate_cache_prefix(prefix: str):
+    try:
+        if redis:
+            keys = await redis.keys(f"{prefix}:*")
+            if keys:
+                await redis.delete(*keys)
+                logger.debug(f"Invalidated cache for prefix: {prefix}")
+    except RedisError as e:
+        logger.error(f"Error invalidating cache for prefix {prefix}: {str(e)}")
 
 # Individual enum creation SQL statements
 ENUM_CREATION_SQLS = [

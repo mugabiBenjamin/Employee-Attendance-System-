@@ -12,7 +12,8 @@ from app.core.utils import calculate_total_hours, calculate_overtime_hours
 from app.core.enums import SystemAction
 from app.core.security import get_current_user
 from app.core.permissions import check_permission
-from app.core.database import get_db
+from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
+from app.core.exceptions import ValidationError, ResourceNotFoundError, DatabaseError, AttendanceError, SQLAlchemyError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ async def clock_in(
 ) -> AttendanceRecordOut:
     """
     Handle employee clock-in with one-click functionality, validation, and logging.
+    Invalidates attendance history cache for the user.
     """
     async with get_db() as db:
         try:
@@ -37,10 +39,7 @@ async def clock_in(
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="User already clocked in for today"
-                )
+                raise AttendanceError(detail="User already clocked in for today")
 
             # Create attendance record
             db_record = AttendanceRecords(
@@ -72,16 +71,23 @@ async def clock_in(
             db.add(system_log)
             await db.commit()
 
+            # Invalidate attendance history cache for this user
+            await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
+
             logger.info(f"User clocked in, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
             return AttendanceRecordOut.model_validate(db_record)
 
-        except HTTPException:
+        except AttendanceError as e:
+            logger.error(f"Attendance error during clock-in for user_id {user.user_id}: {str(e)}")
             raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error during clock-in for user_id {user.user_id}: {str(e)}")
+            raise DatabaseError(message="Database error processing clock-in", original_error=e)
         except Exception as e:
-            logger.error(f"Error during clock-in for user_id {user.user_id}: {str(e)}")
+            logger.error(f"Unexpected error during clock-in for user_id {user.user_id}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error processing clock-in"
+                detail="Unexpected error processing clock-in"
             )
 
 async def clock_out(
@@ -90,6 +96,7 @@ async def clock_out(
 ) -> AttendanceRecordOut:
     """
     Handle employee clock-out with validation, time calculations, and logging.
+    Invalidates attendance history cache for the user.
     """
     async with get_db() as db:
         try:
@@ -104,10 +111,7 @@ async def clock_out(
             result = await db.execute(query)
             db_record = result.scalar_one_or_none()
             if not db_record:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No active clock-in found for today"
-                )
+                raise ResourceNotFoundError(resource="Attendance record", identifier="active clock-in for today")
 
             db_record.clock_out_time = datetime.now(timezone.utc)
             db_record.ip_address = ip_address
@@ -139,16 +143,23 @@ async def clock_out(
             db.add(system_log)
             await db.commit()
 
+            # Invalidate attendance history cache for this user
+            await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
+
             logger.info(f"User clocked out, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
             return AttendanceRecordOut.model_validate(db_record)
 
-        except HTTPException:
+        except ResourceNotFoundError as e:
+            logger.error(f"Resource not found during clock-out for user_id {user.user_id}: {str(e)}")
             raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error during clock-out for user_id {user.user_id}: {str(e)}")
+            raise DatabaseError(message="Database error processing clock-out", original_error=e)
         except Exception as e:
-            logger.error(f"Error during clock-out for user_id {user.user_id}: {str(e)}")
+            logger.error(f"Unexpected error during clock-out for user_id {user.user_id}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error processing clock-out"
+                detail="Unexpected error processing clock-out"
             )
 
 async def get_attendance_history(
@@ -156,33 +167,60 @@ async def get_attendance_history(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_attendance_history"))
+    limit: int = 50,
+    _: str = Depends(check_permission("view_attendance_history")),
+    db: AsyncSession = Depends(get_db)
 ) -> List[AttendanceRecordOut]:
     """
     Retrieve attendance history for a user with optional date range and pagination.
+    Uses Redis caching with 5-minute TTL.
     """
-    async with get_db() as db:
-        try:
-            query = select(AttendanceRecords).where(
-                AttendanceRecords.user_id == user.user_id,
-                AttendanceRecords.is_active == True
-            )
-            if start_date:
-                query = query.where(AttendanceRecords.date >= start_date)
-            if end_date:
-                query = query.where(AttendanceRecords.date <= end_date)
+    try:
+        if skip < 0 or limit <= 0:
+            raise ValidationError(detail="Invalid pagination parameters")
 
-            query = query.offset(skip).limit(limit)
-            result = await db.execute(query)
-            records = result.scalars().all()
+        # Create cache key
+        start_date_str = start_date.isoformat() if start_date else "none"
+        end_date_str = end_date.isoformat() if end_date else "none"
+        cache_key = f"attendance_history:{user.user_id}:{start_date_str}:{end_date_str}:{skip}:{limit}"
 
-            logger.info(f"Retrieved {len(records)} attendance records for user_id: {user.user_id}")
-            return [AttendanceRecordOut.model_validate(record) for record in records]
+        # Check cache
+        cached_result = await get_cache(cache_key)
+        if cached_result:
+            return [AttendanceRecordOut(**record) for record in cached_result]
 
-        except Exception as e:
-            logger.error(f"Error retrieving attendance history for user_id {user.user_id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error retrieving attendance history"
-            )
+        # Query database
+        query = select(AttendanceRecords).where(
+            AttendanceRecords.user_id == user.user_id,
+            AttendanceRecords.is_active == True
+        )
+        if start_date:
+            query = query.where(AttendanceRecords.date >= start_date)
+        if end_date:
+            query = query.where(AttendanceRecords.date <= end_date)
+
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
+        result = await db.execute(query)
+        records = result.scalars().all()
+
+        # Convert records to dict for caching
+        records_dict = [AttendanceRecordOut.model_validate(record).dict() for record in records]
+
+        # Cache the result for 5 minutes (300 seconds)
+        await set_cache(cache_key, records_dict, ttl=300)
+
+        logger.info(f"Retrieved {len(records)} attendance records for user_id: {user.user_id}")
+        return [AttendanceRecordOut.model_validate(record) for record in records]
+
+    except ValidationError as e:
+        logger.error(f"Validation error in get_attendance_history for user_id {user.user_id}: {str(e)}")
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in get_attendance_history for user_id {user.user_id}: {str(e)}")
+        raise DatabaseError(message="Database error retrieving attendance history", original_error=e)
+    except Exception as e:
+        logger.error(f"Unexpected error in get_attendance_history for user_id {user.user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error retrieving attendance history"
+        )

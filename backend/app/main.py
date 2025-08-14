@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
 from app.core.config import settings
-from app.core.database import init_db, start_materialized_view_refresh, AsyncSessionLocal, initialize_engine_and_session
+from app.core.database import init_db, start_materialized_view_refresh, AsyncSessionLocal, initialize_engine_and_session, redis
 from app.api.v1.api import api_router
 from app.models.system_logs import SystemLogs
 from app.core.enums import SystemAction
@@ -44,12 +44,16 @@ def determine_system_action(path: str, method: str) -> str | None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🔄 Application startup: initializing database and views...")
-    await initialize_engine_and_session()  # Initialize engine and session
+    await initialize_engine_and_session()  # Initialize engine, session, and Redis
     await init_db()
     await start_materialized_view_refresh()
     logger.info("✅ Startup complete.")
     yield
     logger.info("🛑 Application shutdown...")
+    if redis:
+        redis.close()
+        await redis.wait_closed()
+        logger.info("Redis connection closed")
 
 app = FastAPI(
     title=settings.APP_NAME,
