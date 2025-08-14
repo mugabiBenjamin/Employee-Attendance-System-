@@ -7,7 +7,7 @@ from app.models.departments import Departments
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import DepartmentNotFoundError
 from app.core.security import get_current_user
@@ -119,8 +119,9 @@ async def get_department_by_id(
 
 async def get_departments(
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[DepartmentOut]:
     """
@@ -130,7 +131,7 @@ async def get_departments(
         query = select(Departments).where(
             Departments.is_active == True,
             Departments.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         departments = result.scalars().all()
 

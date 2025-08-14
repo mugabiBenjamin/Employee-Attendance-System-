@@ -7,7 +7,7 @@ from app.models.shift_patterns import ShiftPatterns
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.shift_pattern import ShiftPatternCreate, ShiftPatternUpdate, ShiftPatternOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
@@ -22,6 +22,7 @@ async def create_shift_pattern(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.CREATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """
@@ -47,7 +48,7 @@ async def create_shift_pattern(
             raise ValidationError(detail="End time must be after start time for non-overnight shifts")
 
         # Validate shift type
-        if shift_pattern.shift_type not in settings.VALID_SHIFT_TYPES:
+        if shift_pattern.shift_type not in settings.VALID_SHIFT_TYPES:  # Use injected settings
             raise ValidationError(detail=f"Invalid shift type. Must be one of: {', '.join(settings.VALID_SHIFT_TYPES)}")
 
         # Create shift pattern
@@ -132,8 +133,9 @@ async def get_shift_pattern_by_id(
 
 async def get_shift_patterns(
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
 ) -> List[ShiftPatternOut]:
     """
@@ -143,7 +145,7 @@ async def get_shift_patterns(
         query = select(ShiftPatterns).where(
             ShiftPatterns.is_active == True,
             ShiftPatterns.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         shift_patterns = result.scalars().all()
 
@@ -166,6 +168,7 @@ async def update_shift_pattern(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.UPDATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """
@@ -206,7 +209,7 @@ async def update_shift_pattern(
                 raise ValidationError(detail="End time must be after start time for non-overnight shifts")
 
         # Validate shift type if updated
-        if "shift_type" in update_data and update_data["shift_type"] not in settings.VALID_SHIFT_TYPES:
+        if "shift_type" in update_data and update_data["shift_type"] not in settings.VALID_SHIFT_TYPES:  # Use injected settings
             raise ValidationError(detail=f"Invalid shift type. Must be one of: {', '.join(settings.VALID_SHIFT_TYPES)}")
 
         # Store old values for logging

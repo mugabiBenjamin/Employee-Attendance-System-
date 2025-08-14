@@ -9,7 +9,7 @@ from app.models.users import Users
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
 from app.schemas.leave_approval_workflow import LeaveApprovalWorkflowCreate, LeaveApprovalWorkflowOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, CorrectionStatus, Permission
 from app.core.mail import send_email
 from app.core.exceptions import UserNotFoundError, ValidationError, ResourceNotFoundError, DatabaseError
@@ -170,8 +170,9 @@ async def get_leave_approval_by_id(
 async def get_leave_approvals_by_request(
     request_id: int,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> List[LeaveApprovalWorkflowOut]:
     """
@@ -191,7 +192,7 @@ async def get_leave_approvals_by_request(
             LeaveApprovalWorkflow.leave_id == request_id,
             LeaveApprovalWorkflow.is_active == True,
             LeaveApprovalWorkflow.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         approvals = result.scalars().all()
 

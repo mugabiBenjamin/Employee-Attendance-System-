@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.models.system_logs import SystemLogs
 from app.models.users import Users
 from app.schemas.system_log import SystemLogCreate, SystemLogOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
@@ -109,14 +109,14 @@ class SystemLogService:
                 detail="Error retrieving system log"
             )
 
-    async def get_system_logs(self, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE, request_id: Optional[str] = None) -> List[SystemLogOut]:
+    async def get_system_logs(self, skip: int = 0, limit: int = 50, settings: Settings = Depends(get_settings), request_id: Optional[str] = None) -> List[SystemLogOut]:
         """
         Retrieve a list of system logs with pagination. Requires view_system_log permission.
         """
         try:
             query = select(SystemLogs).where(
                 SystemLogs.is_active == True
-            ).offset(skip).limit(limit)
+            ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
             result = await self.db.execute(query)
             system_logs = result.scalars().all()
 
@@ -133,7 +133,7 @@ class SystemLogService:
                 detail="Error retrieving system logs"
             )
 
-    async def get_system_logs_by_user(self, user_id: int, skip: int = 0, limit: int = settings.DEFAULT_PAGE_SIZE, request_id: Optional[str] = None) -> List[SystemLogOut]:
+    async def get_system_logs_by_user(self, user_id: int, skip: int = 0, limit: int = 50, settings: Settings = Depends(get_settings), request_id: Optional[str] = None) -> List[SystemLogOut]:
         """
         Retrieve system logs for a specific user with pagination. Requires view_system_log permission.
         """
@@ -150,7 +150,7 @@ class SystemLogService:
             query = select(SystemLogs).where(
                 SystemLogs.user_id == user_id,
                 SystemLogs.is_active == True
-            ).offset(skip).limit(limit)
+            ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
             result = await self.db.execute(query)
             system_logs = result.scalars().all()
 
@@ -203,23 +203,25 @@ async def get_log(
 @require_permissions([Permission.VIEW_LOGS])
 async def list_logs(
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,
     service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     request: Request = Depends()
 ):
     """List system logs with pagination. Requires VIEW_LOGS permission."""
     request_id = getattr(request.state, "request_id", None)
-    return await service.get_system_logs(skip, limit, request_id)
+    return await service.get_system_logs(skip, limit, settings, request_id)
 
 @router.get("/user/{user_id}", response_model=List[SystemLogOut])
 @require_permissions([Permission.VIEW_LOGS])
 async def list_user_logs(
     user_id: int,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,
     service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     request: Request = Depends()
 ):
     """List system logs for a specific user. Requires VIEW_LOGS permission."""
     request_id = getattr(request.state, "request_id", None)
-    return await service.get_system_logs_by_user(user_id, skip, limit, request_id)
+    return await service.get_system_logs_by_user(user_id, skip, limit, settings, request_id)

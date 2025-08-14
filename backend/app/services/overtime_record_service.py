@@ -8,7 +8,7 @@ from app.models.users import Users
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
 from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.mail import send_email
 from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, DatabaseError, ValidationError
@@ -24,6 +24,7 @@ async def create_overtime_record(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.CREATE_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """
@@ -51,8 +52,8 @@ async def create_overtime_record(
         if result.scalar_one_or_none():
             raise ValidationError(detail="Overtime record already exists for this date")
 
-        # Check if overtime exceeds threshold (configurable in settings)
-        if overtime.overtime_hours > settings.OVERTIME_THRESHOLD:
+        # Check if overtime exceeds threshold
+        if overtime.overtime_hours > settings.OVERTIME_THRESHOLD:  # Use injected settings
             # Send alert to manager
             query = select(Users).join(
                 EmployeeHierarchy,
@@ -154,8 +155,9 @@ async def get_user_overtime_records(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD]))
 ) -> List[OvertimeRecordOut]:
     """
@@ -181,7 +183,7 @@ async def get_user_overtime_records(
         if end_date:
             query = query.where(OvertimeRecords.date <= end_date)
 
-        query = query.offset(skip).limit(limit)
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         overtime_records = result.scalars().all()
 
@@ -204,9 +206,10 @@ async def get_team_overtime_records(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     manager: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
 ) -> List[OvertimeRecordOut]:
     """
@@ -236,7 +239,7 @@ async def get_team_overtime_records(
         if end_date:
             query = query.where(OvertimeRecords.date <= end_date)
 
-        query = query.offset(skip).limit(limit)
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         overtime_records = result.scalars().all()
 

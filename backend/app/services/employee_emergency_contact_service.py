@@ -7,7 +7,7 @@ from app.models.employee_emergency_contacts import EmployeeEmergencyContacts
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.employee_emergency_contact import EmployeeEmergencyContactCreate, EmployeeEmergencyContactUpdate, EmployeeEmergencyContactOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError, ResourceNotFoundError
 from app.core.security import get_current_user
@@ -108,8 +108,9 @@ async def get_emergency_contact_by_id(
 async def get_emergency_contacts_by_employee(
     employee_id: int,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> List[EmployeeEmergencyContactOut]:
     """
@@ -129,7 +130,7 @@ async def get_emergency_contacts_by_employee(
             EmployeeEmergencyContacts.user_id == employee_id,
             EmployeeEmergencyContacts.is_active == True,
             EmployeeEmergencyContacts.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         contacts = result.scalars().all()
 

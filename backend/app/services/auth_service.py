@@ -7,7 +7,7 @@ from jose import JWTError, jwt
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.core.security import verify_password, create_access_token, create_refresh_token, get_current_user
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import AuthenticationError
 from app.core.permissions import require_permissions
@@ -32,7 +32,8 @@ class TokenResponse(BaseModel):
 async def login_user(
     db: AsyncSession = Depends(get_db),
     credentials: LoginCredentials = Depends(),
-    request: Request = None
+    request: Request = None,
+    settings: Settings = Depends(get_settings)  # Inject Settings
 ) -> TokenResponse:
     """
     Authenticate user and generate access/refresh tokens, logging the login action.
@@ -119,6 +120,7 @@ async def refresh_token(
     db: AsyncSession = Depends(get_db),
     refresh_token: str = Depends(),
     request: Request = None,
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.REFRESH_TOKEN]))
 ) -> TokenResponse:
     """
@@ -127,7 +129,7 @@ async def refresh_token(
     try:
         # Decode refresh token
         try:
-            payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])  # Updated to use injected settings
             user_id: str = payload.get("sub")
             if user_id is None:
                 raise AuthenticationError(detail="Invalid refresh token")

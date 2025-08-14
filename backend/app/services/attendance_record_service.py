@@ -7,7 +7,7 @@ from app.models.attendance_records import AttendanceRecords
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.attendance_record import AttendanceRecordCreate, AttendanceRecordOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.utils import calculate_total_hours, calculate_overtime_hours
 from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
@@ -173,6 +173,7 @@ async def get_attendance_history(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
     """
@@ -208,7 +209,7 @@ async def get_attendance_history(
         records = result.scalars().all()
 
         # Convert records to dict for caching
-        records_dict = [AttendanceRecordOut.model_validate(record).dict() for record in records]
+        records_dict = [AttendanceRecordOut.model_validate(record).model_dump() for record in records]
 
         # Cache the result for 5 minutes (300 seconds)
         await set_cache(cache_key, records_dict, ttl=300)

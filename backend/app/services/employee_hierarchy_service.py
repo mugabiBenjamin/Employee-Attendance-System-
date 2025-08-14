@@ -7,7 +7,7 @@ from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.employee_hierarchy import EmployeeHierarchyCreate, EmployeeHierarchyUpdate, EmployeeHierarchyOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError, EmployeeHierarchyError, ResourceNotFoundError
 from app.core.security import get_current_user
@@ -122,8 +122,9 @@ async def get_employee_hierarchy_by_id(
 
 async def get_employee_hierarchies(
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> List[EmployeeHierarchyOut]:
     """
@@ -133,7 +134,7 @@ async def get_employee_hierarchies(
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.is_active == True,
             EmployeeHierarchy.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         hierarchies = result.scalars().all()
 

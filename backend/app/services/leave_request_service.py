@@ -9,7 +9,7 @@ from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
 from app.models.leave_balances import LeaveBalances
 from app.schemas.leave_request import LeaveRequestCreate, LeaveRequestOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import LeaveRequestStatus, SystemAction, Permission
 from app.core.mail import send_email
 from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
@@ -175,8 +175,9 @@ async def get_leave_request_by_id(
 async def get_user_leave_requests(
     current_user: Users = Depends(get_current_user),
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST]))
 ) -> List[LeaveRequestOut]:
     """
@@ -193,7 +194,7 @@ async def get_user_leave_requests(
         ).where(
             (LeaveRequests.user_id == current_user.user_id) |
             (EmployeeHierarchy.manager_id == current_user.user_id)
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         leave_requests = result.scalars().all()
 

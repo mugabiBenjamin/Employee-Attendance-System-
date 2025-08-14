@@ -8,7 +8,6 @@ from app.models.leave_policies import LeavePolicies
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.leave_balance import LeaveBalanceCreate, LeaveBalanceOut
-from app.core.config import settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, DatabaseError
 from app.core.security import get_current_user

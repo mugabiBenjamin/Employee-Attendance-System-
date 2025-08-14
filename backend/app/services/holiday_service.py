@@ -8,7 +8,7 @@ from app.models.users import Users
 from app.models.departments import Departments
 from app.models.system_logs import SystemLogs
 from app.schemas.holiday_calendar import HolidayCalendarCreate, HolidayCalendarUpdate, HolidayCalendarOut
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import ResourceNotFoundError, DepartmentNotFoundError, DatabaseError
 from app.core.security import get_current_user
@@ -134,8 +134,9 @@ async def get_holiday_by_id(
 
 async def get_holidays(
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,  # Default value as fallback
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),  # Inject Settings
     _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> List[HolidayCalendarOut]:
     """
@@ -145,7 +146,7 @@ async def get_holidays(
         query = select(HolidayCalendar).where(
             HolidayCalendar.is_active == True,
             HolidayCalendar.deleted_at == None
-        ).offset(skip).limit(limit)
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
         result = await db.execute(query)
         holidays = result.scalars().all()
 
