@@ -8,6 +8,8 @@ class EmployeeHierarchyBase(BaseModel):
     level: int = Field(1, ge=1, le=10)
     effective_from: date
     effective_to: Optional[date] = None
+    is_active: bool = True
+    deleted_at: Optional[datetime] = None
 
 class EmployeeHierarchyCreate(EmployeeHierarchyBase):
     employee_id: int
@@ -18,6 +20,7 @@ class EmployeeHierarchyUpdate(BaseModel):
     level: Optional[int] = Field(None, ge=1, le=10)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
+    is_active: Optional[bool] = None
 
 class EmployeeHierarchyOut(EmployeeHierarchyBase):
     hierarchy_id: int
