@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.models.users import Users
 from app.core.exceptions import DatabaseError
 from datetime import datetime
+import anyio
 
 class EmailSchema(BaseModel):
     to_email: EmailStr
@@ -31,27 +32,29 @@ async def get_user_email(user_id: int, db: AsyncSession) -> Optional[str]:
         raise DatabaseError(f"Failed to retrieve user email: {str(e)}")
 
 async def send_email(email_data: EmailSchema) -> None:
-    """Send email using SMTP configuration from settings."""
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = settings.MAIL_FROM
-        msg['To'] = email_data.to_email
-        msg['Subject'] = email_data.subject
-        if email_data.cc_emails:
-            msg['Cc'] = ", ".join(email_data.cc_emails)
-        if email_data.bcc_emails:
-            msg['Bcc'] = ", ".join(email_data.bcc_emails)
+    """Send email using SMTP configuration from settings, running blocking SMTP in a thread."""
+    def _send_email_blocking():
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = settings.MAIL_FROM
+            msg['To'] = email_data.to_email
+            msg['Subject'] = email_data.subject
+            if email_data.cc_emails:
+                msg['Cc'] = ", ".join(email_data.cc_emails)
+            if email_data.bcc_emails:
+                msg['Bcc'] = ", ".join(email_data.bcc_emails)
 
-        msg.attach(MIMEText(email_data.body, 'plain'))
+            msg.attach(MIMEText(email_data.body, 'plain'))
 
-        with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT) as server:
-            if settings.MAIL_STARTTLS:
-                server.starttls()
-            server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
-            server.send_message(msg)
+            with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT) as server:
+                if settings.MAIL_STARTTLS:
+                    server.starttls()
+                server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+                server.send_message(msg)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    await anyio.to_thread.run_sync(_send_email_blocking)
 
 async def send_leave_notification(
     user_id: int,

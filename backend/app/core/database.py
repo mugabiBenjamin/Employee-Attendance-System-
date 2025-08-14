@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
@@ -76,6 +75,27 @@ async def initialize_engine_and_session():
         logger.error(f"Failed to initialize database or Redis: {str(e)}")
         raise
 
+# Startup and shutdown helpers
+async def startup():
+    """Initialize database engine, session factory, and Redis on application startup."""
+    await initialize_engine_and_session()
+    await init_db()
+    logger.info("Application startup completed: database and Redis initialized")
+
+async def shutdown():
+    """Close database engine and Redis connections on application shutdown."""
+    global engine, redis
+    try:
+        if engine:
+            await engine.dispose()
+            logger.info("Database engine closed")
+        if redis:
+            redis.close()
+            await redis.wait_closed()
+            logger.info("Redis connection closed")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}")
+
 # Database dependency for FastAPI
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
@@ -100,7 +120,7 @@ async def get_cache(key: str) -> Optional[dict]:
         logger.error(f"Error retrieving cache for key {key}: {str(e)}")
         return None
 
-async def set_cache(key: str, value: dict, ttl: int):
+async def set_cache(key: str, value: dict, ttl: int) -> None:
     try:
         if redis:
             await redis.set(key, json.dumps(value), expire=ttl)
@@ -108,7 +128,7 @@ async def set_cache(key: str, value: dict, ttl: int):
     except RedisError as e:
         logger.error(f"Error setting cache for key {key}: {str(e)}")
 
-async def invalidate_cache_prefix(prefix: str):
+async def invalidate_cache_prefix(prefix: str) -> None:
     try:
         if redis:
             keys = await redis.keys(f"{prefix}:*")
@@ -117,6 +137,16 @@ async def invalidate_cache_prefix(prefix: str):
                 logger.debug(f"Invalidated cache for prefix: {prefix}")
     except RedisError as e:
         logger.error(f"Error invalidating cache for prefix {prefix}: {str(e)}")
+
+async def is_key_cached(key: str) -> bool:
+    try:
+        if redis:
+            result = await redis.exists(key)
+            return bool(result)
+        return False
+    except RedisError as e:
+        logger.error(f"Error checking cache existence for key {key}: {str(e)}")
+        return False
 
 # Individual enum creation SQL statements
 ENUM_CREATION_SQLS = [
@@ -215,6 +245,8 @@ MATERIALIZED_VIEW_SQLS = [
 )
 async def init_db():
     async with engine.begin() as conn:
+        # Explicitly import models to register with Base
+        # Models are imported at the top of the file
         # Create enums
         for enum_sql in ENUM_CREATION_SQLS:
             await conn.execute(text(enum_sql))
@@ -232,7 +264,7 @@ async def init_db():
             END $$;
         """))
         
-        # Create tables
+        # Create tables for all registered models
         await conn.run_sync(Base.metadata.create_all)
         
         # Create materialized views
@@ -241,7 +273,7 @@ async def init_db():
         
         logger.info("Database initialized with enums, tables, and materialized view")
 
-# Periodically refresh materialized view with retry logic
+# Background task for materialized view refresh
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -250,20 +282,18 @@ async def init_db():
         f"Materialized view refresh attempt {retry_state.attempt_number} failed, retrying..."
     )
 )
-async def refresh_materialized_view():
-    while True:
+async def background_refresh_materialized_view():
+    async with AsyncSessionLocal() as session:
         try:
-            async with AsyncSessionLocal() as session:
-                await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY attendance_summary"))
-                await session.commit()
-                logger.info("Materialized view 'attendance_summary' refreshed successfully")
+            await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY attendance_summary"))
+            await session.commit()
+            logger.info("Materialized view 'attendance_summary' refreshed successfully")
         except Exception as e:
             logger.error(f"Error refreshing materialized view: {str(e)}")
+            await session.rollback()
             raise
-        # Wait for the configured interval
-        await asyncio.sleep(settings.MATERIALIZED_VIEW_REFRESH_INTERVAL)
 
 # Start the materialized view refresh task
-async def start_materialized_view_refresh():
+async def start_background_refresh():
     logger.info("Starting materialized view refresh task")
-    asyncio.create_task(refresh_materialized_view())
+    asyncio.create_task(background_refresh_materialized_view())

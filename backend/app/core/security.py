@@ -118,9 +118,10 @@ def decode_access_token(token: str) -> dict:
         )
 
 async def blacklist_token(token: str, expires_at: float) -> None:
-    """Add a token to the Redis blacklist with TTL based on its expiry."""
+    """Add a token to the Redis blacklist with TTL based on its expiry, handling clock skew."""
     try:
         if redis:
+            # Calculate TTL, ensuring it's at least 1 to avoid Redis errors
             ttl = max(1, int(expires_at - datetime.now(timezone.utc).timestamp()))
             await redis.setex(f"blacklist:{token}", ttl, "1")
             logger.debug(f"Token blacklisted with TTL {ttl}s")
@@ -128,10 +129,10 @@ async def blacklist_token(token: str, expires_at: float) -> None:
         logger.error(f"Error blacklisting token: {str(e)}")
 
 async def is_token_blacklisted(token: str) -> bool:
-    """Check if a token is blacklisted in Redis."""
+    """Check if a token is blacklisted in Redis, returning a boolean."""
     try:
         if redis:
-            return await redis.exists(f"blacklist:{token}")
+            return bool(await redis.exists(f"blacklist:{token}"))
         return False
     except Exception as e:
         logger.error(f"Error checking token blacklist: {str(e)}")

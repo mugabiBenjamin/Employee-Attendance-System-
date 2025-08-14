@@ -1,9 +1,7 @@
 from fastapi import FastAPI, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.config import settings
-from app.core.database import AsyncSessionLocal
-from app.core.enums import SystemAction
-from app.models.system_logs import SystemLogs
+from database import AsyncSessionLocal, startup
+from enums import SystemAction
+from models.system_logs import SystemLogs
 import logging
 import uuid
 
@@ -35,6 +33,23 @@ METHOD_FALLBACK = {
     "DELETE": SystemAction.DELETE,
 }
 
+# Route to table mapping for more accurate table_affected derivation
+ROUTE_TABLE_MAPPING = {
+    "/auth/token": "users",
+    "/auth/logout": "users",
+    "/attendance/clock_in": "attendance_records",
+    "/attendance/clock_out": "attendance_records",
+    "/users/password": "users",
+    "/users/me": "users",
+    "/users/export": "users",
+    "/users/import": "users",
+    "/users/roles": "user_roles",
+    "/reports": "attendance_records",
+    "/leave/approve": "leave_requests",
+    "/leave/reject": "leave_requests",
+    "/departments": "departments",
+}
+
 def determine_system_action(path: str, method: str) -> str | None:
     """Determine the system action based on request path and method.
     
@@ -56,9 +71,22 @@ def determine_system_action(path: str, method: str) -> str | None:
     
     return None
 
+def get_table_affected(path: str) -> str | None:
+    """Determine the affected table based on the route path."""
+    for route, table in ROUTE_TABLE_MAPPING.items():
+        if path.endswith(route):
+            return table
+    # Fallback to path-based derivation if no exact match
+    path_parts = path.split("/")
+    return path_parts[-2] if len(path_parts) > 2 else None
+
 def setup_middleware(app: FastAPI) -> None:
     """Setup middleware for logging system actions."""
-    
+    # Ensure database is initialized on app startup
+    @app.on_event("startup")
+    async def app_startup():
+        await startup()
+
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
         # Generate unique request_id
@@ -77,17 +105,24 @@ def setup_middleware(app: FastAPI) -> None:
             user = getattr(request.state, "user", None)
             user_id = user.user_id if user else None
             
+            # Safely get client IP
+            ip_address = None
+            try:
+                ip_address = str(request.client.host) if request.client else None
+            except Exception as e:
+                logger.warning(f"Failed to get client IP: {str(e)}")
+            
             # Log to system_logs table
             async with AsyncSessionLocal() as session:
                 try:
                     system_log = SystemLogs(
                         user_id=user_id,
                         action=action,
-                        table_affected=path.split("/")[-2] if len(path.split("/")) > 2 else None,
+                        table_affected=get_table_affected(path),
                         record_id=None,  # Could be extracted from path for specific endpoints
                         old_values=None,
                         new_values=None,
-                        ip_address=str(request.client.host) if request.client else None,
+                        ip_address=ip_address,
                         user_agent=request.headers.get("user-agent"),
                         request_id=request_id
                     )

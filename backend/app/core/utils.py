@@ -28,13 +28,22 @@ def calculate_overtime_hours(total_hours: float, standard_hours: float = 8.0) ->
     overtime = max(0, total_hours - standard_hours)
     return round(overtime, 2)
 
-def validate_file_upload(file: UploadFile, allowed_extensions: List[str] = settings.ALLOWED_EXTENSIONS, max_size: int = settings.MAX_FILE_SIZE) -> None:
-    """Validate file upload based on extension and size."""
+async def validate_file_upload(file: UploadFile, allowed_extensions: List[str] = settings.ALLOWED_EXTENSIONS, max_size: int = settings.MAX_FILE_SIZE) -> None:
+    """Validate file upload based on extension and size by reading the stream."""
     file_ext = file.filename.split('.')[-1].lower() if '.' in file.filename else ''
     if file_ext not in allowed_extensions:
         raise FileUploadError(detail=f"File extension '{file_ext}' not allowed. Allowed: {', '.join(allowed_extensions)}")
-    if file.size > max_size:
-        raise FileUploadError(detail=f"File size exceeds limit of {max_size / (1024 * 1024)} MB")
+    
+    # Check file size by reading stream
+    try:
+        content = await file.read()
+        file_size = len(content)
+        if file_size > max_size:
+            raise FileUploadError(detail=f"File size exceeds limit of {max_size / (1024 * 1024)} MB")
+        # Reset file pointer to start
+        await file.seek(0)
+    except Exception as e:
+        raise FileUploadError(detail=f"Failed to validate file size: {str(e)}")
 
 async def save_uploaded_file(file: UploadFile, upload_folder: str = settings.UPLOAD_FOLDER) -> str:
     """Save uploaded file to the specified folder and return its path."""

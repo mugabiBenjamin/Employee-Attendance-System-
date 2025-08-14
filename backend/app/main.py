@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 import logging
 from pythonjsonlogger import jsonlogger
 from app.core.config import settings
-from app.core.database import init_db, start_materialized_view_refresh, AsyncSessionLocal, initialize_engine_and_session, redis
+from app.core.database import init_db, start_background_refresh, shutdown
+from app.core.middleware import setup_middleware
 from app.api.v1.api import api_router
-from app.models.system_logs import SystemLogs
-from app.core.enums import SystemAction
-from ipaddress import ip_address
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.errors import _rate_limit_exceeded_handler
 
 # Configure JSON logging
 logger = logging.getLogger(__name__)
@@ -24,40 +25,19 @@ log_handler.setFormatter(formatter)
 logger.handlers = [log_handler]
 logger.setLevel(getattr(logging, settings.LOG_LEVEL))
 
-# Action mapping: (path_suffix, method) -> SystemAction
-ACTION_MAPPING = {
-    ("/auth/token", "POST"): SystemAction.LOGIN,
-    ("/auth/logout", "POST"): SystemAction.LOGOUT,
-    ("/attendance-records/clock", "POST"): SystemAction.CLOCK_IN,
-    ("/leave-requests/approve", "POST"): SystemAction.APPROVE_LEAVE,
-    ("/leave-requests/reject", "POST"): SystemAction.REJECT_LEAVE,
-}
-
-METHOD_FALLBACK = {
-    "POST": SystemAction.INSERT,
-    "PUT": SystemAction.UPDATE,
-    "DELETE": SystemAction.DELETE,
-}
-
-def determine_system_action(path: str, method: str) -> str | None:
-    for (path_suffix, mapped_method), action in ACTION_MAPPING.items():
-        if path.endswith(path_suffix) and method == mapped_method:
-            return action
-    return METHOD_FALLBACK.get(method)
+# Configure rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup: initializing database and views...", extra={"request_id": None})
-    await initialize_engine_and_session()  # Initialize engine, session, and Redis
     await init_db()
-    await start_materialized_view_refresh()
+    await start_background_refresh()
     logger.info("Startup complete.", extra={"request_id": None})
     yield
     logger.info("Application shutdown...", extra={"request_id": None})
-    if redis:
-        redis.close()
-        await redis.wait_closed()
-        logger.info("Redis connection closed", extra={"request_id": None})
+    await shutdown()
+    logger.info("Shutdown complete.", extra={"request_id": None})
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -66,7 +46,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add rate-limiting middleware and exception handler
+app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,49 +59,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def log_system_actions(request: Request, call_next):
-    import uuid
-    request_id = str(uuid.uuid4())
-    request.state.request_id = request_id
-    response = await call_next(request)
-    user = getattr(request.state, "user", None)
-    user_id = getattr(user, "user_id", None)
-
-    path = request.url.path
-    method = request.method
-    action = determine_system_action(path, method)
-
-    if action:
-        try:
-            async with AsyncSessionLocal() as session:
-                ip_addr = None
-                if request.client and request.client.host:
-                    try:
-                        ip_addr = str(ip_address(request.client.host))
-                    except ValueError:
-                        logger.warning(f"Invalid IP address: {request.client.host}", extra={"request_id": request_id})
-                        ip_addr = None
-
-                system_log = SystemLogs(
-                    user_id=user_id,
-                    action=action,
-                    table_affected=path.strip("/").split("/")[0],
-                    record_id=None,
-                    old_values=None,
-                    new_values=None,
-                    ip_address=ip_addr,
-                    user_agent=request.headers.get("user-agent"),
-                    timestamp=datetime.now(timezone.utc),
-                    request_id=request_id
-                )
-                session.add(system_log)
-                await session.commit()
-                logger.info(f"Logged action: {action} by user_id={user_id}", extra={"request_id": request_id})
-        except Exception as e:
-            logger.error(f"Failed to log action: {str(e)}", extra={"request_id": request_id})
-
-    return response
+# Setup system action logging middleware
+setup_middleware(app)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
