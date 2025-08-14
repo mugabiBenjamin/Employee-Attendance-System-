@@ -8,19 +8,20 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.employee_emergency_contact import EmployeeEmergencyContactCreate, EmployeeEmergencyContactUpdate, EmployeeEmergencyContactOut
 from app.core.config import settings
-from app.core.enums import SystemAction
-from app.core.exceptions import UserNotFoundError
+from app.core.enums import SystemAction, Permission
+from app.core.exceptions import UserNotFoundError, ResourceNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def create_emergency_contact(
-    db: AsyncSession,
     contact: EmployeeEmergencyContactCreate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_emergency_contact"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> EmployeeEmergencyContactOut:
     """
     Create a new emergency contact for an employee with validation and logging.
@@ -34,11 +35,11 @@ async def create_emergency_contact(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="Employee not found")
+            raise UserNotFoundError(user_id=contact.employee_id)
 
         # Create emergency contact
         db_contact = EmployeeEmergencyContacts(
-            user_id=contact.employee_id,  # Map employee_id to user_id
+            user_id=contact.employee_id,
             **EmployeeEmergencyContactCreate(**contact.model_dump(exclude={'employee_id'})).model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
@@ -74,9 +75,9 @@ async def create_emergency_contact(
         )
 
 async def get_emergency_contact_by_id(
-    db: AsyncSession,
     contact_id: int,
-    _: str = Depends(check_permission("view_emergency_contact"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> Optional[EmployeeEmergencyContactOut]:
     """
     Retrieve an emergency contact by ID.
@@ -91,10 +92,7 @@ async def get_emergency_contact_by_id(
         contact = result.scalar_one_or_none()
 
         if not contact:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Emergency contact not found"
-            )
+            raise ResourceNotFoundError(resource="Emergency contact", identifier=f"ID {contact_id}")
 
         return EmployeeEmergencyContactOut.model_validate(contact)
 
@@ -108,11 +106,11 @@ async def get_emergency_contact_by_id(
         )
 
 async def get_emergency_contacts_by_employee(
-    db: AsyncSession,
     employee_id: int,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_emergency_contact"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> List[EmployeeEmergencyContactOut]:
     """
     Retrieve a list of emergency contacts for an employee with pagination.
@@ -125,7 +123,7 @@ async def get_emergency_contacts_by_employee(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="Employee not found")
+            raise UserNotFoundError(user_id=employee_id)
 
         query = select(EmployeeEmergencyContacts).where(
             EmployeeEmergencyContacts.user_id == employee_id,
@@ -148,11 +146,11 @@ async def get_emergency_contacts_by_employee(
         )
 
 async def update_emergency_contact(
-    db: AsyncSession,
     contact_id: int,
     contact_update: EmployeeEmergencyContactUpdate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("update_emergency_contact"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> EmployeeEmergencyContactOut:
     """
     Update an emergency contact with validation and logging.
@@ -168,10 +166,7 @@ async def update_emergency_contact(
         db_contact = result.scalar_one_or_none()
 
         if not db_contact:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Emergency contact not found"
-            )
+            raise ResourceNotFoundError(resource="Emergency contact", identifier=f"ID {contact_id}")
 
         # Store old values for logging
         old_values = db_contact.__dict__.copy()
@@ -213,10 +208,10 @@ async def update_emergency_contact(
         )
 
 async def delete_emergency_contact(
-    db: AsyncSession,
     contact_id: int,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("delete_emergency_contact"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> None:
     """
     Soft delete an emergency contact with logging.
@@ -231,10 +226,7 @@ async def delete_emergency_contact(
         db_contact = result.scalar_one_or_none()
 
         if not db_contact:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Emergency contact not found"
-            )
+            raise ResourceNotFoundError(resource="Emergency contact", identifier=f"ID {contact_id}")
 
         db_contact.is_active = False
         db_contact.deleted_at = datetime.now(timezone.utc)

@@ -1,15 +1,14 @@
 from typing import List, Optional
-from fastapi import HTTPException, Request, status, Depends
+from fastapi import HTTPException, status, Depends, Request, APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict
 from app.models.system_logs import SystemLogs
 from app.models.users import Users
 from app.schemas.system_log import SystemLogCreate, SystemLogOut
 from app.core.config import settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserNotFoundError
+from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -21,7 +20,13 @@ class SystemLogService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_system_log(self, log: SystemLogCreate, current_user: Optional[Users] = None, request_id: Optional[str] = None) -> SystemLogOut:
+    async def create_system_log(
+        self,
+        log: SystemLogCreate,
+        current_user: Optional[Users] = None,
+        request: Optional[Request] = None,
+        request_id: Optional[str] = None
+    ) -> SystemLogOut:
         """
         Create a system log entry with validation and JSON logging.
         """
@@ -35,14 +40,11 @@ class SystemLogService:
                 )
                 result = await self.db.execute(query)
                 if not result.scalar_one_or_none():
-                    raise UserNotFoundError(detail="User not found")
+                    raise UserNotFoundError(user_id=log.user_id)
 
             valid_actions = [action.value for action in SystemAction]
             if log.action.value not in valid_actions:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid action. Must be one of: {', '.join(valid_actions)}"
-                )
+                raise ValidationError(detail=f"Invalid action. Must be one of: {', '.join(valid_actions)}")
 
             # Create system log
             db_log = SystemLogs(
@@ -52,8 +54,8 @@ class SystemLogService:
                 record_id=log.record_id,
                 old_values=log.old_values,
                 new_values=log.new_values,
-                ip_address=log.ip_address,
-                user_agent=log.user_agent,
+                ip_address=request.client.host if request else log.ip_address,
+                user_agent=request.headers.get("user-agent") if request else log.user_agent,
                 request_id=log.request_id or request_id,
                 timestamp=datetime.now(timezone.utc),
                 is_active=True
@@ -67,8 +69,11 @@ class SystemLogService:
 
         except HTTPException:
             raise
+        except DatabaseError as e:
+            logger.error(f"Database error creating system log: {str(e)}", extra={"request_id": log.request_id or request_id})
+            raise
         except Exception as e:
-            logger.error(f"Error creating system log: {str(e)}", extra={"request_id": log.request_id or request_id})
+            logger.error(f"Unexpected error creating system log: {str(e)}", extra={"request_id": log.request_id or request_id})
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error creating system log"
@@ -87,18 +92,18 @@ class SystemLogService:
             system_log = result.scalar_one_or_none()
 
             if not system_log:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="System log not found"
-                )
+                raise ResourceNotFoundError(resource="System log", identifier=f"ID {log_id}")
 
             logger.info(f"Retrieved system log, log_id: {log_id}", extra={"request_id": request_id})
             return SystemLogOut.model_validate(system_log)
 
-        except HTTPException:
+        except ResourceNotFoundError:
+            raise
+        except DatabaseError as e:
+            logger.error(f"Database error retrieving system log {log_id}: {str(e)}", extra={"request_id": request_id})
             raise
         except Exception as e:
-            logger.error(f"Error retrieving system log {log_id}: {str(e)}", extra={"request_id": request_id})
+            logger.error(f"Unexpected error retrieving system log {log_id}: {str(e)}", extra={"request_id": request_id})
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error retrieving system log"
@@ -118,8 +123,11 @@ class SystemLogService:
             logger.info(f"Retrieved {len(system_logs)} system logs", extra={"request_id": request_id})
             return [SystemLogOut.model_validate(log) for log in system_logs]
 
+        except DatabaseError as e:
+            logger.error(f"Database error retrieving system logs: {str(e)}", extra={"request_id": request_id})
+            raise
         except Exception as e:
-            logger.error(f"Error retrieving system logs: {str(e)}", extra={"request_id": request_id})
+            logger.error(f"Unexpected error retrieving system logs: {str(e)}", extra={"request_id": request_id})
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error retrieving system logs"
@@ -137,7 +145,7 @@ class SystemLogService:
             )
             result = await self.db.execute(query)
             if not result.scalar_one_or_none():
-                raise UserNotFoundError(detail="User not found")
+                raise UserNotFoundError(user_id=user_id)
 
             query = select(SystemLogs).where(
                 SystemLogs.user_id == user_id,
@@ -151,8 +159,11 @@ class SystemLogService:
 
         except HTTPException:
             raise
+        except DatabaseError as e:
+            logger.error(f"Database error retrieving system logs for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
+            raise
         except Exception as e:
-            logger.error(f"Error retrieving system logs for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
+            logger.error(f"Unexpected error retrieving system logs for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error retrieving system logs for user"
@@ -163,8 +174,6 @@ def get_system_log_service(db: AsyncSession = Depends(get_db)) -> SystemLogServi
     return SystemLogService(db)
 
 # API endpoints for system logs
-from fastapi import APIRouter
-
 router = APIRouter(prefix="/system-logs", tags=["System Logs"])
 
 @router.post("/", response_model=SystemLogOut, status_code=status.HTTP_201_CREATED)
@@ -172,21 +181,22 @@ async def create_log(
     log: SystemLogCreate,
     service: SystemLogService = Depends(get_system_log_service),
     current_user: Users = Depends(get_current_user),
-    request: Request = None
+    request: Request = Depends(),
+    _: bool = Depends(require_permissions([Permission.CREATE_LOGS]))
 ):
     """Create a system log entry."""
-    request_id = getattr(request.state, "request_id", None) if request else None
-    return await service.create_system_log(log, current_user, request_id)
+    request_id = getattr(request.state, "request_id", None)
+    return await service.create_system_log(log, current_user, request, request_id)
 
 @router.get("/{log_id}", response_model=SystemLogOut)
 @require_permissions([Permission.VIEW_LOGS])
 async def get_log(
     log_id: int,
     service: SystemLogService = Depends(get_system_log_service),
-    request: Request = None
+    request: Request = Depends()
 ):
     """Retrieve a system log by ID. Requires VIEW_LOGS permission."""
-    request_id = getattr(request.state, "request_id", None) if request else None
+    request_id = getattr(request.state, "request_id", None)
     return await service.get_system_log_by_id(log_id, request_id)
 
 @router.get("/", response_model=List[SystemLogOut])
@@ -195,10 +205,10 @@ async def list_logs(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     service: SystemLogService = Depends(get_system_log_service),
-    request: Request = None
+    request: Request = Depends()
 ):
     """List system logs with pagination. Requires VIEW_LOGS permission."""
-    request_id = getattr(request.state, "request_id", None) if request else None
+    request_id = getattr(request.state, "request_id", None)
     return await service.get_system_logs(skip, limit, request_id)
 
 @router.get("/user/{user_id}", response_model=List[SystemLogOut])
@@ -208,8 +218,8 @@ async def list_user_logs(
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
     service: SystemLogService = Depends(get_system_log_service),
-    request: Request = None
+    request: Request = Depends()
 ):
     """List system logs for a specific user. Requires VIEW_LOGS permission."""
-    request_id = getattr(request.state, "request_id", None) if request else None
+    request_id = getattr(request.state, "request_id", None)
     return await service.get_system_logs_by_user(user_id, skip, limit, request_id)

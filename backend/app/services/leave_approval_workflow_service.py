@@ -12,19 +12,21 @@ from app.schemas.leave_approval_workflow import LeaveApprovalWorkflowCreate, Lea
 from app.core.config import settings
 from app.core.enums import SystemAction, CorrectionStatus, Permission
 from app.core.mail import send_email
-from app.core.exceptions import UserNotFoundError, ValidationError
+from app.core.exceptions import UserNotFoundError, ValidationError, ResourceNotFoundError, DatabaseError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission, require_permissions
+from app.core.permissions import require_permissions
+from app.core.database import get_db
+from app.services.user_role_service import get_user_role_service
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def approve_or_reject_leave(
-    db: AsyncSession,
     approval: LeaveApprovalWorkflowCreate,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(require_permissions([Permission.APPROVE_LEAVE]))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.APPROVE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
     """
     Approve or reject a leave request with validation, logging, and email notification.
@@ -39,10 +41,7 @@ async def approve_or_reject_leave(
         result = await db.execute(query)
         leave_request = result.scalar_one_or_none()
         if not leave_request:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave request not found"
-            )
+            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {approval.request_id}")
 
         # Validate approver
         query = select(Users).where(
@@ -53,7 +52,7 @@ async def approve_or_reject_leave(
         result = await db.execute(query)
         approver = result.scalar_one_or_none()
         if not approver:
-            raise UserNotFoundError(detail="Approver not found")
+            raise UserNotFoundError(user_id=approval.approver_id)
 
         # Check if approver is in the employee's hierarchy
         query = select(EmployeeHierarchy).where(
@@ -67,7 +66,6 @@ async def approve_or_reject_leave(
             raise ValidationError(detail="Approver is not in the employee's hierarchy")
 
         # Validate approver has APPROVE_LEAVE permission
-        from app.services.user_role_service import UserRoleService, get_user_role_service
         user_role_service = get_user_role_service(db)
         user_permissions = await user_role_service.get_user_permissions(approval.approver_id)
         if Permission.APPROVE_LEAVE not in user_permissions:
@@ -102,8 +100,8 @@ async def approve_or_reject_leave(
             record_id=db_approval.workflow_id,
             old_values=None,
             new_values=db_approval.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Added user_agent
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -125,20 +123,20 @@ async def approve_or_reject_leave(
 
     except HTTPException:
         raise
-    except ValidationError as e:
-        logger.error(f"Validation error processing leave approval for leave_id {approval.request_id}: {str(e)}")
+    except DatabaseError as e:
+        logger.error(f"Database error processing leave approval for leave_id {approval.request_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error processing leave approval for leave_id {approval.request_id}: {str(e)}")
+        logger.error(f"Unexpected error processing leave approval for leave_id {approval.request_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing leave approval"
         )
 
 async def get_leave_approval_by_id(
-    db: AsyncSession,
     approval_id: int,
-    _: str = Depends(check_permission("view_leave_approval"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> Optional[LeaveApprovalWorkflowOut]:
     """
     Retrieve a leave approval by ID.
@@ -153,28 +151,28 @@ async def get_leave_approval_by_id(
         approval = result.scalar_one_or_none()
 
         if not approval:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave approval not found"
-            )
+            raise ResourceNotFoundError(resource="Leave approval", identifier=f"ID {approval_id}")
 
         return LeaveApprovalWorkflowOut.model_validate(approval)
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving leave approval {approval_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving leave approval {approval_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving leave approval {approval_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving leave approval"
         )
 
 async def get_leave_approvals_by_request(
-    db: AsyncSession,
     request_id: int,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_leave_approval"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> List[LeaveApprovalWorkflowOut]:
     """
     Retrieve a list of approvals for a leave request with pagination.
@@ -187,10 +185,7 @@ async def get_leave_approvals_by_request(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave request not found"
-            )
+            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {request_id}")
 
         query = select(LeaveApprovalWorkflow).where(
             LeaveApprovalWorkflow.leave_id == request_id,
@@ -203,10 +198,13 @@ async def get_leave_approvals_by_request(
         logger.info(f"Retrieved {len(approvals)} leave approvals for leave_id: {request_id}")
         return [LeaveApprovalWorkflowOut.model_validate(approval) for approval in approvals]
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving leave approvals for leave_id {request_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving leave approvals for leave_id {request_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving leave approvals for leave_id {request_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving leave approvals"

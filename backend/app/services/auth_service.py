@@ -8,9 +8,10 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.core.security import verify_password, create_access_token, create_refresh_token, get_current_user
 from app.core.config import settings
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.exceptions import AuthenticationError
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,10 +30,9 @@ class TokenResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 async def login_user(
-    db: AsyncSession,
-    credentials: LoginCredentials,
-    request: Request,
-    ip_address: str = Depends(check_permission("login"))
+    db: AsyncSession = Depends(get_db),
+    credentials: LoginCredentials = Depends(),
+    request: Request = None
 ) -> TokenResponse:
     """
     Authenticate user and generate access/refresh tokens, logging the login action.
@@ -62,7 +62,7 @@ async def login_user(
             record_id=None,
             old_values=None,
             new_values=None,
-            ip_address=ip_address,
+            ip_address=request.client.host,
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
@@ -82,10 +82,10 @@ async def login_user(
         )
 
 async def logout_user(
-    db: AsyncSession,
-    request: Request,
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
     user: Users = Depends(get_current_user),
-    ip_address: str = Depends(check_permission("logout"))
+    _: bool = Depends(require_permissions([Permission.LOGOUT]))
 ) -> None:
     """
     Log user logout action.
@@ -99,7 +99,7 @@ async def logout_user(
             record_id=None,
             old_values=None,
             new_values=None,
-            ip_address=ip_address,
+            ip_address=request.client.host,
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
@@ -116,10 +116,10 @@ async def logout_user(
         )
 
 async def refresh_token(
-    db: AsyncSession,
-    refresh_token: str,
-    request: Request,
-    ip_address: str = Depends(check_permission("refresh_token"))
+    db: AsyncSession = Depends(get_db),
+    refresh_token: str = Depends(),
+    request: Request = None,
+    _: bool = Depends(require_permissions([Permission.REFRESH_TOKEN]))
 ) -> TokenResponse:
     """
     Refresh access token using a valid refresh token.
@@ -157,7 +157,7 @@ async def refresh_token(
             record_id=None,
             old_values=None,
             new_values=None,
-            ip_address=ip_address,
+            ip_address=request.client.host,
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )

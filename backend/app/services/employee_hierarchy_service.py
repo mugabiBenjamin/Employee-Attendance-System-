@@ -8,19 +8,20 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.employee_hierarchy import EmployeeHierarchyCreate, EmployeeHierarchyUpdate, EmployeeHierarchyOut
 from app.core.config import settings
-from app.core.enums import SystemAction
-from app.core.exceptions import UserNotFoundError
+from app.core.enums import SystemAction, Permission
+from app.core.exceptions import UserNotFoundError, EmployeeHierarchyError, ResourceNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def create_employee_hierarchy(
-    db: AsyncSession,
     hierarchy: EmployeeHierarchyCreate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_employee_hierarchy"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> EmployeeHierarchyOut:
     """
     Create a new employee-manager relationship with validation and logging.
@@ -45,17 +46,11 @@ async def create_employee_hierarchy(
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Employee already has a manager assigned"
-            )
+            raise EmployeeHierarchyError(detail="Employee already has a manager assigned")
 
         # Prevent self-reporting
         if hierarchy.employee_id == hierarchy.manager_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Employee cannot be their own manager"
-            )
+            raise EmployeeHierarchyError(detail="Employee cannot be their own manager")
 
         # Create hierarchy
         db_hierarchy = EmployeeHierarchy(
@@ -95,9 +90,9 @@ async def create_employee_hierarchy(
         )
 
 async def get_employee_hierarchy_by_id(
-    db: AsyncSession,
     hierarchy_id: int,
-    _: str = Depends(check_permission("view_employee_hierarchy"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> Optional[EmployeeHierarchyOut]:
     """
     Retrieve an employee-manager relationship by ID.
@@ -112,10 +107,7 @@ async def get_employee_hierarchy_by_id(
         hierarchy = result.scalar_one_or_none()
 
         if not hierarchy:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee hierarchy not found"
-            )
+            raise ResourceNotFoundError(resource="Employee hierarchy", identifier=f"ID {hierarchy_id}")
 
         return EmployeeHierarchyOut.model_validate(hierarchy)
 
@@ -129,10 +121,10 @@ async def get_employee_hierarchy_by_id(
         )
 
 async def get_employee_hierarchies(
-    db: AsyncSession,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_employee_hierarchy"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> List[EmployeeHierarchyOut]:
     """
     Retrieve a list of active employee-manager relationships with pagination.
@@ -156,11 +148,11 @@ async def get_employee_hierarchies(
         )
 
 async def update_employee_hierarchy(
-    db: AsyncSession,
     hierarchy_id: int,
     hierarchy_update: EmployeeHierarchyUpdate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("update_employee_hierarchy"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> EmployeeHierarchyOut:
     """
     Update an employee-manager relationship with validation and logging.
@@ -176,10 +168,7 @@ async def update_employee_hierarchy(
         db_hierarchy = result.scalar_one_or_none()
 
         if not db_hierarchy:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee hierarchy not found"
-            )
+            raise ResourceNotFoundError(resource="Employee hierarchy", identifier=f"ID {hierarchy_id}")
 
         # Validate manager_id if updated
         update_data = hierarchy_update.model_dump(exclude_none=True)
@@ -191,14 +180,11 @@ async def update_employee_hierarchy(
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
-                raise UserNotFoundError(detail="Manager not found")
+                raise UserNotFoundError(user_id=update_data["manager_id"])
 
             # Prevent self-reporting
             if update_data["manager_id"] == db_hierarchy.employee_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Employee cannot be their own manager"
-                )
+                raise EmployeeHierarchyError(detail="Employee cannot be their own manager")
 
         # Store old values for logging
         old_values = db_hierarchy.__dict__.copy()
@@ -239,10 +225,10 @@ async def update_employee_hierarchy(
         )
 
 async def delete_employee_hierarchy(
-    db: AsyncSession,
     hierarchy_id: int,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("delete_employee_hierarchy"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
 ) -> None:
     """
     Soft delete an employee-manager relationship with logging.
@@ -257,10 +243,7 @@ async def delete_employee_hierarchy(
         db_hierarchy = result.scalar_one_or_none()
 
         if not db_hierarchy:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee hierarchy not found"
-            )
+            raise ResourceNotFoundError(resource="Employee hierarchy", identifier=f"ID {hierarchy_id}")
 
         db_hierarchy.is_active = False
         db_hierarchy.deleted_at = datetime.now(timezone.utc)

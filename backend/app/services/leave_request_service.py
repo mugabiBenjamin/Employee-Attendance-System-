@@ -10,20 +10,22 @@ from app.models.system_logs import SystemLogs
 from app.models.leave_balances import LeaveBalances
 from app.schemas.leave_request import LeaveRequestCreate, LeaveRequestOut
 from app.core.config import settings
-from app.core.enums import LeaveRequestStatus, SystemAction
-from app.core.mail import EmailSchema, send_email, get_user_email
+from app.core.enums import LeaveRequestStatus, SystemAction, Permission
+from app.core.mail import send_email
+from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def create_leave_request(
-    db: AsyncSession,
     leave_request: LeaveRequestCreate,
-    request: Request,  # Added Request dependency
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_leave_request"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.CREATE_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """
     Create a new leave request with validation, logging, and email notification.
@@ -31,10 +33,7 @@ async def create_leave_request(
     try:
         # Validate dates
         if leave_request.start_date >= leave_request.end_date:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Start date must be before end date"
-            )
+            raise ValidationError(detail="Start date must be before end date")
 
         # Check for overlapping leave requests
         query = select(LeaveRequests).where(
@@ -47,10 +46,7 @@ async def create_leave_request(
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Overlapping leave request exists"
-            )
+            raise ValidationError(detail="Overlapping leave request exists")
 
         # Validate leave balance
         query = select(LeaveBalances).where(
@@ -62,18 +58,12 @@ async def create_leave_request(
         result = await db.execute(query)
         leave_balance = result.scalar_one_or_none()
         if not leave_balance:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No leave balance available for this leave type"
-            )
+            raise ValidationError(detail="No leave balance available for this leave type")
 
         days_requested = (leave_request.end_date.date() - leave_request.start_date.date()).days + 1
         available_days = leave_balance.allocated_days - leave_balance.used_days + leave_balance.carried_forward
         if days_requested > available_days:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insufficient leave balance"
-            )
+            raise ValidationError(detail="Insufficient leave balance")
 
         # Create leave request
         db_leave_request = LeaveRequests(
@@ -99,8 +89,8 @@ async def create_leave_request(
             record_id=db_leave_request.leave_id,
             old_values=None,
             new_values=db_leave_request.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Added user_agent
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -129,18 +119,21 @@ async def create_leave_request(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error creating leave request for user_id {current_user.user_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error creating leave request for user_id {current_user.user_id}: {str(e)}")
+        logger.error(f"Unexpected error creating leave request for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating leave request"
         )
 
 async def get_leave_request_by_id(
-    db: AsyncSession,
     request_id: int,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("view_leave_request"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST]))
 ) -> Optional[LeaveRequestOut]:
     """
     Retrieve a leave request by ID for the current user or their subordinates.
@@ -162,29 +155,29 @@ async def get_leave_request_by_id(
         leave_request = result.scalar_one_or_none()
 
         if not leave_request:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave request not found or not authorized"
-            )
+            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {request_id} or not authorized")
 
         logger.info(f"Retrieved leave request, leave_id: {request_id}, user_id: {current_user.user_id}")
         return LeaveRequestOut.model_validate(leave_request)
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving leave request {request_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving leave request {request_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving leave request {request_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving leave request"
         )
 
 async def get_user_leave_requests(
-    db: AsyncSession,
     current_user: Users = Depends(get_current_user),
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_leave_request"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST]))
 ) -> List[LeaveRequestOut]:
     """
     Retrieve a list of leave requests for the current user or their subordinates with pagination.
@@ -207,21 +200,24 @@ async def get_user_leave_requests(
         logger.info(f"Retrieved {len(leave_requests)} leave requests for user_id: {current_user.user_id}")
         return [LeaveRequestOut.model_validate(req) for req in leave_requests]
 
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving leave requests for user_id {current_user.user_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving leave requests for user_id {current_user.user_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving leave requests for user_id {current_user.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving leave requests"
         )
 
 async def approve_leave(
-    db: AsyncSession,
     leave_id: int,
     status: LeaveRequestStatus,
     comments: Optional[str],
-    request: Request,  # Added Request dependency
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("approve_leave"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.APPROVE_LEAVE]))
 ) -> LeaveRequestOut:
     """
     Approve or reject a leave request, update balance, and notify user.
@@ -236,10 +232,7 @@ async def approve_leave(
         result = await db.execute(query)
         leave_request = result.scalar_one_or_none()
         if not leave_request:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Leave request not found"
-            )
+            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {leave_id}")
 
         # Check if the user is authorized to approve (manager of the requester)
         query = select(EmployeeHierarchy).where(
@@ -250,10 +243,7 @@ async def approve_leave(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to approve this leave request"
-            )
+            raise ValidationError(detail="Not authorized to approve this leave request")
 
         # Update leave request status
         old_values = leave_request.__dict__.copy()
@@ -274,10 +264,7 @@ async def approve_leave(
             result = await db.execute(query)
             leave_balance = result.scalar_one_or_none()
             if not leave_balance:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No leave balance available for this leave type"
-                )
+                raise ValidationError(detail="No leave balance available for this leave type")
             leave_balance.used_days += leave_request.days_requested
             leave_balance.updated_at = datetime.now(timezone.utc)
             db.add(leave_balance)
@@ -294,38 +281,44 @@ async def approve_leave(
             record_id=leave_request.leave_id,
             old_values=old_values,
             new_values=leave_request.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Added user_agent
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
         await db.commit()
 
         # Send email notification to user
-        email_data = {
-            "to_email": await get_user_email(leave_request.user_id, db),
-            "subject": f"Leave Request {status.value.capitalize()} (ID: {leave_request.leave_id})",
-            "body": (
-                f"Dear User,\n\n"
-                f"Your leave request (ID: {leave_request.leave_id}) has been {status.value}.\n"
-                f"Details:\n"
-                f"Leave Type: {leave_request.leave_type.capitalize()}\n"
-                f"Start Date: {leave_request.start_date.date()}\n"
-                f"End Date: {leave_request.end_date.date()}\n"
-                f"Comments: {comments or 'None'}\n\n"
-                f"Please contact HR for any questions.\n\n"
-                f"Best regards,\nEmployee Management System"
+        query = select(Users).where(Users.user_id == leave_request.user_id)
+        result = await db.execute(query)
+        employee = result.scalar_one_or_none()
+        if employee:
+            await send_email(
+                to_email=employee.email,
+                subject=f"Leave Request {status.value.capitalize()} (ID: {leave_request.leave_id})",
+                body=(
+                    f"Dear {employee.first_name},\n\n"
+                    f"Your leave request (ID: {leave_request.leave_id}) has been {status.value.lower()}.\n"
+                    f"Details:\n"
+                    f"Leave Type: {leave_request.leave_type.capitalize()}\n"
+                    f"Start Date: {leave_request.start_date.date()}\n"
+                    f"End Date: {leave_request.end_date.date()}\n"
+                    f"Comments: {comments or 'None'}\n\n"
+                    f"Please contact HR for any questions.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                )
             )
-        }
-        await send_email(EmailSchema(**email_data))
 
         logger.info(f"Leave request {leave_id} {status.value} by user_id: {current_user.user_id}")
         return LeaveRequestOut.model_validate(leave_request)
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error approving leave request {leave_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error approving leave request {leave_id}: {str(e)}")
+        logger.error(f"Unexpected error approving leave request {leave_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing leave request"

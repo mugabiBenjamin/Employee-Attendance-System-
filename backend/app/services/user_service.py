@@ -2,31 +2,31 @@ from typing import List, Optional
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
 from app.models.users import Users
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.security import get_password_hash
 from app.core.enums import SystemAction, Permission, EmployeeType
+from app.core.exceptions import ValidationError, DatabaseError, ResourceNotFoundError, ResourceConflictError, BusinessLogicError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ValidationError, DatabaseError, ResourceNotFoundError, ResourceConflictError, BusinessLogicError
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def create_user(
-    db: AsyncSession,
     user: UserCreate,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(require_permissions([Permission.CREATE_USER])),
+    db: AsyncSession = Depends(get_db),
     log_service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_USER]))
 ) -> UserOut:
     """
     Create a new user with validation and logging. Requires CREATE_USER permission.
@@ -85,7 +85,7 @@ async def create_user(
             ip_address=request.client.host,
             user_agent=request.headers.get("user-agent")
         )
-        await log_service.create_system_log(log, current_user)
+        await log_service.create_system_log(log, current_user, request)
 
         logger.info(f"User created, user_id: {db_user.user_id}, email: {db_user.email}")
         return UserOut.model_validate(db_user)
@@ -96,9 +96,9 @@ async def create_user(
     except ResourceConflictError as e:
         logger.error(f"Conflict error in create_user: {str(e)}")
         raise
-    except SQLAlchemyError as e:
+    except DatabaseError as e:
         logger.error(f"Database error in create_user: {str(e)}")
-        raise DatabaseError(message="Database error creating user", original_error=e)
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in create_user: {str(e)}")
         raise HTTPException(
@@ -107,10 +107,10 @@ async def create_user(
         )
 
 async def get_user_by_id(
-    db: AsyncSession,
     user_id: int,
-    _: str = Depends(require_permissions([Permission.VIEW_USER])),
-    settings: Settings = Depends(get_settings)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> Optional[UserOut]:
     """
     Retrieve a user by ID. Requires VIEW_USER permission.
@@ -138,9 +138,9 @@ async def get_user_by_id(
     except ResourceNotFoundError as e:
         logger.error(f"Resource not found in get_user_by_id for user_id {user_id}: {str(e)}")
         raise
-    except SQLAlchemyError as e:
+    except DatabaseError as e:
         logger.error(f"Database error in get_user_by_id for user_id {user_id}: {str(e)}")
-        raise DatabaseError(message="Database error retrieving user", original_error=e)
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in get_user_by_id for user_id {user_id}: {str(e)}")
         raise HTTPException(
@@ -149,23 +149,24 @@ async def get_user_by_id(
         )
 
 async def get_users(
-    db: AsyncSession,
     skip: int = 0,
-    limit: int = 50,
-    _: str = Depends(require_permissions([Permission.VIEW_USER])),
-    settings: Settings = Depends(get_settings)
+    limit: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> List[UserOut]:
     """
     Retrieve a list of active users with pagination. Requires VIEW_USER permission.
     """
     try:
-        if skip < 0 or limit <= 0:
+        if skip < 0 or (limit is not None and limit <= 0):
             raise ValidationError(detail="Invalid pagination parameters")
 
+        limit = limit or settings.DEFAULT_PAGE_SIZE
         query = select(Users).where(
             Users.is_active == True,
             Users.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
+        ).offset(skip).limit(limit)
         result = await db.execute(query)
         users = result.scalars().all()
 
@@ -175,9 +176,9 @@ async def get_users(
     except ValidationError as e:
         logger.error(f"Validation error in get_users: {str(e)}")
         raise
-    except SQLAlchemyError as e:
+    except DatabaseError as e:
         logger.error(f"Database error in get_users: {str(e)}")
-        raise DatabaseError(message="Database error retrieving users", original_error=e)
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in get_users: {str(e)}")
         raise HTTPException(
@@ -186,14 +187,14 @@ async def get_users(
         )
 
 async def update_user(
-    db: AsyncSession,
     user_id: int,
     user_update: UserUpdate,
-    request: Request,  # Added Request dependency
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(require_permissions([Permission.UPDATE_USER])),
+    db: AsyncSession = Depends(get_db),
     log_service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_USER]))
 ) -> UserOut:
     """
     Update a user with validation and logging. Requires UPDATE_USER permission.
@@ -253,10 +254,10 @@ async def update_user(
             record_id=user_id,
             old_values=old_values,
             new_values=db_user.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent")  # Added user_agent
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent")
         )
-        await log_service.create_system_log(log, current_user)
+        await log_service.create_system_log(log, current_user, request)
 
         logger.info(f"User updated, user_id: {user_id}")
         return UserOut.model_validate(db_user)
@@ -270,9 +271,9 @@ async def update_user(
     except ResourceConflictError as e:
         logger.error(f"Conflict error in update_user for user_id {user_id}: {str(e)}")
         raise
-    except SQLAlchemyError as e:
+    except DatabaseError as e:
         logger.error(f"Database error in update_user for user_id {user_id}: {str(e)}")
-        raise DatabaseError(message="Database error updating user", original_error=e)
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in update_user for user_id {user_id}: {str(e)}")
         raise HTTPException(
@@ -281,13 +282,13 @@ async def update_user(
         )
 
 async def delete_user(
-    db: AsyncSession,
     user_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(require_permissions([Permission.DELETE_USER])),
+    db: AsyncSession = Depends(get_db),
     log_service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_USER]))
 ) -> None:
     """
     Soft delete a user with validation and logging. Requires DELETE_USER permission.
@@ -328,10 +329,10 @@ async def delete_user(
             record_id=user_id,
             old_values=db_user.__dict__,
             new_values=None,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent")  # Added user_agent
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent")
         )
-        await log_service.create_system_log(log, current_user)
+        await log_service.create_system_log(log, current_user, request)
 
         logger.info(f"User soft deleted, user_id: {user_id}")
 
@@ -344,9 +345,9 @@ async def delete_user(
     except BusinessLogicError as e:
         logger.error(f"Business logic error in delete_user for user_id {user_id}: {str(e)}")
         raise
-    except SQLAlchemyError as e:
+    except DatabaseError as e:
         logger.error(f"Database error in delete_user for user_id {user_id}: {str(e)}")
-        raise DatabaseError(message="Database error deleting user", original_error=e)
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in delete_user for user_id {user_id}: {str(e)}")
         raise HTTPException(

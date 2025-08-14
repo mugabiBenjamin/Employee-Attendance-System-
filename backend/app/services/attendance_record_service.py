@@ -9,11 +9,11 @@ from app.models.system_logs import SystemLogs
 from app.schemas.attendance_record import AttendanceRecordCreate, AttendanceRecordOut
 from app.core.config import settings
 from app.core.utils import calculate_total_hours, calculate_overtime_hours
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
-from app.core.exceptions import ValidationError, ResourceNotFoundError, DatabaseError, AttendanceError, SQLAlchemyError
+from app.core.exceptions import ValidationError, ResourceNotFoundError, DatabaseError, AttendanceError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,150 +21,150 @@ logger = logging.getLogger(__name__)
 async def clock_in(
     request: Request,
     user: Users = Depends(get_current_user),
-    ip_address: str = Depends(check_permission("clock_in")),
-    location: Optional[str] = None
+    location: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.CLOCK_IN]))
 ) -> AttendanceRecordOut:
     """
     Handle employee clock-in with one-click functionality, validation, and logging.
     Invalidates attendance history cache for the user.
     """
-    async with get_db() as db:
-        try:
-            current_date = datetime.now(timezone.utc).date()
-            # Check for existing active clock-in for today
-            query = select(AttendanceRecords).where(
-                AttendanceRecords.user_id == user.user_id,
-                AttendanceRecords.date == current_date,
-                AttendanceRecords.clock_out_time == None,
-                AttendanceRecords.is_active == True
-            )
-            result = await db.execute(query)
-            if result.scalar_one_or_none():
-                raise AttendanceError(detail="User already clocked in for today")
+    try:
+        current_date = datetime.now(timezone.utc).date()
+        # Check for existing active clock-in for today
+        query = select(AttendanceRecords).where(
+            AttendanceRecords.user_id == user.user_id,
+            AttendanceRecords.date == current_date,
+            AttendanceRecords.clock_out_time == None,
+            AttendanceRecords.is_active == True
+        )
+        result = await db.execute(query)
+        if result.scalar_one_or_none():
+            raise AttendanceError(detail="User already clocked in for today")
 
-            # Create attendance record
-            db_record = AttendanceRecords(
-                **AttendanceRecordCreate(
-                    user_id=user.user_id,
-                    clock_in_time=datetime.now(timezone.utc),
-                    ip_address=ip_address,
-                    location=location
-                ).model_dump(),
-                date=current_date,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc)
-            )
-            db.add(db_record)
-            await db.commit()
-            await db.refresh(db_record)
-
-            # Log action
-            system_log = SystemLogs(
+        # Create attendance record
+        db_record = AttendanceRecords(
+            **AttendanceRecordCreate(
                 user_id=user.user_id,
-                action=SystemAction.CLOCK_IN,
-                table_affected="attendance_records",
-                record_id=db_record.attendance_id,
-                old_values=None,
-                new_values=db_record.__dict__,
-                ip_address=ip_address,
-                user_agent=request.headers.get("user-agent"),
-                timestamp=datetime.now(timezone.utc)
-            )
-            db.add(system_log)
-            await db.commit()
+                clock_in_time=datetime.now(timezone.utc),
+                ip_address=request.client.host,
+                location=location
+            ).model_dump(),
+            date=current_date,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(db_record)
+        await db.commit()
+        await db.refresh(db_record)
 
-            # Invalidate attendance history cache for this user
-            await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
+        # Log action
+        system_log = SystemLogs(
+            user_id=user.user_id,
+            action=SystemAction.CLOCK_IN,
+            table_affected="attendance_records",
+            record_id=db_record.attendance_id,
+            old_values=None,
+            new_values=db_record.__dict__,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        db.add(system_log)
+        await db.commit()
 
-            logger.info(f"User clocked in, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
-            return AttendanceRecordOut.model_validate(db_record)
+        # Invalidate attendance history cache for this user
+        await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
 
-        except AttendanceError as e:
-            logger.error(f"Attendance error during clock-in for user_id {user.user_id}: {str(e)}")
-            raise
-        except SQLAlchemyError as e:
-            logger.error(f"Database error during clock-in for user_id {user.user_id}: {str(e)}")
-            raise DatabaseError(message="Database error processing clock-in", original_error=e)
-        except Exception as e:
-            logger.error(f"Unexpected error during clock-in for user_id {user.user_id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unexpected error processing clock-in"
-            )
+        logger.info(f"User clocked in, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
+        return AttendanceRecordOut.model_validate(db_record)
+
+    except AttendanceError as e:
+        logger.error(f"Attendance error during clock-in for user_id {user.user_id}: {str(e)}")
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error during clock-in for user_id {user.user_id}: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during clock-in for user_id {user.user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error processing clock-in"
+        )
 
 async def clock_out(
-    request: Request,  # Added Request dependency
+    request: Request,
     user: Users = Depends(get_current_user),
-    ip_address: str = Depends(check_permission("clock_out"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
     """
     Handle employee clock-out with validation, time calculations, and logging.
     Invalidates attendance history cache for the user.
     """
-    async with get_db() as db:
-        try:
-            current_date = datetime.now(timezone.utc).date()
-            # Find active clock-in for today
-            query = select(AttendanceRecords).where(
-                AttendanceRecords.user_id == user.user_id,
-                AttendanceRecords.date == current_date,
-                AttendanceRecords.clock_out_time == None,
-                AttendanceRecords.is_active == True
-            )
-            result = await db.execute(query)
-            db_record = result.scalar_one_or_none()
-            if not db_record:
-                raise ResourceNotFoundError(resource="Attendance record", identifier="active clock-in for today")
+    try:
+        current_date = datetime.now(timezone.utc).date()
+        # Find active clock-in for today
+        query = select(AttendanceRecords).where(
+            AttendanceRecords.user_id == user.user_id,
+            AttendanceRecords.date == current_date,
+            AttendanceRecords.clock_out_time == None,
+            AttendanceRecords.is_active == True
+        )
+        result = await db.execute(query)
+        db_record = result.scalar_one_or_none()
+        if not db_record:
+            raise ResourceNotFoundError(resource="Attendance record", identifier="active clock-in for today")
 
-            db_record.clock_out_time = datetime.now(timezone.utc)
-            db_record.ip_address = ip_address
-            total_hours = calculate_total_hours(
-                clock_in=db_record.clock_in_time,
-                clock_out=db_record.clock_out_time,
-                break_duration=db_record.break_duration
-            )
-            if total_hours is not None:
-                db_record.total_hours = total_hours
-                db_record.overtime_hours = calculate_overtime_hours(total_hours)
+        db_record.clock_out_time = datetime.now(timezone.utc)
+        db_record.ip_address = request.client.host
+        total_hours = calculate_total_hours(
+            clock_in=db_record.clock_in_time,
+            clock_out=db_record.clock_out_time,
+            break_duration=db_record.break_duration
+        )
+        if total_hours is not None:
+            db_record.total_hours = total_hours
+            db_record.overtime_hours = calculate_overtime_hours(total_hours)
 
-            db_record.updated_at = datetime.now(timezone.utc)
-            db.add(db_record)
-            await db.commit()
-            await db.refresh(db_record)
+        db_record.updated_at = datetime.now(timezone.utc)
+        db.add(db_record)
+        await db.commit()
+        await db.refresh(db_record)
 
-            # Log action
-            system_log = SystemLogs(
-                user_id=user.user_id,
-                action=SystemAction.CLOCK_OUT,
-                table_affected="attendance_records",
-                record_id=db_record.attendance_id,
-                old_values=None,
-                new_values=db_record.__dict__,
-                ip_address=ip_address,
-                user_agent=request.headers.get("user-agent"),
-                timestamp=datetime.now(timezone.utc)
-            )
-            db.add(system_log)
-            await db.commit()
+        # Log action
+        system_log = SystemLogs(
+            user_id=user.user_id,
+            action=SystemAction.CLOCK_OUT,
+            table_affected="attendance_records",
+            record_id=db_record.attendance_id,
+            old_values=None,
+            new_values=db_record.__dict__,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
+            timestamp=datetime.now(timezone.utc)
+        )
+        db.add(system_log)
+        await db.commit()
 
-            # Invalidate attendance history cache for this user
-            await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
+        # Invalidate attendance history cache for this user
+        await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
 
-            logger.info(f"User clocked out, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
-            return AttendanceRecordOut.model_validate(db_record)
+        logger.info(f"User clocked out, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
+        return AttendanceRecordOut.model_validate(db_record)
 
-        except ResourceNotFoundError as e:
-            logger.error(f"Resource not found during clock-out for user_id {user.user_id}: {str(e)}")
-            raise
-        except SQLAlchemyError as e:
-            logger.error(f"Database error during clock-out for user_id {user.user_id}: {str(e)}")
-            raise DatabaseError(message="Database error processing clock-out", original_error=e)
-        except Exception as e:
-            logger.error(f"Unexpected error during clock-out for user_id {user.user_id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unexpected error processing clock-out"
-            )
+    except ResourceNotFoundError as e:
+        logger.error(f"Resource not found during clock-out for user_id {user.user_id}: {str(e)}")
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error during clock-out for user_id {user.user_id}: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during clock-out for user_id {user.user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error processing clock-out"
+        )
 
 async def get_attendance_history(
     user: Users = Depends(get_current_user),
@@ -172,8 +172,8 @@ async def get_attendance_history(
     end_date: Optional[date] = None,
     skip: int = 0,
     limit: int = 50,
-    _: str = Depends(check_permission("view_attendance_history")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
     """
     Retrieve attendance history for a user with optional date range and pagination.
@@ -219,9 +219,9 @@ async def get_attendance_history(
     except ValidationError as e:
         logger.error(f"Validation error in get_attendance_history for user_id {user.user_id}: {str(e)}")
         raise
-    except SQLAlchemyError as e:
+    except DatabaseError as e:
         logger.error(f"Database error in get_attendance_history for user_id {user.user_id}: {str(e)}")
-        raise DatabaseError(message="Database error retrieving attendance history", original_error=e)
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in get_attendance_history for user_id {user.user_id}: {str(e)}")
         raise HTTPException(

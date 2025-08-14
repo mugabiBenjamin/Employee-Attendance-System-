@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -9,19 +9,20 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.leave_balance import LeaveBalanceCreate, LeaveBalanceOut
 from app.core.config import settings
-from app.core.enums import SystemAction
-from app.core.exceptions import UserNotFoundError
+from app.core.enums import SystemAction, Permission
+from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, DatabaseError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def get_leave_balance(
-    db: AsyncSession,
     user: Users = Depends(get_current_user),
     leave_type: Optional[str] = None,
-    _: str = Depends(check_permission("view_leave_balance"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_BALANCE]))
 ) -> List[LeaveBalanceOut]:
     """
     Retrieve leave balances for a user with optional leave type filter.
@@ -39,10 +40,7 @@ async def get_leave_balance(
         balances = result.scalars().all()
 
         if not balances:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No leave balances found for user"
-            )
+            raise ResourceNotFoundError(resource="Leave balances", identifier=f"user_id {user.user_id}")
 
         # Fetch leave policy details for each balance
         balance_out = []
@@ -61,22 +59,26 @@ async def get_leave_balance(
         logger.info(f"Retrieved {len(balance_out)} leave balances for user_id: {user.user_id}")
         return balance_out
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving leave balances for user_id {user.user_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving leave balances for user_id {user.user_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving leave balances for user_id {user.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving leave balances"
         )
 
 async def update_leave_balance(
-    db: AsyncSession,
     user_id: int,
     leave_type: str,
     balance_change: float,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("update_leave_balance"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_BALANCE]))
 ) -> LeaveBalanceOut:
     """
     Update leave balance for a user with validation and logging.
@@ -90,7 +92,7 @@ async def update_leave_balance(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="User not found")
+            raise UserNotFoundError(user_id=user_id)
 
         # Validate leave type
         query = select(LeavePolicies).where(
@@ -131,6 +133,7 @@ async def update_leave_balance(
             )
 
         # Update balance
+        old_values = db_balance.__dict__.copy()
         old_used_days = db_balance.used_days
         new_used_days = max(0.0, db_balance.used_days - balance_change)
         db_balance.used_days = new_used_days
@@ -145,9 +148,10 @@ async def update_leave_balance(
             action=SystemAction.UPDATE,
             table_affected="leave_balances",
             record_id=db_balance.balance_id,
-            old_values={"used_days": old_used_days},
-            new_values={"used_days": new_used_days},
-            ip_address=None,
+            old_values=old_values,
+            new_values=db_balance.__dict__,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -162,8 +166,11 @@ async def update_leave_balance(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}")
+        logger.error(f"Unexpected error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error updating leave balance"

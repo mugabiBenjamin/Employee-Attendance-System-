@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone, date
@@ -9,20 +9,22 @@ from app.models.employee_hierarchy import EmployeeHierarchy
 from app.models.system_logs import SystemLogs
 from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordOut
 from app.core.config import settings
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.mail import send_email
-from app.core.exceptions import UserNotFoundError
+from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, DatabaseError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def create_overtime_record(
-    db: AsyncSession,
     overtime: OvertimeRecordCreate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_overtime_record"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.CREATE_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """
     Create an overtime record with validation, logging, and email notification to manager.
@@ -36,7 +38,7 @@ async def create_overtime_record(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="User not found")
+            raise UserNotFoundError(user_id=overtime.user_id)
 
         # Check for existing record on same date
         query = select(OvertimeRecords).where(
@@ -47,10 +49,7 @@ async def create_overtime_record(
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Overtime record already exists for this date"
-            )
+            raise ValidationError(detail="Overtime record already exists for this date")
 
         # Check if overtime exceeds threshold (configurable in settings)
         if overtime.overtime_hours > settings.OVERTIME_THRESHOLD:
@@ -94,7 +93,8 @@ async def create_overtime_record(
             record_id=db_overtime.overtime_id,
             old_values=None,
             new_values=db_overtime.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -105,17 +105,20 @@ async def create_overtime_record(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error creating overtime record for user_id {overtime.user_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error creating overtime record for user_id {overtime.user_id}: {str(e)}")
+        logger.error(f"Unexpected error creating overtime record for user_id {overtime.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating overtime record"
         )
 
 async def get_overtime_record_by_id(
-    db: AsyncSession,
     overtime_id: int,
-    _: str = Depends(check_permission("view_overtime_record"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD]))
 ) -> Optional[OvertimeRecordOut]:
     """
     Retrieve an overtime record by ID.
@@ -130,30 +133,30 @@ async def get_overtime_record_by_id(
         overtime = result.scalar_one_or_none()
 
         if not overtime:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Overtime record not found"
-            )
+            raise ResourceNotFoundError(resource="Overtime record", identifier=f"ID {overtime_id}")
 
         return OvertimeRecordOut.model_validate(overtime)
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving overtime record {overtime_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving overtime record {overtime_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving overtime record {overtime_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving overtime record"
         )
 
 async def get_user_overtime_records(
-    db: AsyncSession,
     user_id: int,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_overtime_record"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD]))
 ) -> List[OvertimeRecordOut]:
     """
     Retrieve a list of overtime records for a user with optional date range and pagination.
@@ -166,7 +169,7 @@ async def get_user_overtime_records(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise UserNotFoundError(detail="User not found")
+            raise UserNotFoundError(user_id=user_id)
 
         query = select(OvertimeRecords).where(
             OvertimeRecords.user_id == user_id,
@@ -187,21 +190,24 @@ async def get_user_overtime_records(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving overtime records for user_id {user_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving overtime records for user_id {user_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving overtime records for user_id {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving overtime records"
         )
 
 async def get_team_overtime_records(
-    db: AsyncSession,
-    manager: Users = Depends(get_current_user),
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_team_overtime_records"))
+    manager: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
 ) -> List[OvertimeRecordOut]:
     """
     Retrieve overtime records for a manager's team with optional date range and pagination.
@@ -237,8 +243,11 @@ async def get_team_overtime_records(
         logger.info(f"Retrieved {len(overtime_records)} overtime records for manager_id: {manager.user_id}")
         return [OvertimeRecordOut.model_validate(record) for record in overtime_records]
 
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving team overtime records for manager_id {manager.user_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving team overtime records for manager_id {manager.user_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving team overtime records for manager_id {manager.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving team overtime records"

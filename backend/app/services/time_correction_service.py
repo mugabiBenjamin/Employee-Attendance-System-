@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -8,41 +8,39 @@ from app.models.attendance_records import AttendanceRecords
 from app.models.users import Users
 from app.models.employee_hierarchy import EmployeeHierarchy
 from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionOut, TimeCorrectionUpdate
-from app.core.config import settings
+from app.core.config import Settings, get_settings
 from app.core.enums import Permission, SystemAction, CorrectionStatus
 from app.core.mail import send_email, EmailSchema, get_user_email
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
+from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def create_time_correction(
-    db: AsyncSession,
     time_correction: TimeCorrectionCreate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(require_permissions([Permission.CREATE_TIME_CORRECTION])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    db: AsyncSession = Depends(get_db),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Create a new time correction request. Requires CREATE_TIME_CORRECTION permission."""
     try:
         # Validate attendance record exists and is active
         attendance = await _get_active_attendance(db, time_correction.attendance_id)
         if not attendance:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attendance record not found"
-            )
+            raise ResourceNotFoundError(resource="Attendance record", identifier=f"ID {time_correction.attendance_id}")
 
         # Validate user exists and is active
         user = await _get_active_user(db, time_correction.user_id)
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise ResourceNotFoundError(resource="User", identifier=f"ID {time_correction.user_id}")
 
         # Validate time correction logic
         _validate_correction_times(time_correction.corrected_clock_in, time_correction.corrected_clock_out)
@@ -74,26 +72,32 @@ async def create_time_correction(
             table_affected="time_corrections",
             record_id=db_time_correction.correction_id,
             old_values=None,
-            new_values=db_time_correction.__dict__
+            new_values=db_time_correction.__dict__,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent")
         )
-        await log_service.create_system_log(log, current_user)
+        await log_service.create_system_log(log, current_user, request)
 
         logger.info(f"Time correction created: correction_id={db_time_correction.correction_id}, user_id={time_correction.user_id}")
         return TimeCorrectionOut.model_validate(db_time_correction)
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error creating time correction for user_id {time_correction.user_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error creating time correction for user_id {time_correction.user_id}: {str(e)}")
+        logger.error(f"Unexpected error creating time correction for user_id {time_correction.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create time correction"
         )
 
 async def get_time_correction_by_id(
-    db: AsyncSession,
     correction_id: int,
-    _: str = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
 ) -> Optional[TimeCorrectionOut]:
     """Retrieve a time correction by ID. Requires VIEW_TIME_CORRECTION permission."""
     try:
@@ -102,38 +106,36 @@ async def get_time_correction_by_id(
         correction = result.scalar_one_or_none()
 
         if not correction:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Time correction not found"
-            )
+            raise ResourceNotFoundError(resource="Time correction", identifier=f"ID {correction_id}")
 
         return TimeCorrectionOut.model_validate(correction)
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving time correction {correction_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving time correction {correction_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving time correction {correction_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve time correction"
         )
 
 async def get_user_time_corrections(
-    db: AsyncSession,
     user_id: int,
     skip: int = 0,
-    limit: int = None,
-    _: str = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
+    limit: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
 ) -> List[TimeCorrectionOut]:
     """Get all time corrections for a specific user. Requires VIEW_TIME_CORRECTION permission."""
     try:
         # Validate user exists
         user = await _get_active_user(db, user_id)
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise ResourceNotFoundError(resource="User", identifier=f"ID {user_id}")
 
         limit = limit or settings.DEFAULT_PAGE_SIZE
         
@@ -151,22 +153,27 @@ async def get_user_time_corrections(
         logger.info(f"Retrieved {len(corrections)} time corrections for user_id: {user_id}")
         return [TimeCorrectionOut.model_validate(c) for c in corrections]
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving time corrections for user_id {user_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving time corrections for user_id {user_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving time corrections for user_id {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve time corrections"
         )
 
 async def update_time_correction(
-    db: AsyncSession,
     correction_id: int,
     time_correction_update: TimeCorrectionUpdate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(require_permissions([Permission.UPDATE_TIME_CORRECTION])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    db: AsyncSession = Depends(get_db),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Update an existing time correction. Requires UPDATE_TIME_CORRECTION permission."""
     try:
@@ -176,10 +183,7 @@ async def update_time_correction(
         db_correction = result.scalar_one_or_none()
 
         if not db_correction:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Time correction not found"
-            )
+            raise ResourceNotFoundError(resource="Time correction", identifier=f"ID {correction_id}")
 
         # Check if user is authorized (manager or HR)
         query = select(EmployeeHierarchy).where(
@@ -233,28 +237,35 @@ async def update_time_correction(
             table_affected="time_corrections",
             record_id=correction_id,
             old_values=old_values,
-            new_values=db_correction.__dict__
+            new_values=db_correction.__dict__,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent")
         )
-        await log_service.create_system_log(log, current_user)
+        await log_service.create_system_log(log, current_user, request)
 
         logger.info(f"Time correction updated: correction_id={correction_id}")
         return TimeCorrectionOut.model_validate(db_correction)
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error updating time correction {correction_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error updating time correction {correction_id}: {str(e)}")
+        logger.error(f"Unexpected error updating time correction {correction_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update time correction"
         )
 
 async def delete_time_correction(
-    db: AsyncSession,
     correction_id: int,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(require_permissions([Permission.DELETE_TIME_CORRECTION])),
-    log_service: SystemLogService = Depends(get_system_log_service)
+    db: AsyncSession = Depends(get_db),
+    log_service: SystemLogService = Depends(get_system_log_service),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_TIME_CORRECTION]))
 ) -> None:
     """Soft delete a time correction. Requires DELETE_TIME_CORRECTION permission."""
     try:
@@ -263,10 +274,7 @@ async def delete_time_correction(
         db_correction = result.scalar_one_or_none()
 
         if not db_correction:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Time correction not found"
-            )
+            raise ResourceNotFoundError(resource="Time correction", identifier=f"ID {correction_id}")
 
         # Check if user is authorized (HR only)
         if not current_user.has_role("HR"):
@@ -291,16 +299,21 @@ async def delete_time_correction(
             table_affected="time_corrections",
             record_id=correction_id,
             old_values=old_values,
-            new_values=None
+            new_values=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent")
         )
-        await log_service.create_system_log(log, current_user)
+        await log_service.create_system_log(log, current_user, request)
 
         logger.info(f"Time correction soft deleted: correction_id={correction_id}")
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error deleting time correction {correction_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error deleting time correction {correction_id}: {str(e)}")
+        logger.error(f"Unexpected error deleting time correction {correction_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete time correction"
@@ -309,31 +322,36 @@ async def delete_time_correction(
 # Helper functions
 async def _get_active_attendance(db: AsyncSession, attendance_id: int) -> Optional[AttendanceRecords]:
     """Get active attendance record by ID."""
-    query = select(AttendanceRecords).where(
-        AttendanceRecords.attendance_id == attendance_id,
-        AttendanceRecords.is_active == True,
-        AttendanceRecords.deleted_at == None
-    )
-    result = await db.execute(query)
-    return result.scalar_one_or_none()
+    try:
+        query = select(AttendanceRecords).where(
+            AttendanceRecords.attendance_id == attendance_id,
+            AttendanceRecords.is_active == True,
+            AttendanceRecords.deleted_at == None
+        )
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving attendance record {attendance_id}: {str(e)}")
+        raise
 
 async def _get_active_user(db: AsyncSession, user_id: int) -> Optional[Users]:
     """Get active user by ID."""
-    query = select(Users).where(
-        Users.user_id == user_id,
-        Users.is_active == True,
-        Users.deleted_at == None
-    )
-    result = await db.execute(query)
-    return result.scalar_one_or_none()
+    try:
+        query = select(Users).where(
+            Users.user_id == user_id,
+            Users.is_active == True,
+            Users.deleted_at == None
+        )
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving user {user_id}: {str(e)}")
+        raise
 
 def _validate_correction_times(clock_in: Optional[datetime], clock_out: Optional[datetime]) -> None:
     """Validate that correction times are logical."""
     if clock_in and clock_out and clock_out <= clock_in:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Corrected clock-out time must be after corrected clock-in time"
-        )
+        raise ValidationError(detail="Corrected clock-out time must be after corrected clock-in time")
 
 async def _notify_managers_of_correction(
     db: AsyncSession,
@@ -404,10 +422,7 @@ async def _update_attendance_record(db: AsyncSession, correction: TimeCorrection
         result = await db.execute(query)
         attendance = result.scalar_one_or_none()
         if not attendance:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Attendance record {correction.attendance_id} not found"
-            )
+            raise ResourceNotFoundError(resource="Attendance record", identifier=f"ID {correction.attendance_id}")
         if correction.corrected_clock_in:
             attendance.clock_in = correction.corrected_clock_in
         if correction.corrected_clock_out:
@@ -415,10 +430,13 @@ async def _update_attendance_record(db: AsyncSession, correction: TimeCorrection
         attendance.updated_at = datetime.now(timezone.utc)
         db.add(attendance)
         await db.commit()
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.warning(f"Database error updating attendance record {correction.attendance_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.warning(f"Failed to update attendance record {correction.attendance_id}: {str(e)}")
+        logger.warning(f"Unexpected error updating attendance record {correction.attendance_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update attendance record {correction.attendance_id}"

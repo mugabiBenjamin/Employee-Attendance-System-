@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -9,8 +9,10 @@ from app.models.system_logs import SystemLogs
 from app.schemas.role import RoleCreate, RoleUpdate, RoleOut
 from app.core.config import settings
 from app.core.enums import SystemAction, Permission
+from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 from cachetools import TTLCache
 import logging
 
@@ -20,21 +22,20 @@ logger = logging.getLogger(__name__)
 externals = {"permission_cache": TTLCache(maxsize=1000, ttl=300), "role_permission_cache": TTLCache(maxsize=100, ttl=300)}
 
 async def create_role(
-    db: AsyncSession,
     role: RoleCreate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_role"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.CREATE_ROLE]))
 ) -> RoleOut:
     """
     Create a new role with validation and logging.
     """
     try:
         # Validate role_name
-        if role.role_name not in ['Employee', 'Manager', 'HR', 'Admin', 'Super_Admin']:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid role name. Must be one of: Employee, Manager, HR, Admin, Super_Admin"
-            )
+        valid_roles = ['Employee', 'Manager', 'HR', 'Admin', 'Super_Admin']
+        if role.role_name not in valid_roles:
+            raise ValidationError(detail=f"Invalid role name. Must be one of: {', '.join(valid_roles)}")
 
         # Check for existing role
         query = select(Roles).where(
@@ -44,18 +45,12 @@ async def create_role(
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Role name already exists"
-            )
+            raise ValidationError(detail="Role name already exists")
 
         # Validate permissions
         invalid_permissions = [p for p in role.permissions.keys() if p not in [perm.value for perm in Permission]]
         if invalid_permissions:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid permissions: {', '.join(invalid_permissions)}"
-            )
+            raise ValidationError(detail=f"Invalid permissions: {', '.join(invalid_permissions)}")
 
         # Create role
         db_role = Roles(
@@ -81,7 +76,8 @@ async def create_role(
             record_id=db_role.role_id,
             old_values=None,
             new_values=db_role.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -92,17 +88,20 @@ async def create_role(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error creating role: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error creating role: {str(e)}")
+        logger.error(f"Unexpected error creating role: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating role"
         )
 
 async def get_role_by_id(
-    db: AsyncSession,
     role_id: int,
-    _: str = Depends(check_permission("view_role"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
 ) -> Optional[RoleOut]:
     """
     Retrieve a role by ID.
@@ -117,27 +116,27 @@ async def get_role_by_id(
         role = result.scalar_one_or_none()
 
         if not role:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Role not found"
-            )
+            raise ResourceNotFoundError(resource="Role", identifier=f"ID {role_id}")
 
         return RoleOut.model_validate(role)
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving role {role_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving role {role_id}: {str(e)}")
+        logger.error(f"Unexpected error retrieving role {role_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving role"
         )
 
 async def get_roles(
-    db: AsyncSession,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_role"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
 ) -> List[RoleOut]:
     """
     Retrieve a list of active roles with pagination.
@@ -153,19 +152,23 @@ async def get_roles(
         logger.info(f"Retrieved {len(roles)} roles")
         return [RoleOut.model_validate(role) for role in roles]
 
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving roles: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving roles: {str(e)}")
+        logger.error(f"Unexpected error retrieving roles: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving roles"
         )
 
 async def update_role(
-    db: AsyncSession,
     role_id: int,
     role_update: RoleUpdate,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("update_role"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.UPDATE_ROLE]))
 ) -> RoleOut:
     """
     Update a role with validation and logging.
@@ -181,19 +184,14 @@ async def update_role(
         db_role = result.scalar_one_or_none()
 
         if not db_role:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Role not found"
-            )
+            raise ResourceNotFoundError(resource="Role", identifier=f"ID {role_id}")
 
         # Check for duplicate role name if updated
         update_data = role_update.model_dump(exclude_none=True)
         if "role_name" in update_data:
-            if update_data["role_name"] not in ['Employee', 'Manager', 'HR', 'Admin', 'Super_Admin']:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid role name. Must be one of: Employee, Manager, HR, Admin, Super_Admin"
-                )
+            valid_roles = ['Employee', 'Manager', 'HR', 'Admin', 'Super_Admin']
+            if update_data["role_name"] not in valid_roles:
+                raise ValidationError(detail=f"Invalid role name. Must be one of: {', '.join(valid_roles)}")
             query = select(Roles).where(
                 Roles.role_name == update_data["role_name"],
                 Roles.role_id != role_id,
@@ -202,19 +200,13 @@ async def update_role(
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Role name already exists"
-                )
+                raise ValidationError(detail="Role name already exists")
 
         # Validate permissions if updated
         if "permissions" in update_data:
             invalid_permissions = [p for p in update_data["permissions"].keys() if p not in [perm.value for perm in Permission]]
             if invalid_permissions:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid permissions: {', '.join(invalid_permissions)}"
-                )
+                raise ValidationError(detail=f"Invalid permissions: {', '.join(invalid_permissions)}")
 
         # Store old values for logging
         old_values = db_role.__dict__.copy()
@@ -240,7 +232,8 @@ async def update_role(
             record_id=role_id,
             old_values=old_values,
             new_values=db_role.__dict__,
-            ip_address=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -251,18 +244,22 @@ async def update_role(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        logger.error(f"Database error updating role {role_id}: {str(e)}")
+        raise
     except Exception as e:
-        logger.error(f"Error updating role {role_id}: {str(e)}")
+        logger.error(f"Unexpected error updating role {role_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error updating role"
         )
 
 async def delete_role(
-    db: AsyncSession,
     role_id: int,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("delete_role"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.DELETE_ROLE]))
 ) -> None:
     """
     Soft delete a role with logging.
@@ -277,10 +274,7 @@ async def delete_role(
         db_role = result.scalar_one_or_none()
 
         if not db_role:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Role not found"
-            )
+            raise ResourceNotFoundError(resource="Role", identifier=f"ID {role_id}")
 
         db_role.is_active = False
         db_role.deleted_at = datetime.now(timezone.utc)
@@ -298,7 +292,8 @@ async def delete_role(
             record_id=role_id,
             old_values=db_role.__dict__,
             new_values=None,
-            ip_address=None,
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -306,10 +301,13 @@ async def delete_role(
 
         logger.info(f"Role soft deleted, role_id: {role_id}")
 
-    except HTTPException:
+    except ResourceNotFoundError:
+        raise
+    except DatabaseError as e:
+        logger.error(f"Database error deleting role {role_id}: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Error deleting role {role_id}: {str(e)}")
+        logger.error(f"Unexpected error deleting role {role_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting role"

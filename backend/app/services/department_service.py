@@ -8,19 +8,20 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentOut
 from app.core.config import settings
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.exceptions import DepartmentNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import check_permission
+from app.core.permissions import require_permissions
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 
 async def create_department(
-    db: AsyncSession,
     department: DepartmentCreate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("create_department"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
 ) -> DepartmentOut:
     """
     Create a new department with validation and logging.
@@ -86,9 +87,9 @@ async def create_department(
         )
 
 async def get_department_by_id(
-    db: AsyncSession,
     department_id: int,
-    _: str = Depends(check_permission("view_department"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> Optional[DepartmentOut]:
     """
     Retrieve a department by ID.
@@ -103,7 +104,7 @@ async def get_department_by_id(
         department = result.scalar_one_or_none()
 
         if not department:
-            raise DepartmentNotFoundError()
+            raise DepartmentNotFoundError(dept_id=department_id)
 
         return DepartmentOut.model_validate(department)
 
@@ -117,10 +118,10 @@ async def get_department_by_id(
         )
 
 async def get_departments(
-    db: AsyncSession,
     skip: int = 0,
     limit: int = settings.DEFAULT_PAGE_SIZE,
-    _: str = Depends(check_permission("view_department"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[DepartmentOut]:
     """
     Retrieve a list of active departments with pagination.
@@ -144,11 +145,11 @@ async def get_departments(
         )
 
 async def update_department(
-    db: AsyncSession,
     department_id: int,
     department_update: DepartmentUpdate,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("update_department"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
 ) -> DepartmentOut:
     """
     Update a department with validation and logging.
@@ -164,7 +165,7 @@ async def update_department(
         db_department = result.scalar_one_or_none()
 
         if not db_department:
-            raise DepartmentNotFoundError()
+            raise DepartmentNotFoundError(dept_id=department_id)
 
         # Check for duplicate department name
         update_data = department_update.model_dump(exclude_none=True)
@@ -230,10 +231,10 @@ async def update_department(
         )
 
 async def delete_department(
-    db: AsyncSession,
     department_id: int,
     current_user: Users = Depends(get_current_user),
-    _: str = Depends(check_permission("delete_department"))
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
 ) -> None:
     """
     Soft delete a department with logging.
@@ -248,7 +249,7 @@ async def delete_department(
         db_department = result.scalar_one_or_none()
 
         if not db_department:
-            raise DepartmentNotFoundError()
+            raise DepartmentNotFoundError(dept_id=department_id)
 
         db_department.is_active = False
         db_department.deleted_at = datetime.now(timezone.utc)
