@@ -1,11 +1,15 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 import logging
 from pythonjsonlogger import jsonlogger
 from app.core.config import settings
-from app.core.database import init_db, start_background_refresh, shutdown
+from app.core.database import (
+    initialize_engine_and_session,
+    init_db,
+    start_background_refresh,
+    shutdown
+)
 from app.core.middleware import setup_middleware
 from app.api.v1.api import api_router
 from slowapi import Limiter
@@ -14,7 +18,9 @@ from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import _rate_limit_exceeded_handler
 
-# Configure JSON logging
+# -----------------------
+# Logging Configuration
+# -----------------------
 logger = logging.getLogger(__name__)
 log_handler = logging.FileHandler(settings.LOG_FILE)
 formatter = jsonlogger.JsonFormatter(
@@ -25,20 +31,29 @@ log_handler.setFormatter(formatter)
 logger.handlers = [log_handler]
 logger.setLevel(getattr(logging, settings.LOG_LEVEL))
 
-# Configure rate limiter
+# -----------------------
+# Rate Limiter Setup
+# -----------------------
 limiter = Limiter(key_func=get_remote_address)
 
+# -----------------------
+# Lifespan Events
+# -----------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application startup: initializing database and views...", extra={"request_id": None})
-    await init_db()
-    await start_background_refresh()
+    logger.info("Application startup: initializing database, Redis, and views...", extra={"request_id": None})
+    await initialize_engine_and_session()   # Create DB engine, session factory, Redis
+    await init_db()                         # Create enums, tables, views
+    await start_background_refresh()        # Start background refresh for materialized views
     logger.info("Startup complete.", extra={"request_id": None})
     yield
     logger.info("Application shutdown...", extra={"request_id": None})
     await shutdown()
     logger.info("Shutdown complete.", extra={"request_id": None})
 
+# -----------------------
+# FastAPI App Instance
+# -----------------------
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
@@ -46,11 +61,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add rate-limiting middleware and exception handler
+# -----------------------
+# Middleware Configuration
+# -----------------------
+# Rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -59,11 +78,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Setup system action logging middleware
+# System action logging
 setup_middleware(app)
 
+# -----------------------
+# API Routes
+# -----------------------
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# -----------------------
+# Root Endpoint
+# -----------------------
 @app.get("/")
 async def root():
     return {"message": f"Welcome to {settings.APP_NAME} API"}

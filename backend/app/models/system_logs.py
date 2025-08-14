@@ -1,9 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import ENUM, JSONB, INET
+from sqlalchemy.dialects.postgresql import JSONB, INET
 from app.core.database import Base
-
-system_action_enum = ENUM('INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'CLOCK_IN', 'CLOCK_OUT', 'password_change', 'profile_update', 'data_export', 'data_import', 'assign_role', 'revoke_role', 'view_report', 'approve_leave', 'reject_leave', 'create_department', 'delete_department', name='system_action')
+from app.core.db_enums import system_action_enum
 
 class SystemLogs(Base):
     __tablename__ = "system_logs"

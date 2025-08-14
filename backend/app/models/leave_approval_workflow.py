@@ -1,9 +1,7 @@
 from sqlalchemy import Column, Integer, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import ENUM
 from app.core.database import Base
-
-leave_request_status_enum = ENUM('draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed', name='leave_request_status')
+from app.core.db_enums import leave_request_status_enum
 
 class LeaveApprovalWorkflow(Base):
     __tablename__ = "leave_approval_workflow"

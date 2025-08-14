@@ -1,11 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Date, Text, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import ENUM
 from app.core.database import Base
-
-leave_type_enum = ENUM('annual', 'sick', 'maternity', 'paternity', 'emergency', 'unpaid', 'casual', 'compensatory', 'bereavement', 'leave_of_absence', 'public_holiday', name='leave_type')
-
-leave_request_status_enum = ENUM('draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed', name='leave_request_status')
+from app.core.db_enums import leave_type_enum, leave_request_status_enum
 
 class LeaveRequests(Base):
     __tablename__ = "leave_requests"

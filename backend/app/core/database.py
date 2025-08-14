@@ -4,6 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.sql import text
 from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
+from app.core.db_enums import (
+    attendance_status_enum, leave_request_status_enum, leave_type_enum,
+    correction_status_enum, employee_type_enum, shift_type_enum, system_action_enum
+)
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from sqlalchemy.exc import OperationalError, DatabaseError
@@ -148,61 +152,10 @@ async def is_key_cached(key: str) -> bool:
         logger.error(f"Error checking cache existence for key {key}: {str(e)}")
         return False
 
-# Individual enum creation SQL statements
-ENUM_CREATION_SQLS = [
-    """
-    DO $$ BEGIN
-        CREATE TYPE attendance_status AS ENUM (
-            'present', 'absent', 'late', 'early_departure', 'on_leave', 'half_day', 'sick'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE leave_request_status AS ENUM (
-            'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE leave_type AS ENUM (
-            'annual', 'sick', 'maternity', 'paternity', 'emergency', 'unpaid',
-            'casual', 'compensatory', 'bereavement', 'leave_of_absence', 'public_holiday'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE correction_status AS ENUM (
-            'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE system_action AS ENUM (
-            'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'CLOCK_IN', 'CLOCK_OUT',
-            'password_change', 'profile_update', 'data_export', 'data_import',
-            'assign_role', 'revoke_role', 'view_report', 'approve_leave',
-            'reject_leave', 'create_department', 'delete_department'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE employee_type AS ENUM (
-            'full_time', 'part_time', 'contract', 'intern', 'temporary'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE shift_type AS ENUM (
-            'morning', 'afternoon', 'night', 'flexible', 'split'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """
+# Enum types list
+ENUM_TYPES = [
+    attendance_status_enum, leave_request_status_enum, leave_type_enum,
+    correction_status_enum, employee_type_enum, shift_type_enum, system_action_enum
 ]
 
 # Materialized view and index creation SQL statements
@@ -234,7 +187,7 @@ MATERIALIZED_VIEW_SQLS = [
     """
 ]
 
-# Initialize database tables and enums with retry logic
+# Initialize database tables, enums, and views
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -245,13 +198,15 @@ MATERIALIZED_VIEW_SQLS = [
 )
 async def init_db():
     async with engine.begin() as conn:
-        # Explicitly import models to register with Base
-        # Models are imported at the top of the file
-        # Create enums
-        for enum_sql in ENUM_CREATION_SQLS:
-            await conn.execute(text(enum_sql))
-        
-        # Ensure job_title column in users table
+        # Create enums from centralized db_enums.py
+        for enum_type in ENUM_TYPES:
+            await conn.execute(text(f"""
+                DO $$ BEGIN
+                    CREATE TYPE {enum_type.name} AS ENUM ({', '.join(f"'{v}'" for v in enum_type.enums)});
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+            """))
+
+        # Ensure job_title column exists
         await conn.execute(text("""
             DO $$ BEGIN
                 IF NOT EXISTS (
@@ -263,17 +218,17 @@ async def init_db():
                 END IF;
             END $$;
         """))
-        
-        # Create tables for all registered models
+
+        # Create all tables for registered models
         await conn.run_sync(Base.metadata.create_all)
-        
-        # Create materialized views
+
+        # Create materialized views and indexes
         for view_sql in MATERIALIZED_VIEW_SQLS:
             await conn.execute(text(view_sql))
-        
-        logger.info("Database initialized with enums, tables, and materialized view")
 
-# Background task for materialized view refresh
+        logger.info("Database initialized with enums, tables, and materialized views")
+
+# Background task for refreshing materialized view
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -293,7 +248,6 @@ async def background_refresh_materialized_view():
             await session.rollback()
             raise
 
-# Start the materialized view refresh task
 async def start_background_refresh():
     logger.info("Starting materialized view refresh task")
     asyncio.create_task(background_refresh_materialized_view())

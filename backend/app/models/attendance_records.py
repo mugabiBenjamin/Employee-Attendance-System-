@@ -1,9 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, UniqueConstraint, Index, Boolean
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import INET, ENUM
+from sqlalchemy.dialects.postgresql import INET
 from app.core.database import Base
-
-attendance_status_enum = ENUM('present', 'absent', 'late', 'early_departure', 'on_leave', 'half_day', 'sick', name='attendance_status')
+from app.core.db_enums import attendance_status_enum
 
 class AttendanceRecords(Base):
     __tablename__ = "attendance_records"
