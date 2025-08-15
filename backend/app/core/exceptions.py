@@ -159,18 +159,6 @@ class RedisError(BaseCustomException):
             error_code="REDIS_ERROR"
         )
 
-class LeavePolicyError(BusinessLogicError):
-    """Leave policy specific errors."""
-    def __init__(self, detail: str = "Invalid leave policy"):
-        super().__init__(detail)
-        self.error_code = "LEAVE_POLICY_ERROR"
-
-class OvertimePolicyError(BusinessLogicError):
-    """Overtime policy specific errors."""
-    def __init__(self, detail: str = "Invalid overtime policy"):
-        super().__init__(detail)
-        self.error_code = "OVERTIME_POLICY_ERROR"
-
 class RateLimitError(BaseCustomException):
     """Rate limit exceeded errors."""
     def __init__(self, detail: str = "Too many requests"):
@@ -190,6 +178,104 @@ class SessionError(BaseCustomException):
             error_code="SESSION_ERROR"
         )
 
+class FileUploadError(BaseCustomException):
+    """File upload errors."""
+    def __init__(self, detail: str = "File upload failed"):
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="FILE_UPLOAD_ERROR"
+        )
+
+class BulkOperationError(BaseCustomException):
+    """Bulk operation failures."""
+    def __init__(self, detail: str = "Bulk operation failed", failed_count: Optional[int] = None, total_count: Optional[int] = None):
+        if failed_count is not None and total_count is not None:
+            detail += f" ({failed_count}/{total_count} failed)"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="BULK_OPERATION_ERROR"
+        )
+
+class DataExportError(BaseCustomException):
+    """Data export failures."""
+    def __init__(self, detail: str = "Data export failed", export_type: Optional[str] = None):
+        if export_type:
+            detail = f"{export_type} export failed: {detail}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="DATA_EXPORT_ERROR"
+        )
+
+class DataImportError(BaseCustomException):
+    """Data import failures."""
+    def __init__(self, detail: str = "Data import failed", import_type: Optional[str] = None):
+        if import_type:
+            detail = f"{import_type} import failed: {detail}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="DATA_IMPORT_ERROR"
+        )
+
+class ReportGenerationError(BaseCustomException):
+    """Report generation failures."""
+    def __init__(self, detail: str = "Report generation failed", report_type: Optional[str] = None):
+        if report_type:
+            detail = f"{report_type} report generation failed: {detail}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="REPORT_GENERATION_ERROR"
+        )
+
+class NotificationError(BaseCustomException):
+    """Notification sending failures."""
+    def __init__(self, detail: str = "Notification failed", notification_type: Optional[str] = None):
+        if notification_type:
+            detail = f"{notification_type} notification failed: {detail}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="NOTIFICATION_ERROR"
+        )
+
+class IntegrationError(BaseCustomException):
+    """Third-party integration failures."""
+    def __init__(self, detail: str = "Integration failed", service_name: Optional[str] = None):
+        if service_name:
+            detail = f"{service_name} integration failed: {detail}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            error_code="INTEGRATION_ERROR"
+        )
+
+class ComplianceError(BaseCustomException):
+    """Labor law and compliance violations."""
+    def __init__(self, detail: str = "Compliance violation", regulation: Optional[str] = None):
+        if regulation:
+            detail = f"{regulation} violation: {detail}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="COMPLIANCE_ERROR"
+        )
+
+class WorkflowStateError(BaseCustomException):
+    """Invalid workflow state transitions."""
+    def __init__(self, detail: str = "Invalid state transition", from_state: Optional[str] = None, to_state: Optional[str] = None):
+        if from_state and to_state:
+            detail = f"Cannot transition from {from_state} to {to_state}: {detail}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="WORKFLOW_STATE_ERROR"
+        )
+
+# Resource-specific Not Found Errors
 class UserNotFoundError(BaseCustomException):
     """User not found errors."""
     def __init__(self, user_id: Optional[int] = None):
@@ -334,6 +420,43 @@ class EmployeeEmergencyContactNotFoundError(BaseCustomException):
             error_code="EMERGENCY_CONTACT_NOT_FOUND"
         )
 
+class AttendanceRecordNotFoundError(BaseCustomException):
+    """Attendance record not found errors."""
+    def __init__(self, record_id: Optional[int] = None):
+        detail = f"Attendance record not found"
+        if record_id:
+            detail += f": ID {record_id}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="ATTENDANCE_RECORD_NOT_FOUND"
+        )
+
+class PayrollPeriodNotFoundError(BaseCustomException):
+    """Payroll period not found errors."""
+    def __init__(self, period_id: Optional[int] = None):
+        detail = f"Payroll period not found"
+        if period_id:
+            detail += f": ID {period_id}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="PAYROLL_PERIOD_NOT_FOUND"
+        )
+
+# Business Logic Errors
+class LeavePolicyError(BusinessLogicError):
+    """Leave policy specific errors."""
+    def __init__(self, detail: str = "Invalid leave policy"):
+        super().__init__(detail)
+        self.error_code = "LEAVE_POLICY_ERROR"
+
+class OvertimePolicyError(BusinessLogicError):
+    """Overtime policy specific errors."""
+    def __init__(self, detail: str = "Invalid overtime policy"):
+        super().__init__(detail)
+        self.error_code = "OVERTIME_POLICY_ERROR"
+
 class LeaveRequestError(BusinessLogicError):
     """Leave request specific errors."""
     def __init__(self, detail: str = "Invalid leave request"):
@@ -346,14 +469,23 @@ class AttendanceError(BusinessLogicError):
         super().__init__(detail)
         self.error_code = "ATTENDANCE_ERROR"
 
-class FileUploadError(BaseCustomException):
-    """File upload errors."""
-    def __init__(self, detail: str = "File upload failed"):
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="FILE_UPLOAD_ERROR"
-        )
+class ClockInError(BusinessLogicError):
+    """Clock-in specific errors."""
+    def __init__(self, detail: str = "Clock-in operation failed"):
+        super().__init__(detail)
+        self.error_code = "CLOCK_IN_ERROR"
+
+class ClockOutError(BusinessLogicError):
+    """Clock-out specific errors."""
+    def __init__(self, detail: str = "Clock-out operation failed"):
+        super().__init__(detail)
+        self.error_code = "CLOCK_OUT_ERROR"
+
+class DuplicateAttendanceError(ResourceConflictError):
+    """Duplicate attendance record errors."""
+    def __init__(self, detail: str = "Duplicate attendance record"):
+        super().__init__(detail, "Attendance")
+        self.error_code = "DUPLICATE_ATTENDANCE_ERROR"
 
 class ShiftAssignmentError(BusinessLogicError):
     """Shift assignment specific errors."""
@@ -375,9 +507,27 @@ class OvertimeRecordError(BusinessLogicError):
 
 class LeaveBalanceError(BusinessLogicError):
     """Leave balance specific errors (e.g., insufficient balance)."""
-    def __init__(self, detail: str = "Insufficient leave balance"):
+    def __init__(self, detail: str = "Leave balance error"):
         super().__init__(detail)
         self.error_code = "LEAVE_BALANCE_ERROR"
+
+class InsufficientLeaveBalanceError(LeaveBalanceError):
+    """Insufficient leave balance errors."""
+    def __init__(self, detail: str = "Insufficient leave balance"):
+        super().__init__(detail)
+        self.error_code = "INSUFFICIENT_LEAVE_BALANCE_ERROR"
+
+class NegativeBalanceError(LeaveBalanceError):
+    """Negative balance errors."""
+    def __init__(self, detail: str = "Negative balance not allowed"):
+        super().__init__(detail)
+        self.error_code = "NEGATIVE_BALANCE_ERROR"
+
+class PayrollPeriodError(BusinessLogicError):
+    """Payroll period specific errors."""
+    def __init__(self, detail: str = "Payroll period conflict"):
+        super().__init__(detail)
+        self.error_code = "PAYROLL_PERIOD_ERROR"
 
 class EmployeeHierarchyError(BusinessLogicError):
     """Employee hierarchy specific errors (e.g., circular reporting)."""
@@ -445,3 +595,27 @@ def time_correction_not_found(correction_id: Optional[int] = None):
 
 def emergency_contact_not_found(contact_id: Optional[int] = None):
     return EmployeeEmergencyContactNotFoundError(contact_id)
+
+def attendance_record_not_found(record_id: Optional[int] = None):
+    return AttendanceRecordNotFoundError(record_id)
+
+def payroll_period_not_found(period_id: Optional[int] = None):
+    return PayrollPeriodNotFoundError(period_id)
+
+def insufficient_leave_balance(detail: str = "Insufficient leave balance"):
+    return InsufficientLeaveBalanceError(detail)
+
+def duplicate_attendance():
+    return DuplicateAttendanceError()
+
+def invalid_clock_in(detail: str = "Clock-in not allowed"):
+    return ClockInError(detail)
+
+def invalid_clock_out(detail: str = "Clock-out not allowed"):
+    return ClockOutError(detail)
+
+def compliance_violation(detail: str, regulation: Optional[str] = None):
+    return ComplianceError(detail, regulation)
+
+def workflow_state_error(detail: str, from_state: Optional[str] = None, to_state: Optional[str] = None):
+    return WorkflowStateError(detail, from_state, to_state)

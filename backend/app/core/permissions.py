@@ -1,10 +1,10 @@
-from typing import List
+from typing import List, Set
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict
 from app.core.database import get_db
-from app.core.enums import Permission
+from app.core.enums import Permission, PermissionGroup, PERMISSION_GROUPS
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
@@ -22,7 +22,6 @@ role_permission_cache = cachetools.TTLCache(maxsize=100, ttl=300)
 class PermissionCheck(BaseModel):
     user_id: int
     required_permissions: List[Permission]
-
     model_config = ConfigDict(from_attributes=True)
 
 async def get_role_permissions(role_id: int, db: AsyncSession) -> List[str]:
@@ -64,11 +63,9 @@ async def check_permissions(
 ) -> bool:
     """Check if the current user has the required permissions."""
     try:
-        # Verify user is active
         if not current_user.is_active:
             raise AuthorizationError(detail="User account is inactive")
 
-        # Convert enum list to string list for processing
         required_perms_str = [perm.value for perm in required_permissions]
 
         # Check user permission cache
@@ -103,7 +100,6 @@ async def check_permissions(
             role_permissions = await get_role_permissions(role_id, db)
             user_permissions.update(role_permissions)
 
-        # Cache the aggregated permissions
         user_permission_cache[cache_key] = list(user_permissions)
 
         # Check for ALL_PERMISSIONS wildcard
@@ -138,10 +134,26 @@ def require_permissions(required_permissions: List[Permission]):
         return wrapper
     return decorator
 
-async def get_user_permissions(
-    user_id: int,
-    db: AsyncSession
-) -> List[str]:
+def require_any_permissions(required_permissions: List[Permission]):
+    """Decorator that allows access if user has ANY of the required permissions."""
+    def decorator(func):
+        async def wrapper(*args, current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db), **kwargs):
+            user_permissions = await get_user_permissions(current_user.user_id, db)
+            required_perms_str = [perm.value for perm in required_permissions]
+            
+            if Permission.ALL_PERMISSIONS.value in user_permissions:
+                return await func(*args, current_user=current_user, db=db, **kwargs)
+            
+            if not any(perm in user_permissions for perm in required_perms_str):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_perms_str}"
+                )
+            
+            return await func(*args, current_user=current_user, db=db, **kwargs)
+        return wrapper
+    return decorator
+
+async def get_user_permissions(user_id: int, db: AsyncSession) -> List[str]:
     """Get all permissions for a specific user."""
     try:
         cache_key = f"user_{user_id}_permissions"
@@ -171,6 +183,30 @@ async def get_user_permissions(
             detail="Failed to retrieve user permissions"
         )
 
+async def has_permission(user_id: int, permission: Permission, db: AsyncSession) -> bool:
+    """Check if a specific user has a specific permission."""
+    try:
+        user_permissions = await get_user_permissions(user_id, db)
+        return (Permission.ALL_PERMISSIONS.value in user_permissions or 
+                permission.value in user_permissions)
+    except Exception:
+        return False
+
+def get_permissions_for_group(group: PermissionGroup) -> Set[Permission]:
+    """Get all permissions for a permission group."""
+    return set(PERMISSION_GROUPS.get(group, []))
+
+def invalidate_user_cache(user_id: int):
+    """Invalidate cached permissions for a user."""
+    cache_key = f"user_{user_id}_permissions"
+    user_permission_cache.pop(cache_key, None)
+
+def invalidate_role_cache(role_id: int):
+    """Invalidate cached permissions for a role."""
+    cache_key = f"role_{role_id}_permissions"
+    role_permission_cache.pop(cache_key, None)
+
+# Convenience decorators for common permission groups
 def require_employee_permissions():
     return require_permissions([Permission.CLOCK_IN, Permission.CLOCK_OUT])
 
@@ -182,3 +218,31 @@ def require_hr_permissions():
 
 def require_admin_permissions():
     return require_permissions([Permission.MANAGE_USERS, Permission.MANAGE_ROLES])
+
+def require_super_admin_permissions():
+    return require_permissions([Permission.ALL_PERMISSIONS])
+
+# Specific permission decorators for common operations
+def require_leave_management():
+    return require_any_permissions([
+        Permission.VIEW_LEAVE_REQUEST,
+        Permission.VIEW_TEAM_LEAVE_REQUESTS,
+        Permission.VIEW_ALL_LEAVE_REQUESTS,
+        Permission.APPROVE_LEAVE
+    ])
+
+def require_attendance_view():
+    return require_any_permissions([
+        Permission.VIEW_OWN_ATTENDANCE,
+        Permission.VIEW_TEAM_ATTENDANCE,
+        Permission.VIEW_ALL_ATTENDANCE
+    ])
+
+def require_user_management():
+    return require_any_permissions([
+        Permission.CREATE_USER,
+        Permission.VIEW_USER,
+        Permission.UPDATE_USER,
+        Permission.DELETE_USER,
+        Permission.MANAGE_USERS
+    ])
