@@ -13,7 +13,7 @@ from app.core.enums import Permission, SystemAction, CorrectionStatus
 from app.core.mail import send_email, EmailSchema, get_user_email
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
-from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
+from app.core.exceptions import TimeCorrectionNotFoundError, AttendanceRecordNotFoundError, UserNotFoundError, ValidationError, DatabaseError
 from app.services.system_log_service import SystemLogService, get_system_log_service
 from app.schemas.system_log import SystemLogCreate
 from app.core.database import get_db
@@ -35,12 +35,12 @@ async def create_time_correction(
         # Validate attendance record exists and is active
         attendance = await _get_active_attendance(db, time_correction.attendance_id)
         if not attendance:
-            raise ResourceNotFoundError(resource="Attendance record", identifier=f"ID {time_correction.attendance_id}")
+            raise AttendanceRecordNotFoundError(attendance_id=time_correction.attendance_id)
 
         # Validate user exists and is active
         user = await _get_active_user(db, time_correction.user_id)
         if not user:
-            raise ResourceNotFoundError(resource="User", identifier=f"ID {time_correction.user_id}")
+            raise UserNotFoundError(user_id=time_correction.user_id)
 
         # Validate time correction logic
         _validate_correction_times(time_correction.corrected_clock_in, time_correction.corrected_clock_out)
@@ -106,11 +106,11 @@ async def get_time_correction_by_id(
         correction = result.scalar_one_or_none()
 
         if not correction:
-            raise ResourceNotFoundError(resource="Time correction", identifier=f"ID {correction_id}")
+            raise TimeCorrectionNotFoundError(correction_id=correction_id)
 
         return TimeCorrectionOut.model_validate(correction)
 
-    except ResourceNotFoundError:
+    except TimeCorrectionNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving time correction {correction_id}: {str(e)}")
@@ -135,7 +135,7 @@ async def get_user_time_corrections(
         # Validate user exists
         user = await _get_active_user(db, user_id)
         if not user:
-            raise ResourceNotFoundError(resource="User", identifier=f"ID {user_id}")
+            raise UserNotFoundError(user_id=user_id)
 
         limit = limit or settings.DEFAULT_PAGE_SIZE
         
@@ -153,7 +153,7 @@ async def get_user_time_corrections(
         logger.info(f"Retrieved {len(corrections)} time corrections for user_id: {user_id}")
         return [TimeCorrectionOut.model_validate(c) for c in corrections]
 
-    except ResourceNotFoundError:
+    except UserNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving time corrections for user_id {user_id}: {str(e)}")
@@ -183,7 +183,7 @@ async def update_time_correction(
         db_correction = result.scalar_one_or_none()
 
         if not db_correction:
-            raise ResourceNotFoundError(resource="Time correction", identifier=f"ID {correction_id}")
+            raise TimeCorrectionNotFoundError(correction_id=correction_id)
 
         # Check if user is authorized (manager or HR)
         query = select(EmployeeHierarchy).where(
@@ -274,7 +274,7 @@ async def delete_time_correction(
         db_correction = result.scalar_one_or_none()
 
         if not db_correction:
-            raise ResourceNotFoundError(resource="Time correction", identifier=f"ID {correction_id}")
+            raise TimeCorrectionNotFoundError(correction_id=correction_id)
 
         # Check if user is authorized (HR only)
         if not current_user.has_role("HR"):
@@ -422,7 +422,7 @@ async def _update_attendance_record(db: AsyncSession, correction: TimeCorrection
         result = await db.execute(query)
         attendance = result.scalar_one_or_none()
         if not attendance:
-            raise ResourceNotFoundError(resource="Attendance record", identifier=f"ID {correction.attendance_id}")
+            raise AttendanceRecordNotFoundError(attendance_id=correction.attendance_id)
         if correction.corrected_clock_in:
             attendance.clock_in = correction.corrected_clock_in
         if correction.corrected_clock_out:
@@ -430,7 +430,7 @@ async def _update_attendance_record(db: AsyncSession, correction: TimeCorrection
         attendance.updated_at = datetime.now(timezone.utc)
         db.add(attendance)
         await db.commit()
-    except ResourceNotFoundError:
+    except AttendanceRecordNotFoundError:
         raise
     except DatabaseError as e:
         logger.warning(f"Database error updating attendance record {correction.attendance_id}: {str(e)}")

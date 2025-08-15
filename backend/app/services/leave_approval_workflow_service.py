@@ -12,7 +12,7 @@ from app.schemas.leave_approval_workflow import LeaveApprovalWorkflowCreate, Lea
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, CorrectionStatus, Permission
 from app.core.mail import send_email
-from app.core.exceptions import UserNotFoundError, ValidationError, ResourceNotFoundError, DatabaseError
+from app.core.exceptions import LeaveApprovalWorkflowError, UserNotFoundError, ValidationError, LeaveRequestNotFoundError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -41,7 +41,7 @@ async def approve_or_reject_leave(
         result = await db.execute(query)
         leave_request = result.scalar_one_or_none()
         if not leave_request:
-            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {approval.request_id}")
+            raise LeaveRequestNotFoundError(leave_id=approval.request_id)
 
         # Validate approver
         query = select(Users).where(
@@ -151,11 +151,11 @@ async def get_leave_approval_by_id(
         approval = result.scalar_one_or_none()
 
         if not approval:
-            raise ResourceNotFoundError(resource="Leave approval", identifier=f"ID {approval_id}")
+            raise LeaveApprovalWorkflowError(workflow_id=approval_id)
 
         return LeaveApprovalWorkflowOut.model_validate(approval)
 
-    except ResourceNotFoundError:
+    except LeaveApprovalWorkflowError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving leave approval {approval_id}: {str(e)}")
@@ -170,9 +170,9 @@ async def get_leave_approval_by_id(
 async def get_leave_approvals_by_request(
     request_id: int,
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> List[LeaveApprovalWorkflowOut]:
     """
@@ -186,20 +186,20 @@ async def get_leave_approvals_by_request(
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
-            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {request_id}")
+            raise LeaveRequestNotFoundError(leave_id=request_id)
 
         query = select(LeaveApprovalWorkflow).where(
             LeaveApprovalWorkflow.leave_id == request_id,
             LeaveApprovalWorkflow.is_active == True,
             LeaveApprovalWorkflow.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         approvals = result.scalars().all()
 
         logger.info(f"Retrieved {len(approvals)} leave approvals for leave_id: {request_id}")
         return [LeaveApprovalWorkflowOut.model_validate(approval) for approval in approvals]
 
-    except ResourceNotFoundError:
+    except LeaveRequestNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving leave approvals for leave_id {request_id}: {str(e)}")

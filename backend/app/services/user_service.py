@@ -7,7 +7,7 @@ from app.models.users import Users
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.security import get_password_hash
 from app.core.enums import SystemAction, Permission, EmployeeType
-from app.core.exceptions import ValidationError, DatabaseError, ResourceNotFoundError, ResourceConflictError, BusinessLogicError
+from app.core.exceptions import ValidationError, DatabaseError, UserNotFoundError, ResourceConflictError, BusinessLogicError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
@@ -128,14 +128,14 @@ async def get_user_by_id(
         user = result.scalar_one_or_none()
 
         if not user:
-            raise ResourceNotFoundError(resource="User", identifier=str(user_id))
+            raise UserNotFoundError(user_id=user_id)
 
         return UserOut.model_validate(user)
 
     except ValidationError as e:
         logger.error(f"Validation error in get_user_by_id for user_id {user_id}: {str(e)}")
         raise
-    except ResourceNotFoundError as e:
+    except UserNotFoundError as e:
         logger.error(f"Resource not found in get_user_by_id for user_id {user_id}: {str(e)}")
         raise
     except DatabaseError as e:
@@ -212,7 +212,7 @@ async def update_user(
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise ResourceNotFoundError(resource="User", identifier=str(user_id))
+            raise UserNotFoundError(user_id=user_id)
 
         update_data = user_update.model_dump(exclude_none=True)
         if "email" in update_data:
@@ -265,7 +265,7 @@ async def update_user(
     except ValidationError as e:
         logger.error(f"Validation error in update_user for user_id {user_id}: {str(e)}")
         raise
-    except ResourceNotFoundError as e:
+    except UserNotFoundError as e:
         logger.error(f"Resource not found in update_user for user_id {user_id}: {str(e)}")
         raise
     except ResourceConflictError as e:
@@ -306,7 +306,7 @@ async def delete_user(
         db_user = result.scalar_one_or_none()
 
         if not db_user:
-            raise ResourceNotFoundError(resource="User", identifier=str(user_id))
+            raise UserNotFoundError(user_id=user_id)
 
         query = select(Users).where(
             Users.manager_id == user_id,
@@ -339,7 +339,7 @@ async def delete_user(
     except ValidationError as e:
         logger.error(f"Validation error in delete_user for user_id {user_id}: {str(e)}")
         raise
-    except ResourceNotFoundError as e:
+    except UserNotFoundError as e:
         logger.error(f"Resource not found in delete_user for user_id {user_id}: {str(e)}")
         raise
     except BusinessLogicError as e:

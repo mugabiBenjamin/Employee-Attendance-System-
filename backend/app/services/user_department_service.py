@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.models.user_departments import UserDepartments
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import ResourceNotFoundError, DatabaseError, ResourceConflictError
+from app.core.exceptions import UserDepartmentNotFoundError, DatabaseError, ResourceConflictError, UserNotFoundError, DepartmentNotFoundError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
@@ -99,11 +99,11 @@ async def get_user_department_by_id(
         user_department = result.scalar_one_or_none()
         
         if not user_department:
-            raise ResourceNotFoundError(resource="User department assignment", identifier=f"ID {user_department_id}")
+            raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
         return UserDepartmentOut.model_validate(user_department)
 
-    except ResourceNotFoundError:
+    except UserDepartmentNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving user department assignment {user_department_id}: {str(e)}")
@@ -147,7 +147,7 @@ async def get_user_departments(
         logger.info(f"Retrieved {len(user_departments)} department assignments for user {user_id}")
         return [UserDepartmentOut.model_validate(ud) for ud in user_departments]
 
-    except ResourceNotFoundError:
+    except UserNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving department assignments for user {user_id}: {str(e)}")
@@ -181,7 +181,7 @@ async def update_user_department(
         db_user_department = result.scalar_one_or_none()
 
         if not db_user_department:
-            raise ResourceNotFoundError(resource="User department assignment", identifier=f"ID {user_department_id}")
+            raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
         old_values = {k: v for k, v in db_user_department.__dict__.items() if not k.startswith('_')}
         changes = update_data.model_dump(exclude_none=True)
@@ -259,7 +259,7 @@ async def delete_user_department(
         db_user_department = result.scalar_one_or_none()
 
         if not db_user_department:
-            raise ResourceNotFoundError(resource="User department assignment", identifier=f"ID {user_department_id}")
+            raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
         old_values = {k: v for k, v in db_user_department.__dict__.items() if not k.startswith('_')}
         
@@ -283,7 +283,7 @@ async def delete_user_department(
 
         logger.info(f"User department assignment soft deleted: {user_department_id}")
 
-    except ResourceNotFoundError:
+    except UserDepartmentNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error deleting user department assignment {user_department_id}: {str(e)}")

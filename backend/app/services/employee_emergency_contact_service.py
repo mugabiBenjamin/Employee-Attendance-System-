@@ -9,7 +9,7 @@ from app.models.system_logs import SystemLogs
 from app.schemas.employee_emergency_contact import EmployeeEmergencyContactCreate, EmployeeEmergencyContactUpdate, EmployeeEmergencyContactOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserNotFoundError, ResourceNotFoundError
+from app.core.exceptions import UserNotFoundError, EmployeeEmergencyContactNotFoundError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -94,11 +94,11 @@ async def get_emergency_contact_by_id(
         contact = result.scalar_one_or_none()
 
         if not contact:
-            raise ResourceNotFoundError(resource="Emergency contact", identifier=f"ID {contact_id}")
+            raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
         return EmployeeEmergencyContactOut.model_validate(contact)
 
-    except HTTPException:
+    except EmployeeEmergencyContactNotFoundError:
         raise
     except Exception as e:
         logger.error(f"Error retrieving emergency contact {contact_id}: {str(e)}")
@@ -170,7 +170,7 @@ async def update_emergency_contact(
         db_contact = result.scalar_one_or_none()
 
         if not db_contact:
-            raise ResourceNotFoundError(resource="Emergency contact", identifier=f"ID {contact_id}")
+            raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
         # Store old values for logging
         old_values = db_contact.__dict__.copy()
@@ -232,7 +232,7 @@ async def delete_emergency_contact(
         db_contact = result.scalar_one_or_none()
 
         if not db_contact:
-            raise ResourceNotFoundError(resource="Emergency contact", identifier=f"ID {contact_id}")
+            raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
         db_contact.is_active = False
         db_contact.deleted_at = datetime.now(timezone.utc)

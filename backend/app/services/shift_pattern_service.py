@@ -9,7 +9,7 @@ from app.models.system_logs import SystemLogs
 from app.schemas.shift_pattern import ShiftPatternCreate, ShiftPatternUpdate, ShiftPatternOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
+from app.core.exceptions import ShiftPatternNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -22,7 +22,7 @@ async def create_shift_pattern(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.CREATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """
@@ -48,7 +48,7 @@ async def create_shift_pattern(
             raise ValidationError(detail="End time must be after start time for non-overnight shifts")
 
         # Validate shift type
-        if shift_pattern.shift_type not in settings.VALID_SHIFT_TYPES:  # Use injected settings
+        if shift_pattern.shift_type not in settings.VALID_SHIFT_TYPES:
             raise ValidationError(detail=f"Invalid shift type. Must be one of: {', '.join(settings.VALID_SHIFT_TYPES)}")
 
         # Create shift pattern
@@ -115,11 +115,11 @@ async def get_shift_pattern_by_id(
         shift_pattern = result.scalar_one_or_none()
 
         if not shift_pattern:
-            raise ResourceNotFoundError(resource="Shift pattern", identifier=f"ID {shift_id}")
+            raise ShiftPatternNotFoundError(pattern_id=shift_id)
 
         return ShiftPatternOut.model_validate(shift_pattern)
 
-    except ResourceNotFoundError:
+    except ShiftPatternNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving shift pattern {shift_id}: {str(e)}")
@@ -133,9 +133,9 @@ async def get_shift_pattern_by_id(
 
 async def get_shift_patterns(
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
 ) -> List[ShiftPatternOut]:
     """
@@ -145,7 +145,7 @@ async def get_shift_patterns(
         query = select(ShiftPatterns).where(
             ShiftPatterns.is_active == True,
             ShiftPatterns.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         shift_patterns = result.scalars().all()
 
@@ -168,7 +168,7 @@ async def update_shift_pattern(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.UPDATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """
@@ -185,7 +185,7 @@ async def update_shift_pattern(
         db_shift_pattern = result.scalar_one_or_none()
 
         if not db_shift_pattern:
-            raise ResourceNotFoundError(resource="Shift pattern", identifier=f"ID {shift_id}")
+            raise ShiftPatternNotFoundError(pattern_id=shift_id)
 
         # Check for duplicate shift name if updated
         update_data = shift_pattern_update.model_dump(exclude_none=True)
@@ -209,7 +209,7 @@ async def update_shift_pattern(
                 raise ValidationError(detail="End time must be after start time for non-overnight shifts")
 
         # Validate shift type if updated
-        if "shift_type" in update_data and update_data["shift_type"] not in settings.VALID_SHIFT_TYPES:  # Use injected settings
+        if "shift_type" in update_data and update_data["shift_type"] not in settings.VALID_SHIFT_TYPES:
             raise ValidationError(detail=f"Invalid shift type. Must be one of: {', '.join(settings.VALID_SHIFT_TYPES)}")
 
         # Store old values for logging
@@ -276,7 +276,7 @@ async def delete_shift_pattern(
         db_shift_pattern = result.scalar_one_or_none()
 
         if not db_shift_pattern:
-            raise ResourceNotFoundError(resource="Shift pattern", identifier=f"ID {shift_id}")
+            raise ShiftPatternNotFoundError(pattern_id=shift_id)
 
         db_shift_pattern.is_active = False
         db_shift_pattern.deleted_at = datetime.now(timezone.utc)
@@ -299,7 +299,7 @@ async def delete_shift_pattern(
 
         logger.info(f"Shift pattern soft deleted, pattern_id: {shift_id}")
 
-    except ResourceNotFoundError:
+    except ShiftPatternNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error deleting shift pattern {shift_id}: {str(e)}")

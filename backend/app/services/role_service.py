@@ -9,7 +9,7 @@ from app.models.system_logs import SystemLogs
 from app.schemas.role import RoleCreate, RoleUpdate, RoleOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
+from app.core.exceptions import RoleNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -116,11 +116,11 @@ async def get_role_by_id(
         role = result.scalar_one_or_none()
 
         if not role:
-            raise ResourceNotFoundError(resource="Role", identifier=f"ID {role_id}")
+            raise RoleNotFoundError(role_id=role_id)
 
         return RoleOut.model_validate(role)
 
-    except ResourceNotFoundError:
+    except RoleNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving role {role_id}: {str(e)}")
@@ -134,9 +134,9 @@ async def get_role_by_id(
 
 async def get_roles(
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
 ) -> List[RoleOut]:
     """
@@ -146,7 +146,7 @@ async def get_roles(
         query = select(Roles).where(
             Roles.is_active == True,
             Roles.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         roles = result.scalars().all()
 
@@ -185,7 +185,7 @@ async def update_role(
         db_role = result.scalar_one_or_none()
 
         if not db_role:
-            raise ResourceNotFoundError(resource="Role", identifier=f"ID {role_id}")
+            raise RoleNotFoundError(role_id=role_id)
 
         # Check for duplicate role name if updated
         update_data = role_update.model_dump(exclude_none=True)
@@ -275,7 +275,7 @@ async def delete_role(
         db_role = result.scalar_one_or_none()
 
         if not db_role:
-            raise ResourceNotFoundError(resource="Role", identifier=f"ID {role_id}")
+            raise RoleNotFoundError(role_id=role_id)
 
         db_role.is_active = False
         db_role.deleted_at = datetime.now(timezone.utc)
@@ -302,7 +302,7 @@ async def delete_role(
 
         logger.info(f"Role soft deleted, role_id: {role_id}")
 
-    except ResourceNotFoundError:
+    except RoleNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error deleting role {role_id}: {str(e)}")

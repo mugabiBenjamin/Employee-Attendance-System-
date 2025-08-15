@@ -12,7 +12,7 @@ from app.schemas.leave_request import LeaveRequestCreate, LeaveRequestOut
 from app.core.config import Settings, get_settings
 from app.core.enums import LeaveRequestStatus, SystemAction, Permission
 from app.core.mail import send_email
-from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError
+from app.core.exceptions import LeaveRequestNotFoundError, LeaveBalanceNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -58,7 +58,7 @@ async def create_leave_request(
         result = await db.execute(query)
         leave_balance = result.scalar_one_or_none()
         if not leave_balance:
-            raise ValidationError(detail="No leave balance available for this leave type")
+            raise LeaveBalanceNotFoundError(user_id=current_user.user_id, leave_type=leave_request.leave_type)
 
         days_requested = (leave_request.end_date.date() - leave_request.start_date.date()).days + 1
         available_days = leave_balance.allocated_days - leave_balance.used_days + leave_balance.carried_forward
@@ -155,12 +155,12 @@ async def get_leave_request_by_id(
         leave_request = result.scalar_one_or_none()
 
         if not leave_request:
-            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {request_id} or not authorized")
+            raise LeaveRequestNotFoundError(leave_id=request_id)
 
         logger.info(f"Retrieved leave request, leave_id: {request_id}, user_id: {current_user.user_id}")
         return LeaveRequestOut.model_validate(leave_request)
 
-    except ResourceNotFoundError:
+    except LeaveRequestNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving leave request {request_id}: {str(e)}")
@@ -175,9 +175,9 @@ async def get_leave_request_by_id(
 async def get_user_leave_requests(
     current_user: Users = Depends(get_current_user),
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST]))
 ) -> List[LeaveRequestOut]:
     """
@@ -194,7 +194,7 @@ async def get_user_leave_requests(
         ).where(
             (LeaveRequests.user_id == current_user.user_id) |
             (EmployeeHierarchy.manager_id == current_user.user_id)
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         leave_requests = result.scalars().all()
 
@@ -233,7 +233,7 @@ async def approve_leave(
         result = await db.execute(query)
         leave_request = result.scalar_one_or_none()
         if not leave_request:
-            raise ResourceNotFoundError(resource="Leave request", identifier=f"ID {leave_id}")
+            raise LeaveRequestNotFoundError(leave_id=leave_id)
 
         # Check if the user is authorized to approve (manager of the requester)
         query = select(EmployeeHierarchy).where(
@@ -265,7 +265,7 @@ async def approve_leave(
             result = await db.execute(query)
             leave_balance = result.scalar_one_or_none()
             if not leave_balance:
-                raise ValidationError(detail="No leave balance available for this leave type")
+                raise LeaveBalanceNotFoundError(user_id=leave_request.user_id, leave_type=leave_request.leave_type)
             leave_balance.used_days += leave_request.days_requested
             leave_balance.updated_at = datetime.now(timezone.utc)
             db.add(leave_balance)

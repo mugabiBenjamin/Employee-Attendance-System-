@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.models.user_roles import UserRoles
 from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import ResourceNotFoundError, ValidationError, DatabaseError, ResourceConflictError
+from app.core.exceptions import UserRoleNotFoundError, ValidationError, DatabaseError, ResourceConflictError, UserNotFoundError, RoleNotFoundError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.services.system_log_service import SystemLogService, get_system_log_service
@@ -107,11 +107,11 @@ async def get_user_role_by_id(
         user_role = result.scalar_one_or_none()
 
         if not user_role:
-            raise ResourceNotFoundError(resource="User role assignment", identifier=f"ID {user_role_id}")
+            raise UserRoleNotFoundError(user_role_id=user_role_id)
 
         return UserRoleOut.model_validate(user_role)
 
-    except ResourceNotFoundError:
+    except UserRoleNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving user role assignment {user_role_id}: {str(e)}")
@@ -149,7 +149,7 @@ async def get_user_roles(
         logger.info(f"Retrieved {len(user_roles)} role assignments for user_id: {user_id}")
         return [UserRoleOut.model_validate(ur) for ur in user_roles]
 
-    except ResourceNotFoundError:
+    except UserNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving role assignments for user_id {user_id}: {str(e)}")
@@ -185,7 +185,7 @@ async def update_user_role(
         db_user_role = result.scalar_one_or_none()
 
         if not db_user_role:
-            raise ResourceNotFoundError(resource="User role assignment", identifier=f"ID {user_role_id}")
+            raise UserRoleNotFoundError(user_role_id=user_role_id)
 
         # Validate user if updated
         update_data = user_role_update.model_dump(exclude_none=True)
@@ -270,7 +270,7 @@ async def delete_user_role(
         db_user_role = result.scalar_one_or_none()
 
         if not db_user_role:
-            raise ResourceNotFoundError(resource="User role assignment", identifier=f"ID {user_role_id}")
+            raise UserRoleNotFoundError(user_role_id=user_role_id)
 
         # Prevent deletion of user's last role assignment
         query = select(UserRoles).where(

@@ -9,7 +9,7 @@ from app.models.system_logs import SystemLogs
 from app.schemas.leave_policy import LeavePolicyCreate, LeavePolicyUpdate, LeavePolicyOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import ResourceNotFoundError, DatabaseError
+from app.core.exceptions import LeavePolicyNotFoundError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -108,11 +108,11 @@ async def get_leave_policy_by_id(
         policy = result.scalar_one_or_none()
 
         if not policy:
-            raise ResourceNotFoundError(resource="Leave policy", identifier=f"ID {policy_id}")
+            raise LeavePolicyNotFoundError(leave_type=f"ID {policy_id}")
 
         return LeavePolicyOut.model_validate(policy)
 
-    except ResourceNotFoundError:
+    except LeavePolicyNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving leave policy {policy_id}: {str(e)}")
@@ -126,9 +126,9 @@ async def get_leave_policy_by_id(
 
 async def get_leave_policies(
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_POLICY]))
 ) -> List[LeavePolicyOut]:
     """
@@ -138,7 +138,7 @@ async def get_leave_policies(
         query = select(LeavePolicies).where(
             LeavePolicies.is_active == True,
             LeavePolicies.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         policies = result.scalars().all()
 
@@ -177,7 +177,7 @@ async def update_leave_policy(
         db_policy = result.scalar_one_or_none()
 
         if not db_policy:
-            raise ResourceNotFoundError(resource="Leave policy", identifier=f"ID {policy_id}")
+            raise LeavePolicyNotFoundError(leave_type=f"ID {policy_id}")
 
         # Check for duplicate leave type if updated
         update_data = policy_update.model_dump(exclude_none=True)
@@ -257,7 +257,7 @@ async def delete_leave_policy(
         db_policy = result.scalar_one_or_none()
 
         if not db_policy:
-            raise ResourceNotFoundError(resource="Leave policy", identifier=f"ID {policy_id}")
+            raise LeavePolicyNotFoundError(leave_type=f"ID {policy_id}")
 
         db_policy.is_active = False
         db_policy.deleted_at = datetime.now(timezone.utc)
@@ -280,7 +280,7 @@ async def delete_leave_policy(
 
         logger.info(f"Leave policy soft deleted, policy_id: {policy_id}")
 
-    except ResourceNotFoundError:
+    except LeavePolicyNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error deleting leave policy {policy_id}: {str(e)}")

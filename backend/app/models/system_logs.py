@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB, INET
 from app.core.database import Base
@@ -17,3 +17,4 @@ class SystemLogs(Base):
     ip_address = Column(INET)
     user_agent = Column(Text)
     timestamp = Column(DateTime(timezone=True), server_default=func.current_timestamp())
+    is_active = Column(Boolean, nullable=False, default=True)

@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 from app.models.holiday_calendar import HolidayCalendar
 from app.models.users import Users
 from app.models.departments import Departments
@@ -10,7 +10,7 @@ from app.models.system_logs import SystemLogs
 from app.schemas.holiday_calendar import HolidayCalendarCreate, HolidayCalendarUpdate, HolidayCalendarOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import ResourceNotFoundError, DepartmentNotFoundError, DatabaseError
+from app.core.exceptions import HolidayNotFoundError, DepartmentNotFoundError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -116,11 +116,11 @@ async def get_holiday_by_id(
         holiday = result.scalar_one_or_none()
 
         if not holiday:
-            raise ResourceNotFoundError(resource="Holiday", identifier=f"ID {holiday_id}")
+            raise HolidayNotFoundError(holiday_id=holiday_id)
 
         return HolidayCalendarOut.model_validate(holiday)
 
-    except ResourceNotFoundError:
+    except HolidayNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving holiday {holiday_id}: {str(e)}")
@@ -134,9 +134,9 @@ async def get_holiday_by_id(
 
 async def get_holidays(
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> List[HolidayCalendarOut]:
     """
@@ -146,7 +146,7 @@ async def get_holidays(
         query = select(HolidayCalendar).where(
             HolidayCalendar.is_active == True,
             HolidayCalendar.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         holidays = result.scalars().all()
 
@@ -185,7 +185,7 @@ async def update_holiday(
         db_holiday = result.scalar_one_or_none()
 
         if not db_holiday:
-            raise ResourceNotFoundError(resource="Holiday", identifier=f"ID {holiday_id}")
+            raise HolidayNotFoundError(holiday_id=holiday_id)
 
         # Store old values for logging
         old_values = db_holiday.__dict__.copy()
@@ -282,7 +282,7 @@ async def delete_holiday(
         db_holiday = result.scalar_one_or_none()
 
         if not db_holiday:
-            raise ResourceNotFoundError(resource="Holiday", identifier=f"ID {holiday_id}")
+            raise HolidayNotFoundError(holiday_id=holiday_id)
 
         db_holiday.is_active = False
         db_holiday.deleted_at = datetime.now(timezone.utc)
@@ -305,7 +305,7 @@ async def delete_holiday(
 
         logger.info(f"Holiday soft deleted, holiday_id: {holiday_id}")
 
-    except ResourceNotFoundError:
+    except HolidayNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error deleting holiday {holiday_id}: {str(e)}")

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def create_employee_hierarchy(
     hierarchy: EmployeeHierarchyCreate,
-    request: Request,  # Added Request parameter
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -72,8 +72,8 @@ async def create_employee_hierarchy(
             record_id=db_hierarchy.hierarchy_id,
             old_values=None,
             new_values=db_hierarchy.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Updated to use request
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -153,7 +153,7 @@ async def get_employee_hierarchies(
 async def update_employee_hierarchy(
     hierarchy_id: int,
     hierarchy_update: EmployeeHierarchyUpdate,
-    request: Request,  # Added Request parameter
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -210,8 +210,8 @@ async def update_employee_hierarchy(
             record_id=hierarchy_id,
             old_values=old_values,
             new_values=db_hierarchy.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Updated to use request
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -231,7 +231,7 @@ async def update_employee_hierarchy(
 
 async def delete_employee_hierarchy(
     hierarchy_id: int,
-    request: Request,  # Added Request parameter
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
@@ -263,8 +263,8 @@ async def delete_employee_hierarchy(
             record_id=hierarchy_id,
             old_values=db_hierarchy.__dict__,
             new_values=None,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Updated to use request
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)

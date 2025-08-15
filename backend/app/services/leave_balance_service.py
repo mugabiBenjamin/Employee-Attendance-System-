@@ -9,7 +9,7 @@ from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.schemas.leave_balance import LeaveBalanceCreate, LeaveBalanceOut
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, DatabaseError
+from app.core.exceptions import LeaveBalanceNotFoundError, UserNotFoundError, LeavePolicyNotFoundError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -39,7 +39,7 @@ async def get_leave_balance(
         balances = result.scalars().all()
 
         if not balances:
-            raise ResourceNotFoundError(resource="Leave balances", identifier=f"user_id {user.user_id}")
+            raise LeaveBalanceNotFoundError(user_id=user.user_id, leave_type=leave_type or "any")
 
         # Fetch leave policy details for each balance
         balance_out = []
@@ -58,7 +58,7 @@ async def get_leave_balance(
         logger.info(f"Retrieved {len(balance_out)} leave balances for user_id: {user.user_id}")
         return balance_out
 
-    except ResourceNotFoundError:
+    except LeaveBalanceNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving leave balances for user_id {user.user_id}: {str(e)}")
@@ -102,10 +102,7 @@ async def update_leave_balance(
         result = await db.execute(query)
         policy = result.scalar_one_or_none()
         if not policy:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid leave type"
-            )
+            raise LeavePolicyNotFoundError(leave_type=leave_type)
 
         # Retrieve or create leave balance
         query = select(LeaveBalances).where(

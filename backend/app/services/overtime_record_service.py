@@ -11,7 +11,7 @@ from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.mail import send_email
-from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, DatabaseError, ValidationError
+from app.core.exceptions import UserNotFoundError, OvertimeRecordNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -24,7 +24,7 @@ async def create_overtime_record(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.CREATE_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """
@@ -53,7 +53,7 @@ async def create_overtime_record(
             raise ValidationError(detail="Overtime record already exists for this date")
 
         # Check if overtime exceeds threshold
-        if overtime.overtime_hours > settings.OVERTIME_THRESHOLD:  # Use injected settings
+        if overtime.overtime_hours > settings.OVERTIME_THRESHOLD:
             # Send alert to manager
             query = select(Users).join(
                 EmployeeHierarchy,
@@ -76,8 +76,8 @@ async def create_overtime_record(
         db_overtime = OvertimeRecords(
             user_id=overtime.user_id,
             overtime_hours=overtime.overtime_hours,
-            overtime_rate=1.5,  # Default rate from schema
-            overtime_amount=overtime.overtime_hours * 1.5,  # Calculate amount
+            overtime_rate=1.5,
+            overtime_amount=overtime.overtime_hours * 1.5,
             date=overtime.date,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
@@ -134,11 +134,11 @@ async def get_overtime_record_by_id(
         overtime = result.scalar_one_or_none()
 
         if not overtime:
-            raise ResourceNotFoundError(resource="Overtime record", identifier=f"ID {overtime_id}")
+            raise OvertimeRecordNotFoundError(overtime_id=overtime_id)
 
         return OvertimeRecordOut.model_validate(overtime)
 
-    except ResourceNotFoundError:
+    except OvertimeRecordNotFoundError:
         raise
     except DatabaseError as e:
         logger.error(f"Database error retrieving overtime record {overtime_id}: {str(e)}")
@@ -155,9 +155,9 @@ async def get_user_overtime_records(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD]))
 ) -> List[OvertimeRecordOut]:
     """
@@ -183,7 +183,7 @@ async def get_user_overtime_records(
         if end_date:
             query = query.where(OvertimeRecords.date <= end_date)
 
-        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         overtime_records = result.scalars().all()
 
@@ -206,10 +206,10 @@ async def get_team_overtime_records(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
-    limit: int = 50,  # Default value as fallback
+    limit: int = 50,
     manager: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
 ) -> List[OvertimeRecordOut]:
     """
@@ -239,7 +239,7 @@ async def get_team_overtime_records(
         if end_date:
             query = query.where(OvertimeRecords.date <= end_date)
 
-        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         overtime_records = result.scalars().all()
 

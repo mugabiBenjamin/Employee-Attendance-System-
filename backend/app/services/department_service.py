@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 async def create_department(
     department: DepartmentCreate,
-    request: Request,  # Added Request parameter
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
+    _: bool = Depends(require_permissions([Permission.CREATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """
     Create a new department with validation and logging.
@@ -69,8 +69,8 @@ async def create_department(
             record_id=db_department.department_id,
             old_values=None,
             new_values=db_department.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Updated to use request
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -91,7 +91,7 @@ async def create_department(
 async def get_department_by_id(
     department_id: int,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> Optional[DepartmentOut]:
     """
     Retrieve a department by ID.
@@ -124,7 +124,7 @@ async def get_departments(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> List[DepartmentOut]:
     """
     Retrieve a list of active departments with pagination.
@@ -150,10 +150,10 @@ async def get_departments(
 async def update_department(
     department_id: int,
     department_update: DepartmentUpdate,
-    request: Request,  # Added Request parameter
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
+    _: bool = Depends(require_permissions([Permission.UPDATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """
     Update a department with validation and logging.
@@ -219,8 +219,8 @@ async def update_department(
             record_id=db_department.department_id,
             old_values=old_values,
             new_values=db_department.__dict__,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Updated to use request
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
@@ -240,10 +240,10 @@ async def update_department(
 
 async def delete_department(
     department_id: int,
-    request: Request,  # Added Request parameter
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_DEPARTMENTS]))
+    _: bool = Depends(require_permissions([Permission.DELETE_DEPARTMENT]))
 ) -> None:
     """
     Soft delete a department with logging.
@@ -272,8 +272,8 @@ async def delete_department(
             record_id=db_department.department_id,
             old_values=db_department.__dict__,
             new_values=None,
-            ip_address=request.client.host,  # Updated to use request
-            user_agent=request.headers.get("user-agent"),  # Updated to use request
+            ip_address=request.client.host,
+            user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)

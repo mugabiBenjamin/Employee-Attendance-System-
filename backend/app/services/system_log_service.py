@@ -8,7 +8,7 @@ from app.models.users import Users
 from app.schemas.system_log import SystemLogCreate, SystemLogOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, ValidationError, DatabaseError
+from app.core.exceptions import UserNotFoundError, SystemLogNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -92,12 +92,12 @@ class SystemLogService:
             system_log = result.scalar_one_or_none()
 
             if not system_log:
-                raise ResourceNotFoundError(resource="System log", identifier=f"ID {log_id}")
+                raise SystemLogNotFoundError(log_id=log_id)
 
             logger.info(f"Retrieved system log, log_id: {log_id}", extra={"request_id": request_id})
             return SystemLogOut.model_validate(system_log)
 
-        except ResourceNotFoundError:
+        except SystemLogNotFoundError:
             raise
         except DatabaseError as e:
             logger.error(f"Database error retrieving system log {log_id}: {str(e)}", extra={"request_id": request_id})
@@ -116,7 +116,7 @@ class SystemLogService:
         try:
             query = select(SystemLogs).where(
                 SystemLogs.is_active == True
-            ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+            ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
             result = await self.db.execute(query)
             system_logs = result.scalars().all()
 
@@ -150,7 +150,7 @@ class SystemLogService:
             query = select(SystemLogs).where(
                 SystemLogs.user_id == user_id,
                 SystemLogs.is_active == True
-            ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)  # Use injected settings
+            ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
             result = await self.db.execute(query)
             system_logs = result.scalars().all()
 
@@ -205,7 +205,7 @@ async def list_logs(
     skip: int = 0,
     limit: int = 50,
     service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     request: Request = Depends()
 ):
     """List system logs with pagination. Requires VIEW_LOGS permission."""
@@ -219,7 +219,7 @@ async def list_user_logs(
     skip: int = 0,
     limit: int = 50,
     service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings),  # Inject Settings
+    settings: Settings = Depends(get_settings),
     request: Request = Depends()
 ):
     """List system logs for a specific user. Requires VIEW_LOGS permission."""

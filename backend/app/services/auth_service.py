@@ -2,15 +2,16 @@ from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 from app.models.users import Users
 from app.models.system_logs import SystemLogs
 from app.core.security import verify_password, create_access_token, create_refresh_token, get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import SystemAction
+from app.core.enums import SystemAction, Permission
 from app.core.exceptions import AuthenticationError
 from app.core.database import get_db
+from app.core.permissions import require_permissions
 import logging
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,8 @@ async def refresh_token(
     token_request: RefreshTokenRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.REFRESH_TOKEN]))
 ) -> TokenResponse:
     """
     Refresh access token using a valid refresh token.

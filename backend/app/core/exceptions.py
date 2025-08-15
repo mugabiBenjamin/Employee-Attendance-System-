@@ -1,5 +1,4 @@
 from fastapi import HTTPException, status
-from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, Dict, Any, Type, List
 from enum import Enum
 
@@ -47,7 +46,7 @@ class AuthorizationError(BaseCustomException):
         )
 
 class ValidationError(BaseCustomException):
-    """Input validation errors."""
+    """Input validation errors with support for schema-specific rules."""
     def __init__(
         self,
         detail: str = "Invalid input data",
@@ -102,184 +101,11 @@ class BusinessLogicError(BaseCustomException):
             error_code="BUSINESS_LOGIC_ERROR"
         )
 
-class EmailSendingError(BaseCustomException):
-    """Email sending failures."""
-    def __init__(self, detail: str = "Failed to send email", original_error: Optional[Exception] = None):
-        super().__init__(
-            detail=f"{detail}: {str(original_error)}" if original_error else detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="EMAIL_SENDING_ERROR"
-        )
-
-class CacheError(BaseCustomException):
-    """Cache operation failures."""
-    def __init__(self, detail: str = "Cache operation failed", original_error: Optional[Exception] = None):
-        super().__init__(
-            detail=f"{detail}: {str(original_error)}" if original_error else detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="CACHE_ERROR"
-        )
-
-class LoggingError(BaseCustomException):
-    """Logging operation failures."""
-    def __init__(self, detail: str = "Logging operation failed", original_error: Optional[Exception] = None):
-        super().__init__(
-            detail=f"{detail}: {str(original_error)}" if original_error else detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="LOGGING_ERROR"
-        )
-
-class RequestIdError(BaseCustomException):
-    """Request ID validation errors."""
-    def __init__(self, detail: str = "Invalid or missing request ID"):
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="REQUEST_ID_ERROR"
-        )
-
-class CeleryTaskError(BaseCustomException):
-    """Celery task execution failures."""
-    def __init__(self, detail: str = "Celery task failed", task_id: Optional[str] = None, original_error: Optional[Exception] = None):
-        error_detail = f"{detail}: task_id={task_id}" if task_id else detail
-        if original_error:
-            error_detail += f": {str(original_error)}"
-        super().__init__(
-            detail=error_detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="CELERY_TASK_ERROR"
-        )
-
-class RedisError(BaseCustomException):
-    """Redis operation failures."""
-    def __init__(self, detail: str = "Redis operation failed", original_error: Optional[Exception] = None):
-        super().__init__(
-            detail=f"{detail}: {str(original_error)}" if original_error else detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="REDIS_ERROR"
-        )
-
-class RateLimitError(BaseCustomException):
-    """Rate limit exceeded errors."""
-    def __init__(self, detail: str = "Too many requests"):
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            error_code="RATE_LIMIT_ERROR"
-        )
-
-class SessionError(BaseCustomException):
-    """Session management errors."""
-    def __init__(self, detail: str = "Invalid or expired session"):
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            headers={"WWW-Authenticate": "Bearer"},
-            error_code="SESSION_ERROR"
-        )
-
-class FileUploadError(BaseCustomException):
-    """File upload errors."""
-    def __init__(self, detail: str = "File upload failed"):
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="FILE_UPLOAD_ERROR"
-        )
-
-class BulkOperationError(BaseCustomException):
-    """Bulk operation failures."""
-    def __init__(self, detail: str = "Bulk operation failed", failed_count: Optional[int] = None, total_count: Optional[int] = None):
-        if failed_count is not None and total_count is not None:
-            detail += f" ({failed_count}/{total_count} failed)"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="BULK_OPERATION_ERROR"
-        )
-
-class DataExportError(BaseCustomException):
-    """Data export failures."""
-    def __init__(self, detail: str = "Data export failed", export_type: Optional[str] = None):
-        if export_type:
-            detail = f"{export_type} export failed: {detail}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="DATA_EXPORT_ERROR"
-        )
-
-class DataImportError(BaseCustomException):
-    """Data import failures."""
-    def __init__(self, detail: str = "Data import failed", import_type: Optional[str] = None):
-        if import_type:
-            detail = f"{import_type} import failed: {detail}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="DATA_IMPORT_ERROR"
-        )
-
-class ReportGenerationError(BaseCustomException):
-    """Report generation failures."""
-    def __init__(self, detail: str = "Report generation failed", report_type: Optional[str] = None):
-        if report_type:
-            detail = f"{report_type} report generation failed: {detail}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="REPORT_GENERATION_ERROR"
-        )
-
-class NotificationError(BaseCustomException):
-    """Notification sending failures."""
-    def __init__(self, detail: str = "Notification failed", notification_type: Optional[str] = None):
-        if notification_type:
-            detail = f"{notification_type} notification failed: {detail}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="NOTIFICATION_ERROR"
-        )
-
-class IntegrationError(BaseCustomException):
-    """Third-party integration failures."""
-    def __init__(self, detail: str = "Integration failed", service_name: Optional[str] = None):
-        if service_name:
-            detail = f"{service_name} integration failed: {detail}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            error_code="INTEGRATION_ERROR"
-        )
-
-class ComplianceError(BaseCustomException):
-    """Labor law and compliance violations."""
-    def __init__(self, detail: str = "Compliance violation", regulation: Optional[str] = None):
-        if regulation:
-            detail = f"{regulation} violation: {detail}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="COMPLIANCE_ERROR"
-        )
-
-class WorkflowStateError(BaseCustomException):
-    """Invalid workflow state transitions."""
-    def __init__(self, detail: str = "Invalid state transition", from_state: Optional[str] = None, to_state: Optional[str] = None):
-        if from_state and to_state:
-            detail = f"Cannot transition from {from_state} to {to_state}: {detail}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="WORKFLOW_STATE_ERROR"
-        )
-
 # Resource-specific Not Found Errors
 class UserNotFoundError(BaseCustomException):
     """User not found errors."""
     def __init__(self, user_id: Optional[int] = None):
-        detail = f"User not found"
+        detail = "User not found"
         if user_id:
             detail += f": ID {user_id}"
         super().__init__(
@@ -291,7 +117,7 @@ class UserNotFoundError(BaseCustomException):
 class DepartmentNotFoundError(BaseCustomException):
     """Department not found errors."""
     def __init__(self, dept_id: Optional[int] = None):
-        detail = f"Department not found"
+        detail = "Department not found"
         if dept_id:
             detail += f": ID {dept_id}"
         super().__init__(
@@ -303,7 +129,7 @@ class DepartmentNotFoundError(BaseCustomException):
 class RoleNotFoundError(BaseCustomException):
     """Role not found errors."""
     def __init__(self, role_id: Optional[int] = None):
-        detail = f"Role not found"
+        detail = "Role not found"
         if role_id:
             detail += f": ID {role_id}"
         super().__init__(
@@ -312,10 +138,34 @@ class RoleNotFoundError(BaseCustomException):
             error_code="ROLE_NOT_FOUND"
         )
 
+class UserDepartmentNotFoundError(BaseCustomException):
+    """User department assignment not found errors."""
+    def __init__(self, user_department_id: Optional[int] = None):
+        detail = "User department assignment not found"
+        if user_department_id:
+            detail += f": ID {user_department_id}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="USER_DEPARTMENT_NOT_FOUND"
+        )
+
+class UserRoleNotFoundError(BaseCustomException):
+    """User role assignment not found errors."""
+    def __init__(self, user_role_id: Optional[int] = None):
+        detail = "User role assignment not found"
+        if user_role_id:
+            detail += f": ID {user_role_id}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="USER_ROLE_NOT_FOUND"
+        )
+
 class LeavePolicyNotFoundError(BaseCustomException):
     """Leave policy not found errors."""
     def __init__(self, policy_id: Optional[int] = None):
-        detail = f"Leave policy not found"
+        detail = "Leave policy not found"
         if policy_id:
             detail += f": ID {policy_id}"
         super().__init__(
@@ -327,7 +177,7 @@ class LeavePolicyNotFoundError(BaseCustomException):
 class ShiftAssignmentNotFoundError(BaseCustomException):
     """Shift assignment not found errors."""
     def __init__(self, shift_id: Optional[int] = None):
-        detail = f"Shift assignment not found"
+        detail = "Shift assignment not found"
         if shift_id:
             detail += f": ID {shift_id}"
         super().__init__(
@@ -339,7 +189,7 @@ class ShiftAssignmentNotFoundError(BaseCustomException):
 class ShiftPatternNotFoundError(BaseCustomException):
     """Shift pattern not found errors."""
     def __init__(self, pattern_id: Optional[int] = None):
-        detail = f"Shift pattern not found"
+        detail = "Shift pattern not found"
         if pattern_id:
             detail += f": ID {pattern_id}"
         super().__init__(
@@ -351,7 +201,7 @@ class ShiftPatternNotFoundError(BaseCustomException):
 class OvertimeRecordNotFoundError(BaseCustomException):
     """Overtime record not found errors."""
     def __init__(self, record_id: Optional[int] = None):
-        detail = f"Overtime record not found"
+        detail = "Overtime record not found"
         if record_id:
             detail += f": ID {record_id}"
         super().__init__(
@@ -363,7 +213,7 @@ class OvertimeRecordNotFoundError(BaseCustomException):
 class LeaveBalanceNotFoundError(BaseCustomException):
     """Leave balance not found errors."""
     def __init__(self, balance_id: Optional[int] = None):
-        detail = f"Leave balance not found"
+        detail = "Leave balance not found"
         if balance_id:
             detail += f": ID {balance_id}"
         super().__init__(
@@ -375,7 +225,7 @@ class LeaveBalanceNotFoundError(BaseCustomException):
 class HolidayNotFoundError(BaseCustomException):
     """Holiday not found errors."""
     def __init__(self, holiday_id: Optional[int] = None):
-        detail = f"Holiday not found"
+        detail = "Holiday not found"
         if holiday_id:
             detail += f": ID {holiday_id}"
         super().__init__(
@@ -387,7 +237,7 @@ class HolidayNotFoundError(BaseCustomException):
 class LeaveRequestNotFoundError(BaseCustomException):
     """Leave request not found errors."""
     def __init__(self, request_id: Optional[int] = None):
-        detail = f"Leave request not found"
+        detail = "Leave request not found"
         if request_id:
             detail += f": ID {request_id}"
         super().__init__(
@@ -399,7 +249,7 @@ class LeaveRequestNotFoundError(BaseCustomException):
 class TimeCorrectionNotFoundError(BaseCustomException):
     """Time correction not found errors."""
     def __init__(self, correction_id: Optional[int] = None):
-        detail = f"Time correction not found"
+        detail = "Time correction not found"
         if correction_id:
             detail += f": ID {correction_id}"
         super().__init__(
@@ -411,7 +261,7 @@ class TimeCorrectionNotFoundError(BaseCustomException):
 class EmployeeEmergencyContactNotFoundError(BaseCustomException):
     """Employee emergency contact not found errors."""
     def __init__(self, contact_id: Optional[int] = None):
-        detail = f"Emergency contact not found"
+        detail = "Emergency contact not found"
         if contact_id:
             detail += f": ID {contact_id}"
         super().__init__(
@@ -423,7 +273,7 @@ class EmployeeEmergencyContactNotFoundError(BaseCustomException):
 class AttendanceRecordNotFoundError(BaseCustomException):
     """Attendance record not found errors."""
     def __init__(self, record_id: Optional[int] = None):
-        detail = f"Attendance record not found"
+        detail = "Attendance record not found"
         if record_id:
             detail += f": ID {record_id}"
         super().__init__(
@@ -432,132 +282,170 @@ class AttendanceRecordNotFoundError(BaseCustomException):
             error_code="ATTENDANCE_RECORD_NOT_FOUND"
         )
 
-class PayrollPeriodNotFoundError(BaseCustomException):
-    """Payroll period not found errors."""
-    def __init__(self, period_id: Optional[int] = None):
-        detail = f"Payroll period not found"
-        if period_id:
-            detail += f": ID {period_id}"
+class EmployeeHierarchyNotFoundError(BaseCustomException):
+    """Employee hierarchy not found errors."""
+    def __init__(self, hierarchy_id: Optional[int] = None):
+        detail = "Employee hierarchy not found"
+        if hierarchy_id:
+            detail += f": ID {hierarchy_id}"
         super().__init__(
             detail=detail,
             status_code=status.HTTP_404_NOT_FOUND,
-            error_code="PAYROLL_PERIOD_NOT_FOUND"
+            error_code="EMPLOYEE_HIERARCHY_NOT_FOUND"
+        )
+
+class HolidayCalendarNotFoundError(BaseCustomException):
+    """Holiday calendar not found errors."""
+    def __init__(self, holiday_id: Optional[int] = None):
+        detail = "Holiday calendar not found"
+        if holiday_id:
+            detail += f": ID {holiday_id}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="HOLIDAY_CALENDAR_NOT_FOUND"
+        )
+
+class LeaveApprovalWorkflowNotFoundError(BaseCustomException):
+    """Leave approval workflow not found errors."""
+    def __init__(self, workflow_id: Optional[int] = None):
+        detail = "Leave approval workflow not found"
+        if workflow_id:
+            detail += f": ID {workflow_id}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="LEAVE_APPROVAL_WORKFLOW_NOT_FOUND"
+        )
+
+class SystemLogNotFoundError(BaseCustomException):
+    """System log not found errors."""
+    def __init__(self, log_id: Optional[int] = None):
+        detail = "System log not found"
+        if log_id:
+            detail += f": ID {log_id}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="SYSTEM_LOG_NOT_FOUND"
         )
 
 # Business Logic Errors
 class LeavePolicyError(BusinessLogicError):
     """Leave policy specific errors."""
     def __init__(self, detail: str = "Invalid leave policy"):
-        super().__init__(detail)
-        self.error_code = "LEAVE_POLICY_ERROR"
+        super().__init__(detail, "LeavePolicy")
+        self.error_code = "LEAVE_POLICY_INVALID"
 
 class OvertimePolicyError(BusinessLogicError):
     """Overtime policy specific errors."""
     def __init__(self, detail: str = "Invalid overtime policy"):
-        super().__init__(detail)
-        self.error_code = "OVERTIME_POLICY_ERROR"
+        super().__init__(detail, "OvertimePolicy")
+        self.error_code = "OVERTIME_POLICY_INVALID"
 
 class LeaveRequestError(BusinessLogicError):
     """Leave request specific errors."""
     def __init__(self, detail: str = "Invalid leave request"):
-        super().__init__(detail)
-        self.error_code = "LEAVE_REQUEST_ERROR"
+        super().__init__(detail, "LeaveRequest")
+        self.error_code = "LEAVE_REQUEST_INVALID"
 
 class AttendanceError(BusinessLogicError):
     """Attendance operation errors."""
     def __init__(self, detail: str = "Invalid attendance operation"):
-        super().__init__(detail)
-        self.error_code = "ATTENDANCE_ERROR"
+        super().__init__(detail, "Attendance")
+        self.error_code = "ATTENDANCE_INVALID"
 
-class ClockInError(BusinessLogicError):
-    """Clock-in specific errors."""
-    def __init__(self, detail: str = "Clock-in operation failed"):
-        super().__init__(detail)
-        self.error_code = "CLOCK_IN_ERROR"
-
-class ClockOutError(BusinessLogicError):
-    """Clock-out specific errors."""
-    def __init__(self, detail: str = "Clock-out operation failed"):
-        super().__init__(detail)
-        self.error_code = "CLOCK_OUT_ERROR"
+class AttendanceOperationError(BusinessLogicError):
+    """Attendance clock-in or clock-out operation errors."""
+    def __init__(self, detail: str = "Attendance operation failed", operation: Optional[str] = None):
+        super().__init__(detail, f"AttendanceOperation_{operation}" if operation else "AttendanceOperation")
+        self.error_code = f"ATTENDANCE_{operation.upper()}_INVALID" if operation else "ATTENDANCE_OPERATION_INVALID"
 
 class DuplicateAttendanceError(ResourceConflictError):
     """Duplicate attendance record errors."""
     def __init__(self, detail: str = "Duplicate attendance record"):
         super().__init__(detail, "Attendance")
-        self.error_code = "DUPLICATE_ATTENDANCE_ERROR"
+        self.error_code = "ATTENDANCE_DUPLICATE"
 
 class ShiftAssignmentError(BusinessLogicError):
     """Shift assignment specific errors."""
     def __init__(self, detail: str = "Invalid shift assignment"):
-        super().__init__(detail)
-        self.error_code = "SHIFT_ASSIGNMENT_ERROR"
+        super().__init__(detail, "ShiftAssignment")
+        self.error_code = "SHIFT_ASSIGNMENT_INVALID"
 
 class ShiftPatternError(BusinessLogicError):
     """Shift pattern configuration errors."""
     def __init__(self, detail: str = "Invalid shift pattern"):
-        super().__init__(detail)
-        self.error_code = "SHIFT_PATTERN_ERROR"
+        super().__init__(detail, "ShiftPattern")
+        self.error_code = "SHIFT_PATTERN_INVALID"
 
 class OvertimeRecordError(BusinessLogicError):
     """Overtime record specific errors."""
     def __init__(self, detail: str = "Invalid overtime record"):
-        super().__init__(detail)
-        self.error_code = "OVERTIME_RECORD_ERROR"
+        super().__init__(detail, "OvertimeRecord")
+        self.error_code = "OVERTIME_RECORD_INVALID"
 
 class LeaveBalanceError(BusinessLogicError):
-    """Leave balance specific errors (e.g., insufficient balance)."""
+    """Leave balance specific errors."""
     def __init__(self, detail: str = "Leave balance error"):
-        super().__init__(detail)
-        self.error_code = "LEAVE_BALANCE_ERROR"
+        super().__init__(detail, "LeaveBalance")
+        self.error_code = "LEAVE_BALANCE_INVALID"
 
 class InsufficientLeaveBalanceError(LeaveBalanceError):
     """Insufficient leave balance errors."""
     def __init__(self, detail: str = "Insufficient leave balance"):
         super().__init__(detail)
-        self.error_code = "INSUFFICIENT_LEAVE_BALANCE_ERROR"
+        self.error_code = "LEAVE_BALANCE_INSUFFICIENT"
 
 class NegativeBalanceError(LeaveBalanceError):
     """Negative balance errors."""
     def __init__(self, detail: str = "Negative balance not allowed"):
         super().__init__(detail)
-        self.error_code = "NEGATIVE_BALANCE_ERROR"
-
-class PayrollPeriodError(BusinessLogicError):
-    """Payroll period specific errors."""
-    def __init__(self, detail: str = "Payroll period conflict"):
-        super().__init__(detail)
-        self.error_code = "PAYROLL_PERIOD_ERROR"
+        self.error_code = "LEAVE_BALANCE_NEGATIVE"
 
 class EmployeeHierarchyError(BusinessLogicError):
     """Employee hierarchy specific errors (e.g., circular reporting)."""
     def __init__(self, detail: str = "Invalid employee hierarchy"):
-        super().__init__(detail)
-        self.error_code = "EMPLOYEE_HIERARCHY_ERROR"
+        super().__init__(detail, "EmployeeHierarchy")
+        self.error_code = "EMPLOYEE_HIERARCHY_INVALID"
 
 class HolidayCalendarError(BusinessLogicError):
     """Holiday calendar specific errors."""
     def __init__(self, detail: str = "Invalid holiday calendar operation"):
-        super().__init__(detail)
-        self.error_code = "HOLIDAY_CALENDAR_ERROR"
+        super().__init__(detail, "HolidayCalendar")
+        self.error_code = "HOLIDAY_CALENDAR_INVALID"
 
 class LeaveApprovalWorkflowError(BusinessLogicError):
     """Leave approval workflow specific errors."""
     def __init__(self, detail: str = "Invalid leave approval workflow"):
-        super().__init__(detail)
-        self.error_code = "LEAVE_APPROVAL_WORKFLOW_ERROR"
+        super().__init__(detail, "LeaveApprovalWorkflow")
+        self.error_code = "LEAVE_APPROVAL_WORKFLOW_INVALID"
 
 class TimeCorrectionError(BusinessLogicError):
     """Time correction specific errors."""
     def __init__(self, detail: str = "Invalid time correction request"):
-        super().__init__(detail)
-        self.error_code = "TIME_CORRECTION_ERROR"
+        super().__init__(detail, "TimeCorrection")
+        self.error_code = "TIME_CORRECTION_INVALID"
 
 class EmployeeEmergencyContactError(BusinessLogicError):
     """Employee emergency contact specific errors."""
     def __init__(self, detail: str = "Invalid emergency contact operation"):
-        super().__init__(detail)
-        self.error_code = "EMERGENCY_CONTACT_ERROR"
+        super().__init__(detail, "EmployeeEmergencyContact")
+        self.error_code = "EMERGENCY_CONTACT_INVALID"
+
+class AttendanceSummaryError(BusinessLogicError):
+    """Attendance summary specific errors."""
+    def __init__(self, detail: str = "Invalid attendance summary"):
+        super().__init__(detail, "AttendanceSummary")
+        self.error_code = "ATTENDANCE_SUMMARY_INVALID"
+
+class WorkflowStateError(BusinessLogicError):
+    """Invalid workflow state transitions."""
+    def __init__(self, detail: str = "Invalid state transition", from_state: Optional[str] = None, to_state: Optional[str] = None):
+        if from_state and to_state:
+            detail = f"Cannot transition from {from_state} to {to_state}: {detail}"
+        super().__init__(detail, "WorkflowState")
+        self.error_code = "WORKFLOW_STATE_INVALID"
 
 # Convenience functions for common cases
 def user_not_found(user_id: Optional[int] = None):
@@ -568,6 +456,12 @@ def department_not_found(dept_id: Optional[int] = None):
 
 def role_not_found(role_id: Optional[int] = None):
     return RoleNotFoundError(role_id)
+
+def user_department_not_found(user_department_id: Optional[int] = None):
+    return UserDepartmentNotFoundError(user_department_id)
+
+def user_role_not_found(user_role_id: Optional[int] = None):
+    return UserRoleNotFoundError(user_role_id)
 
 def leave_policy_not_found(policy_id: Optional[int] = None):
     return LeavePolicyNotFoundError(policy_id)
@@ -599,23 +493,29 @@ def emergency_contact_not_found(contact_id: Optional[int] = None):
 def attendance_record_not_found(record_id: Optional[int] = None):
     return AttendanceRecordNotFoundError(record_id)
 
-def payroll_period_not_found(period_id: Optional[int] = None):
-    return PayrollPeriodNotFoundError(period_id)
+def employee_hierarchy_not_found(hierarchy_id: Optional[int] = None):
+    return EmployeeHierarchyNotFoundError(hierarchy_id)
+
+def holiday_calendar_not_found(holiday_id: Optional[int] = None):
+    return HolidayCalendarNotFoundError(holiday_id)
+
+def leave_approval_workflow_not_found(workflow_id: Optional[int] = None):
+    return LeaveApprovalWorkflowNotFoundError(workflow_id)
+
+def system_log_not_found(log_id: Optional[int] = None):
+    return SystemLogNotFoundError(log_id)
 
 def insufficient_leave_balance(detail: str = "Insufficient leave balance"):
     return InsufficientLeaveBalanceError(detail)
 
-def duplicate_attendance():
-    return DuplicateAttendanceError()
+def negative_balance(detail: str = "Negative balance not allowed"):
+    return NegativeBalanceError(detail)
 
-def invalid_clock_in(detail: str = "Clock-in not allowed"):
-    return ClockInError(detail)
+def duplicate_attendance(detail: str = "Duplicate attendance record"):
+    return DuplicateAttendanceError(detail)
 
-def invalid_clock_out(detail: str = "Clock-out not allowed"):
-    return ClockOutError(detail)
-
-def compliance_violation(detail: str, regulation: Optional[str] = None):
-    return ComplianceError(detail, regulation)
+def attendance_operation_failed(detail: str = "Attendance operation failed", operation: Optional[str] = None):
+    return AttendanceOperationError(detail, operation)
 
 def workflow_state_error(detail: str, from_state: Optional[str] = None, to_state: Optional[str] = None):
     return WorkflowStateError(detail, from_state, to_state)
