@@ -1,35 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict
-from datetime import datetime, timezone, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.users import Users
-from app.models.system_logs import SystemLogs
-from app.core.security import (
-    create_access_token, 
-    create_refresh_token,
-    decode_access_token, 
-    verify_password, 
-    decode_refresh_token,
-    get_current_active_user,
-    blacklist_token,
-    oauth2_scheme
-)
-from app.core.enums import SystemAction
-from app.core.permissions import get_user_permissions
-from app.models.roles import Roles
-from app.models.user_roles import UserRoles
-from app.schemas.user_role import UserProfile
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from app.core.security import get_current_active_user, oauth2_scheme
+from app.services.auth_service import login_for_access_token, refresh_access_token, logout, get_current_user_profile, validate_token
+from app.core.config import Settings, get_settings
 import logging
 
-logger = logging.getLogger(__name__)
+from backend.app.schemas.user_role import UserProfile
 
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -44,231 +26,74 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
     model_config = ConfigDict(from_attributes=True)
 
-async def log_system_action(db: AsyncSession, user_id: int, action: SystemAction, details: str = None):
-    """Helper to log system actions"""
-    try:
-        log_entry = SystemLogs(
-            user_id=user_id,
-            action=action.value,
-            details=details,
-            timestamp=datetime.now(timezone.utc),
-            is_active=True
-        )
-        db.add(log_entry)
-    except Exception as e:
-        logger.error(f"Failed to log system action: {str(e)}")
-
-@router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login")
-@limiter.limit("5/minute")
-async def login_for_access_token(
+@router.post("/token", 
+            response_model=Token, 
+            status_code=status.HTTP_200_OK, 
+            summary="User login", 
+            description="Authenticate user with email and password to get JWT tokens.")
+async def login_endpoint(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> Token:
-    """Authenticate user with email and password to get JWT tokens."""
-    try:
-        if not form_data.username or not form_data.password:
-            logger.warning("Missing credentials in login attempt")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email and password are required"
-            )
+    """
+    Handle user login by delegating to auth_service.
+    """
+    return await login_for_access_token(form_data, db, settings)
 
-        # Find active user by email
-        query = select(Users).where(
-            Users.email == form_data.username,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
-
-        if not user or not verify_password(form_data.password, user.password_hash):
-            logger.warning(f"Failed login attempt for email: {form_data.username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-            
-        access_token = create_access_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=1800)  # 30 minutes
-        )
-        refresh_token = create_refresh_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=86400)  # 1 day
-        )
-
-        await log_system_action(db, user.user_id, SystemAction.LOGIN, f"Successful login from {form_data.username}")
-
-        logger.info(f"Successful login for user_id: {user.user_id}")
-        return Token(access_token=access_token, refresh_token=refresh_token)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error during login for email {form_data.username}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication failed"
-        )
-
-@router.post("/refresh", response_model=Token, status_code=status.HTTP_200_OK, summary="Refresh access token")
-@limiter.limit("5/minute")
-async def refresh_access_token(
+@router.post("/refresh", 
+             response_model=Token, 
+             status_code=status.HTTP_200_OK, 
+             summary="Refresh access token", 
+             description="Generate new access token using a valid refresh token.")
+async def refresh_token_endpoint(
     request: Request,
     token_request: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> Token:
-    """Generate new access token using a valid refresh token."""
-    try:
-        payload = decode_refresh_token(token_request.refresh_token)
-        user_id = payload.get("sub")
-        if not user_id:
-            logger.warning("Invalid refresh token provided")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid refresh token",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
+    """
+    Handle token refresh by delegating to auth_service.
+    """
+    return await refresh_access_token(token_request, db, settings)
 
-        # Verify token issuance time to prevent reuse of old tokens
-        issued_at = payload.get("iat")
-        if not issued_at or (datetime.now(timezone.utc).timestamp() - issued_at > 86400):  # 1 day expiry
-            logger.warning(f"Expired refresh token for user_id: {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token expired",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-
-        # Check if refresh token is blacklisted
-        if await blacklist_token(token_request.refresh_token):
-            logger.warning(f"Blacklisted refresh token used for user_id: {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token is invalid",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-
-        # Verify user still exists and is active
-        query = select(Users).where(
-            Users.user_id == int(user_id),
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
-
-        if not user:
-            logger.warning(f"Refresh token used for inactive/deleted user_id: {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User account not found or inactive",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-
-        access_token = create_access_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=1800)  # 30 minutes
-        )
-        new_refresh_token = create_refresh_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=86400)  # 1 day
-        )
-
-        logger.info(f"Token refreshed for user_id: {user.user_id}")
-        return Token(access_token=access_token, refresh_token=new_refresh_token)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error refreshing token: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token refresh failed"
-        )
-
-@router.post("/logout", status_code=status.HTTP_200_OK, summary="User logout")
-async def logout(
+@router.post("/logout", 
+             status_code=status.HTTP_200_OK, 
+             summary="User logout", 
+             description="Log out current user and blacklist tokens.")
+async def logout_endpoint(
     current_user: Users = Depends(get_current_active_user),
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db)
 ):
-    """Log out current user, blacklist tokens, and record logout action."""
-    try:
-        # Decode access token to get expiry
-        payload = decode_access_token(token)
-        expires_at = payload.get("exp", datetime.now(timezone.utc).timestamp() + 1800)
+    """
+    Handle user logout by delegating to auth_service.
+    """
+    await logout(current_user, token, db)
+    return {"message": "Successfully logged out"}
 
-        # Blacklist access token
-        await blacklist_token(token, expires_at)
-
-        # Log logout action
-        await log_system_action(db, current_user.user_id, SystemAction.LOGOUT, "User logged out")
-        await db.commit()
-        
-        logger.info(f"User logged out, user_id: {current_user.user_id}")
-        return {"message": "Successfully logged out"}
-
-    except Exception as e:
-        logger.error(f"Error during logout for user_id {current_user.user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Logout failed"
-        )
-
-@router.get("/me", response_model=UserProfile, summary="Get current user profile")
-async def get_current_user_profile(
+@router.get("/me", 
+            response_model=UserProfile, 
+            summary="Get current user profile", 
+            description="Retrieve profile information for the current user.")
+async def get_profile_endpoint(
     current_user: Users = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
-    """Retrieve profile information for the current user."""
-    try:
-        # Get user permissions
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        permissions_list = user_permissions
-        
-        # Get user roles
-        roles_query = select(Roles.role_name).join(UserRoles).where(
-            UserRoles.user_id == current_user.user_id,
-            UserRoles.is_active == True
-        )
-        roles_result = await db.execute(roles_query)
-        roles_list = [role[0] for role in roles_result.fetchall()]
-        
-        return UserProfile(
-            user_id=current_user.user_id,
-            email=current_user.email,
-            first_name=current_user.first_name,
-            last_name=current_user.last_name,
-            job_title=current_user.job_title,
-            roles=roles_list,
-            permissions=permissions_list
-        )
+    """
+    Retrieve current user profile by delegating to auth_service.
+    """
+    return await get_current_user_profile(current_user, db)
 
-    except Exception as e:
-        logger.error(f"Error retrieving user profile for user_id {current_user.user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve user profile"
-        )
-
-@router.post("/validate-token", status_code=status.HTTP_200_OK, summary="Validate access token")
-async def validate_token(
+@router.post("/validate-token", 
+            status_code=status.HTTP_200_OK, 
+            summary="Validate access token", 
+            description="Validate if the current access token is valid and user is active.")
+async def validate_token_endpoint(
     current_user: Users = Depends(get_current_active_user)
 ):
-    """Validate if the current access token is valid and user is active."""
-    try:
-        return {
-            "valid": True,
-            "user_id": current_user.user_id,
-            "email": current_user.email
-        }
-    except Exception as e:
-        logger.error(f"Error validating token for user_id {current_user.user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token validation failed"
-        )
+    """
+    Validate access token by delegating to auth_service.
+    """
+    return await validate_token(current_user)

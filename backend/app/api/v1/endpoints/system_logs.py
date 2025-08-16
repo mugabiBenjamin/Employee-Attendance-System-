@@ -1,15 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
-from app.models.system_logs import SystemLogs
 from app.models.users import Users
-from app.core.config import settings
-from app.core.permissions import check_permissions
+from app.core.permissions import require_permissions
 from app.core.security import get_current_active_user
+from app.core.config import Settings, get_settings
 from app.core.enums import Permission
+from app.services.system_log_service import (
+    read_system_logs as service_read_system_logs,
+    read_system_log as service_read_system_log,
+    get_user_logs as service_get_user_logs,
+    get_log_actions_summary as service_get_log_actions_summary
+)
 from app.schemas.system_log import SystemLogOut
 import logging
 
@@ -17,146 +21,73 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system-logs", tags=["System Logs"])
 
-@router.get("/", response_model=List[SystemLogOut], summary="List system logs")
-async def read_system_logs(
+@router.get("/", 
+            response_model=List[SystemLogOut],
+            summary="List system logs",
+            description="List system logs with optional filters.")
+@require_permissions([Permission.VIEW_SYSTEM_LOGS])
+async def read_system_logs_endpoint(
     user_id: Optional[int] = None,
     action: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> List[SystemLogOut]:
-    """List system logs with optional filters. Requires VIEW_LOGS permission."""
-    try:
-        await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
+    """
+    List system logs with optional filters by delegating to system_log_service.
+    """
+    return await service_read_system_logs(user_id, action, start_date, end_date, skip, limit, current_user, db, settings)
 
-        query = select(SystemLogs).where(SystemLogs.is_active == True)
-        
-        # Apply filters
-        if user_id:
-            query = query.where(SystemLogs.user_id == user_id)
-        if action:
-            query = query.where(SystemLogs.action == action)
-        if start_date:
-            query = query.where(SystemLogs.timestamp >= start_date)
-        if end_date:
-            query = query.where(SystemLogs.timestamp <= end_date)
-        
-        # Order by most recent first
-        query = query.order_by(desc(SystemLogs.timestamp)).offset(skip).limit(limit)
-        result = await db.execute(query)
-        logs = result.scalars().all()
-
-        logger.info(f"Retrieved {len(logs)} system logs")
-        return [SystemLogOut.model_validate(log) for log in logs]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving system logs: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving system logs")
-
-@router.get("/{log_id}", response_model=SystemLogOut, summary="Get system log by ID")
-async def read_system_log(
+@router.get("/{log_id}", 
+            response_model=SystemLogOut,
+            summary="Get system log by ID",
+            description="Retrieve a specific system log by its ID.")
+@require_permissions([Permission.VIEW_SYSTEM_LOGS])
+async def read_system_log_endpoint(
     log_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> SystemLogOut:
-    """Get a specific system log by ID. Requires VIEW_LOGS permission."""
-    try:
-        await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
+    """
+    Retrieve a system log by ID by delegating to system_log_service.
+    """
+    return await service_read_system_log(log_id, current_user, db, settings)
 
-        query = select(SystemLogs).where(SystemLogs.log_id == log_id, SystemLogs.is_active == True)
-        result = await db.execute(query)
-        log = result.scalar_one_or_none()
-
-        if not log:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System log not found")
-
-        logger.info(f"Retrieved system log, log_id: {log_id}")
-        return SystemLogOut.model_validate(log)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving system log {log_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving system log")
-
-# Additional endpoints for log analysis
-@router.get("/user/{user_id}/logs", response_model=List[SystemLogOut], summary="Get logs for specific user")
-async def get_user_logs(
+@router.get("/user/{user_id}/logs", 
+            response_model=List[SystemLogOut],
+            summary="Get logs for specific user",
+            description="Retrieve system logs for a specific user, optionally filtered by action.")
+@require_permissions([Permission.VIEW_SYSTEM_LOGS])
+async def get_user_logs_endpoint(
     user_id: int,
     action: Optional[str] = None,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ) -> List[SystemLogOut]:
-    """Get system logs for a specific user. Requires VIEW_LOGS permission or viewing own logs."""
-    try:
-        # Allow users to view their own logs
-        if current_user.user_id != user_id:
-            await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
+    """
+    Retrieve logs for a specific user by delegating to system_log_service.
+    """
+    return await service_get_user_logs(user_id, action, limit, current_user, db, settings)
 
-        query = select(SystemLogs).where(
-            SystemLogs.user_id == user_id,
-            SystemLogs.is_active == True
-        )
-        
-        if action:
-            query = query.where(SystemLogs.action == action)
-        
-        query = query.order_by(desc(SystemLogs.timestamp)).limit(limit)
-        result = await db.execute(query)
-        logs = result.scalars().all()
-
-        return [SystemLogOut.model_validate(log) for log in logs]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving logs for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving user logs")
-
-@router.get("/actions/summary", summary="Get log action summary")
-async def get_log_actions_summary(
+@router.get("/actions/summary", 
+            summary="Get log action summary",
+            description="Retrieve a summary of system actions.")
+@require_permissions([Permission.VIEW_SYSTEM_LOGS])
+async def get_log_actions_summary_endpoint(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_active_user),
+    settings: Settings = Depends(get_settings)
 ):
-    """Get summary of system actions. Requires VIEW_LOGS permission."""
-    try:
-        await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
-
-        query = select(SystemLogs.action, SystemLogs.log_id).where(SystemLogs.is_active == True)
-        
-        if start_date:
-            query = query.where(SystemLogs.timestamp >= start_date)
-        if end_date:
-            query = query.where(SystemLogs.timestamp <= end_date)
-            
-        result = await db.execute(query)
-        logs = result.all()
-        
-        # Count actions
-        action_counts = {}
-        for log in logs:
-            action = log.action
-            action_counts[action] = action_counts.get(action, 0) + 1
-        
-        return {
-            "total_logs": len(logs),
-            "action_summary": action_counts,
-            "period": {
-                "start_date": start_date,
-                "end_date": end_date
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error generating log summary: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error generating log summary")
+    """
+    Retrieve a summary of system actions by delegating to system_log_service.
+    """
+    return await service_get_log_actions_summary(start_date, end_date, current_user, db, settings)

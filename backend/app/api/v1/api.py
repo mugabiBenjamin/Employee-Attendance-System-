@@ -14,6 +14,13 @@ from app.api.v1.endpoints import (
     user_departments,
     user_roles,
     users,
+    attendance_summary,
+    holiday_calendar,
+    leave_approval_workflow,
+    leave_balances,
+    leave_policies,
+    overtime_records,
+    time_corrections
 )
 
 api_router = APIRouter()
@@ -31,3 +38,10 @@ api_router.include_router(employee_hierarchy.router)
 api_router.include_router(shift_patterns.router)
 api_router.include_router(shift_assignments.router)
 api_router.include_router(system_logs.router)
+api_router.include_router(attendance_summary.router)
+api_router.include_router(holiday_calendar.router)
+api_router.include_router(leave_approval_workflow.router)
+api_router.include_router(leave_balances.router)
+api_router.include_router(leave_policies.router)
+api_router.include_router(overtime_records.router)
+api_router.include_router(time_corrections.router)

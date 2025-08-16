@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/time-corrections", tags=["Time Corrections"])
 
 @router.post("/", 
-            response_model=TimeCorrectionOut, 
-            status_code=status.HTTP_201_CREATED,
-            dependencies=[Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))],
-            summary="Request time correction", 
-            description="Submit a time correction request for an attendance record.")
+             response_model=TimeCorrectionOut, 
+             status_code=status.HTTP_201_CREATED,
+             summary="Request time correction", 
+             description="Submit a time correction request for an attendance record.")
+@require_permissions([Permission.VIEW_OWN_ATTENDANCE])
 async def request_time_correction(
     correction: TimeCorrectionCreate,
     db: AsyncSession = Depends(get_db),
@@ -55,6 +55,7 @@ async def request_time_correction(
             response_model=TimeCorrectionOut,
             summary="Get time correction by ID", 
             description="Retrieve a specific time correction request.")
+@require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_TEAM_ATTENDANCE])
 async def get_time_correction(
     correction_id: int,
     db: AsyncSession = Depends(get_db),
@@ -79,6 +80,7 @@ async def get_time_correction(
             response_model=List[TimeCorrectionOut],
             summary="Get time correction requests", 
             description="Retrieve time correction requests for current user or team (if authorized).")
+@require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_TEAM_ATTENDANCE])
 async def list_time_corrections(
     user_id: Optional[int] = None,
     skip: int = 0,
@@ -103,9 +105,9 @@ async def list_time_corrections(
 
 @router.put("/{correction_id}", 
             response_model=TimeCorrectionOut,
-            dependencies=[Depends(require_permissions([Permission.APPROVE_LEAVE]))],
             summary="Approve/reject time correction", 
             description="Approve or reject a time correction request.")
+@require_permissions([Permission.APPROVE_CORRECTIONS])
 async def approve_reject_time_correction(
     correction_id: int,
     approval_data: TimeCorrectionApproval,
@@ -146,10 +148,10 @@ async def approve_reject_time_correction(
         )
 
 @router.delete("/{correction_id}", 
-            status_code=status.HTTP_204_NO_CONTENT,
-            dependencies=[Depends(require_permissions([Permission.APPROVE_LEAVE]))],
-            summary="Delete time correction", 
-            description="Soft delete a time correction request (HR/admin only).")
+               status_code=status.HTTP_204_NO_CONTENT,
+               summary="Delete time correction", 
+               description="Soft delete a time correction request (HR/admin only).")
+@require_permissions([Permission.APPROVE_CORRECTIONS])
 async def remove_time_correction(
     correction_id: int,
     db: AsyncSession = Depends(get_db),
