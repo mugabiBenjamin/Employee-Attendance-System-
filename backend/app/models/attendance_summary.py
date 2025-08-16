@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Date
 from app.core.database import Base
 
 class AttendanceSummary(Base):
@@ -14,3 +14,4 @@ class AttendanceSummary(Base):
     overtime_hours = Column(String)  
     clock_in_time = Column(DateTime(timezone=True))
     clock_out_time = Column(DateTime(timezone=True))
+    is_active = Column(Boolean, default=True, nullable=False)

@@ -19,6 +19,7 @@ class Users(Base):
     employee_type = Column(employee_type_enum, nullable=False, default='full_time')
     salary = Column(DECIMAL(12, 2))
     manager_id = Column(Integer, ForeignKey('users.user_id', ondelete='SET NULL'))
+    department_id = Column(Integer, ForeignKey('departments.department_id', ondelete='SET NULL'))
     is_active = Column(Boolean, default=True)
     deleted_at = Column(DateTime(timezone=True))
     last_login = Column(DateTime(timezone=True))
