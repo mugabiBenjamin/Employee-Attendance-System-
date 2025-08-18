@@ -11,11 +11,7 @@ class DepartmentBase(BaseModel):
     is_active: bool = True
 
 class DepartmentCreate(DepartmentBase):
-    department_name: str
-    description: Optional[str] = None
-    manager_id: Optional[int] = None
-    budget: Optional[float] = None
-    location: Optional[str] = None
+    pass
 
 class DepartmentUpdate(BaseModel):
     department_name: Optional[str] = Field(None, max_length=100)

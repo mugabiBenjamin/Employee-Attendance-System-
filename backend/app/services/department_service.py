@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -24,12 +24,13 @@ async def create_department(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.CREATE_DEPARTMENT]))
 ) -> DepartmentOut:
-    """
-    Create a new department with validation and logging.
-    """
+    """Create a new department with validation and logging."""
     try:
-        # Check for existing department name
-        query = select(Departments).where(Departments.department_name == department.department_name)
+        query = select(Departments).where(
+            Departments.department_name == department.department_name,
+            Departments.is_active.is_(True),
+            Departments.deleted_at.is_(None)
+        )
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise HTTPException(
@@ -37,12 +38,11 @@ async def create_department(
                 detail="Department name already exists"
             )
 
-        # Validate manager_id if provided
         if department.manager_id:
             query = select(Users).where(
                 Users.user_id == department.manager_id,
-                Users.is_active == True,
-                Users.deleted_at == None
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
@@ -51,9 +51,8 @@ async def create_department(
                     detail="Manager not found"
                 )
 
-        # Create department
         db_department = Departments(
-            **DepartmentCreate(**department.model_dump()).model_dump(),
+            **department.model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -61,7 +60,6 @@ async def create_department(
         await db.commit()
         await db.refresh(db_department)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
             action=SystemAction.CREATE_DEPARTMENT,
@@ -88,19 +86,17 @@ async def create_department(
             detail="Error creating department"
         )
 
-async def get_department_by_id(
+async def get_department(
     department_id: int,
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
-) -> Optional[DepartmentOut]:
-    """
-    Retrieve a department by ID.
-    """
+) -> DepartmentOut:
+    """Retrieve a department by ID."""
     try:
         query = select(Departments).where(
             Departments.department_id == department_id,
-            Departments.is_active == True,
-            Departments.deleted_at == None
+            Departments.is_active.is_(True),
+            Departments.deleted_at.is_(None)
         )
         result = await db.execute(query)
         department = result.scalar_one_or_none()
@@ -119,20 +115,18 @@ async def get_department_by_id(
             detail="Error retrieving department"
         )
 
-async def get_departments(
+async def list_departments(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> List[DepartmentOut]:
-    """
-    Retrieve a list of active departments with pagination.
-    """
+    """Retrieve a list of active departments with pagination."""
     try:
         query = select(Departments).where(
-            Departments.is_active == True,
-            Departments.deleted_at == None
+            Departments.is_active.is_(True),
+            Departments.deleted_at.is_(None)
         ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         departments = result.scalars().all()
@@ -155,15 +149,12 @@ async def update_department(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.UPDATE_DEPARTMENT]))
 ) -> DepartmentOut:
-    """
-    Update a department with validation and logging.
-    """
+    """Update a department with validation and logging."""
     try:
-        # Retrieve department
         query = select(Departments).where(
             Departments.department_id == department_id,
-            Departments.is_active == True,
-            Departments.deleted_at == None
+            Departments.is_active.is_(True),
+            Departments.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_department = result.scalar_one_or_none()
@@ -171,12 +162,13 @@ async def update_department(
         if not db_department:
             raise DepartmentNotFoundError(dept_id=department_id)
 
-        # Check for duplicate department name
         update_data = department_update.model_dump(exclude_none=True)
         if "department_name" in update_data:
             query = select(Departments).where(
                 Departments.department_name == update_data["department_name"],
-                Departments.department_id != department_id
+                Departments.department_id != department_id,
+                Departments.is_active.is_(True),
+                Departments.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
@@ -185,12 +177,11 @@ async def update_department(
                     detail="Department name already exists"
                 )
 
-        # Validate manager_id if provided
         if "manager_id" in update_data and update_data["manager_id"]:
             query = select(Users).where(
                 Users.user_id == update_data["manager_id"],
-                Users.is_active == True,
-                Users.deleted_at == None
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
@@ -199,10 +190,7 @@ async def update_department(
                     detail="Manager not found"
                 )
 
-        # Store old values for logging
         old_values = db_department.__dict__.copy()
-
-        # Apply updates
         for key, value in update_data.items():
             setattr(db_department, key, value)
 
@@ -211,10 +199,9 @@ async def update_department(
         await db.commit()
         await db.refresh(db_department)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE,
+            action=SystemAction.UPDATE_DEPARTMENT,
             table_affected="departments",
             record_id=db_department.department_id,
             old_values=old_values,
@@ -229,7 +216,7 @@ async def update_department(
         logger.info(f"Department updated, department_id: {department_id}")
         return DepartmentOut.model_validate(db_department)
 
-    except HTTPException:
+    except (DepartmentNotFoundError, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Error updating department {department_id}: {str(e)}")
@@ -245,14 +232,12 @@ async def delete_department(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.DELETE_DEPARTMENT]))
 ) -> None:
-    """
-    Soft delete a department with logging.
-    """
+    """Soft delete a department with logging."""
     try:
         query = select(Departments).where(
             Departments.department_id == department_id,
-            Departments.is_active == True,
-            Departments.deleted_at == None
+            Departments.is_active.is_(True),
+            Departments.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_department = result.scalar_one_or_none()
@@ -264,7 +249,6 @@ async def delete_department(
         db_department.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
             action=SystemAction.DELETE_DEPARTMENT,
@@ -281,7 +265,7 @@ async def delete_department(
 
         logger.info(f"Department soft deleted, department_id: {department_id}")
 
-    except HTTPException:
+    except DepartmentNotFoundError:
         raise
     except Exception as e:
         logger.error(f"Error deleting department {department_id}: {str(e)}")

@@ -19,26 +19,24 @@ class AttendanceRecordBase(BaseModel):
 
     @field_validator('clock_in_time', 'clock_out_time', mode='before')
     @classmethod
-    def validate_datetime_format(cls, value):
+    def validate_datetime_format(cls, value: Optional[datetime]) -> Optional[datetime]:
         if value is None:
             return value
         if isinstance(value, str):
-            # Check ISO 8601 format
             iso_format_pattern = r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:\d{2}|Z)?$'
             if not re.match(iso_format_pattern, value):
-                raise ValidationError(detail=f"Invalid datetime format. Must be ISO 8601 (e.g., '2025-08-14T12:00:00Z').")
+                raise ValidationError(detail="Invalid datetime format. Must be ISO 8601 (e.g., '2025-08-14T12:00:00Z').")
             try:
                 value = datetime.fromisoformat(value.replace('Z', '+00:00'))
             except ValueError:
                 raise ValidationError(detail="Invalid datetime value.")
-        # Ensure datetime is not in the future
         if value > datetime.now(value.tzinfo or timezone.utc):
             raise ValidationError(detail="Datetime cannot be in the future.")
         return value
 
     @field_validator('clock_out_time')
     @classmethod
-    def validate_clock_out(cls, clock_out_time, info):
+    def validate_clock_out(cls, clock_out_time: Optional[datetime], info) -> Optional[datetime]:
         if clock_out_time and hasattr(info, 'data') and 'clock_in_time' in info.data:
             clock_in_time = info.data['clock_in_time']
             if clock_in_time and clock_out_time <= clock_in_time:
@@ -47,9 +45,8 @@ class AttendanceRecordBase(BaseModel):
 
     @field_validator('date')
     @classmethod
-    def validate_date(cls, value):
-        # Ensure date is not in the future
-        if value > date.today():
+    def validate_date(cls, value: datetime) -> datetime:
+        if value > datetime.now(value.tzinfo or timezone.utc):
             raise ValidationError(detail="Date cannot be in the future.")
         return value
 
@@ -58,7 +55,7 @@ class AttendanceRecordCreate(AttendanceRecordBase):
     clock_in_time: datetime
     ip_address: str
     location: Optional[str] = None
-    status: AttendanceStatus = AttendanceStatus.PRESENT  # Already uses AttendanceStatus
+    status: AttendanceStatus = AttendanceStatus.PRESENT
 
 class AttendanceRecordUpdate(BaseModel):
     clock_in_time: Optional[datetime] = None
@@ -66,7 +63,7 @@ class AttendanceRecordUpdate(BaseModel):
     break_duration: Optional[int] = Field(None, ge=0)
     total_hours: Optional[float] = Field(None, ge=0)
     overtime_hours: Optional[float] = Field(None, ge=0)
-    status: Optional[AttendanceStatus] = None  # Changed to use AttendanceStatus enum
+    status: Optional[AttendanceStatus] = None
     location: Optional[str] = Field(None, max_length=255)
     is_active: Optional[bool] = None
 
@@ -103,3 +100,6 @@ class AttendanceRecordOut(AttendanceRecordBase):
     updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)
+
+class ClockInOut(BaseModel):
+    action: str

@@ -5,27 +5,35 @@ from app.core.db_enums import employee_type_enum
 
 class Users(Base):
     __tablename__ = "users"
-    
-    user_id = Column(Integer, primary_key=True)
-    employee_id = Column(String(20), unique=True, nullable=False, 
-                        server_default=text("'EMP' || LPAD(nextval('employee_id_seq')::TEXT, 6, '0')"))
-    email = Column(String(255), unique=True, nullable=False)
+
+    user_id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(
+        String(20),
+        unique=True,
+        nullable=False,
+        server_default=text("'EMP' || LPAD(nextval('employee_id_seq')::TEXT, 6, '0')")
+    )
+    email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
-    phone = Column(String(20))
-    job_title = Column(String(100))
+    phone = Column(String(20), nullable=True)
+    job_title = Column(String(100), nullable=True)
     hire_date = Column(Date, nullable=False)
-    employee_type = Column(employee_type_enum, nullable=False, default='full_time')
-    salary = Column(DECIMAL(12, 2))
-    manager_id = Column(Integer, ForeignKey('users.user_id', ondelete='SET NULL'))
-    department_id = Column(Integer, ForeignKey('departments.department_id', ondelete='SET NULL'))
+    employee_type = Column(employee_type_enum, nullable=False, default="full_time")
+    salary = Column(DECIMAL(12, 2), nullable=True)
+    manager_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    department_id = Column(Integer, ForeignKey("departments.department_id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, default=True)
-    deleted_at = Column(DateTime(timezone=True))
-    last_login = Column(DateTime(timezone=True))
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    last_login = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
-    updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
-    
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp()
+    )
+
     __table_args__ = (
         CheckConstraint("email ~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'", name="email_format"),
         CheckConstraint("phone IS NULL OR phone ~ '^[\\+]?[0-9\\s\\-\\(\\)]+$'", name="phone_format"),

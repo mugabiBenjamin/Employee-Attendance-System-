@@ -10,7 +10,7 @@ from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.exceptions import ValidationError, DatabaseError, UserNotFoundError, ResourceConflictError, BusinessLogicError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
-from app.services.system_log_service import SystemLogService, get_system_log_service
+from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists
 from app.core.config import Settings, get_settings
@@ -21,16 +21,14 @@ logger = logging.getLogger(__name__)
 
 async def create_user(
     user: UserCreate,
-    request: Request,
+    request: Optional[Request] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    log_service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.CREATE_USER]))
 ) -> UserOut:
     """
-    Create a new user with validation and logging. Requires CREATE_USER permission.
-    """
+    Create a new user with validation and logging."""
     try:
         # Validate employee_type
         if user.employee_type not in [e.value for e in EmployeeType]:
@@ -48,7 +46,7 @@ async def create_user(
 
         # Validate manager_id if provided
         if user.manager_id:
-            await validate_user_exists(db, user.manager_id)
+            await validate_user_exists(db, user.manager_id, request_id)
 
         # Validate required fields
         if not user.email or not user.password:
@@ -67,6 +65,7 @@ async def create_user(
             salary=user.salary,
             manager_id=user.manager_id,
             is_active=user.is_active,
+            employee_id=f"EMP{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",  # Generate employee_id
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -82,39 +81,42 @@ async def create_user(
             record_id=db_user.user_id,
             old_values=None,
             new_values=db_user.__dict__,
-            ip_address=request.client.host,
-            user_agent=request.headers.get("user-agent")
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
         )
-        await log_service.create_system_log(log, current_user, request)
+        await create_system_log(log, request, current_user, db, request_id)
 
-        logger.info(f"User created, user_id: {db_user.user_id}, email: {db_user.email}")
+        logger.info(
+            f"User created, user_id: {db_user.user_id}, email: {db_user.email}",
+            extra={"request_id": request_id, "user_id": current_user.user_id}
+        )
         return UserOut.model_validate(db_user)
 
     except ValidationError as e:
-        logger.error(f"Validation error in create_user: {str(e)}")
-        raise
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except ResourceConflictError as e:
-        logger.error(f"Conflict error in create_user: {str(e)}")
-        raise
+        logger.error(f"Resource conflict: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except UserNotFoundError as e:
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error in create_user: {str(e)}")
-        raise
+        logger.error(f"Database error creating user: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error in create_user: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error creating user"
-        )
+        logger.error(f"Unexpected error creating user: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-async def get_user_by_id(
+async def read_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.VIEW_USER]))
-) -> Optional[UserOut]:
+) -> UserOut:
     """
-    Retrieve a user by ID. Requires VIEW_USER permission.
-    """
+    Retrieve a user by ID."""
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user ID")
@@ -130,34 +132,35 @@ async def get_user_by_id(
         if not user:
             raise UserNotFoundError(user_id=user_id)
 
+        logger.info(
+            f"Retrieved user, user_id: {user_id}",
+            extra={"request_id": request_id}
+        )
         return UserOut.model_validate(user)
 
     except ValidationError as e:
-        logger.error(f"Validation error in get_user_by_id for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except UserNotFoundError as e:
-        logger.error(f"Resource not found in get_user_by_id for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error in get_user_by_id for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Database error retrieving user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error in get_user_by_id for user_id {user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error retrieving user"
-        )
+        logger.error(f"Unexpected error retrieving user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-async def get_users(
+async def read_users(
     skip: int = 0,
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> List[UserOut]:
     """
-    Retrieve a list of active users with pagination. Requires VIEW_USER permission.
-    """
+    Retrieve a list of active users with pagination."""
     try:
         if skip < 0 or (limit is not None and limit <= 0):
             raise ValidationError(detail="Invalid pagination parameters")
@@ -170,35 +173,33 @@ async def get_users(
         result = await db.execute(query)
         users = result.scalars().all()
 
-        logger.info(f"Retrieved {len(users)} users")
+        logger.info(
+            f"Retrieved {len(users)} users",
+            extra={"request_id": request_id}
+        )
         return [UserOut.model_validate(user) for user in users]
 
     except ValidationError as e:
-        logger.error(f"Validation error in get_users: {str(e)}")
-        raise
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error in get_users: {str(e)}")
-        raise
+        logger.error(f"Database error retrieving users: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error in get_users: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error retrieving users"
-        )
+        logger.error(f"Unexpected error retrieving users: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 async def update_user(
     user_id: int,
     user_update: UserUpdate,
-    request: Request,
+    request: Optional[Request] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    log_service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.UPDATE_USER]))
 ) -> UserOut:
     """
-    Update a user with validation and logging. Requires UPDATE_USER permission.
-    """
+    Update a user with validation and logging."""
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user ID")
@@ -215,6 +216,9 @@ async def update_user(
             raise UserNotFoundError(user_id=user_id)
 
         update_data = user_update.model_dump(exclude_none=True)
+        if not update_data:
+            raise ValidationError(detail="No fields provided for update")
+
         if "email" in update_data:
             query = select(Users).where(
                 Users.email == update_data["email"],
@@ -227,7 +231,7 @@ async def update_user(
                 raise ResourceConflictError(detail="Email already registered")
 
         if "manager_id" in update_data and update_data["manager_id"] is not None:
-            await validate_user_exists(db, update_data["manager_id"])
+            await validate_user_exists(db, update_data["manager_id"], request_id)
 
         if "employee_type" in update_data and update_data["employee_type"] is not None:
             if update_data["employee_type"] not in [e.value for e in EmployeeType]:
@@ -254,45 +258,44 @@ async def update_user(
             record_id=user_id,
             old_values=old_values,
             new_values=db_user.__dict__,
-            ip_address=request.client.host,
-            user_agent=request.headers.get("user-agent")
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
         )
-        await log_service.create_system_log(log, current_user, request)
+        await create_system_log(log, request, current_user, db, request_id)
 
-        logger.info(f"User updated, user_id: {user_id}")
+        logger.info(
+            f"User updated, user_id: {user_id}",
+            extra={"request_id": request_id, "user_id": current_user.user_id}
+        )
         return UserOut.model_validate(db_user)
 
     except ValidationError as e:
-        logger.error(f"Validation error in update_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except UserNotFoundError as e:
-        logger.error(f"Resource not found in update_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ResourceConflictError as e:
-        logger.error(f"Conflict error in update_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Resource conflict: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error in update_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Database error updating user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error in update_user for user_id {user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error updating user"
-        )
+        logger.error(f"Unexpected error updating user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 async def delete_user(
     user_id: int,
-    request: Request,
+    request: Optional[Request] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    log_service: SystemLogService = Depends(get_system_log_service),
-    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.DELETE_USER]))
 ) -> None:
     """
-    Soft delete a user with validation and logging. Requires DELETE_USER permission.
-    """
+    Soft delete a user with validation and logging."""
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user ID")
@@ -329,28 +332,65 @@ async def delete_user(
             record_id=user_id,
             old_values=db_user.__dict__,
             new_values=None,
-            ip_address=request.client.host,
-            user_agent=request.headers.get("user-agent")
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
         )
-        await log_service.create_system_log(log, current_user, request)
+        await create_system_log(log, request, current_user, db, request_id)
 
-        logger.info(f"User soft deleted, user_id: {user_id}")
+        logger.info(
+            f"User soft deleted, user_id: {user_id}",
+            extra={"request_id": request_id, "user_id": current_user.user_id}
+        )
 
     except ValidationError as e:
-        logger.error(f"Validation error in delete_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except UserNotFoundError as e:
-        logger.error(f"Resource not found in delete_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except BusinessLogicError as e:
-        logger.error(f"Business logic error in delete_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Business logic error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error in delete_user for user_id {user_id}: {str(e)}")
-        raise
+        logger.error(f"Database error deleting user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error in delete_user for user_id {user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error deleting user"
+        logger.error(f"Unexpected error deleting user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+
+async def get_current_user_profile(
+    current_user: Users,
+    db: AsyncSession = Depends(get_db),
+    request_id: Optional[str] = None,
+    _: bool = Depends(require_permissions([]))  # No specific permission required
+) -> UserOut:
+    """
+    Retrieve the current authenticated user's profile."""
+    try:
+        query = select(Users).where(
+            Users.user_id == current_user.user_id,
+            Users.is_active == True,
+            Users.deleted_at == None
         )
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise UserNotFoundError(user_id=current_user.user_id)
+
+        logger.info(
+            f"Retrieved profile for user_id: {current_user.user_id}",
+            extra={"request_id": request_id}
+        )
+        return UserOut.model_validate(user)
+
+    except UserNotFoundError as e:
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving profile for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving profile for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

@@ -8,7 +8,7 @@ class AttendanceSummary(Base):
     employee_id = Column(String)
     full_name = Column(String)
     department_name = Column(String)
-    date = Column(Date)
+    attendance_summary_date = Column(Date)
     status = Column(String)
     total_hours = Column(String)
     overtime_hours = Column(String)  

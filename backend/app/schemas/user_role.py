@@ -1,39 +1,36 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 class UserRoleBase(BaseModel):
-    user_id: int
-    role_id: int
-    assigned_by: Optional[int] = None
-    is_active: bool = True
+    user_id: int = Field(..., description="ID of the user assigned to the role")
+    role_id: int = Field(..., description="ID of the role assigned to the user")
+    assigned_by: Optional[int] = Field(None, description="ID of the user who assigned the role")
+    is_active: bool = Field(True, description="Whether the role assignment is active")
 
 class UserRoleCreate(UserRoleBase):
-    user_id: int
-    role_id: int
-    is_active: bool = True
+    pass
 
 class UserRoleUpdate(BaseModel):
-    user_id: Optional[int] = None
-    role_id: Optional[int] = None
-    assigned_by: Optional[int] = None
-    is_active: Optional[bool] = None
+    user_id: Optional[int] = Field(None, description="Updated ID of the user")
+    role_id: Optional[int] = Field(None, description="Updated ID of the role")
+    assigned_by: Optional[int] = Field(None, description="Updated ID of the user who assigned the role")
+    is_active: Optional[bool] = Field(None, description="Updated active status of the role assignment")
 
 class UserRoleOut(UserRoleBase):
-    user_role_id: int
-    user_id: int
-    role_id: int
-    assigned_by: Optional[int]
-    is_active: bool
-    assigned_at: datetime
-    updated_at: Optional[datetime] = None
+    user_role_id: int = Field(..., description="Unique identifier of the user-role assignment")
+    assigned_at: datetime = Field(..., description="Timestamp when the role was assigned")
+    updated_at: Optional[datetime] = Field(None, description="Timestamp when the role assignment was last updated")
     
+    model_config = ConfigDict(from_attributes=True)
+
 class UserProfile(BaseModel):
-    user_id: int
-    email: str
-    first_name: str
-    last_name: str
-    job_title: str | None
-    roles: list[str] = []
-    permissions: list[str] = []
+    user_id: int = Field(..., description="ID of the user")
+    email: str = Field(..., description="Email address of the user")
+    first_name: str = Field(..., description="First name of the user")
+    last_name: str = Field(..., description="Last name of the user")
+    job_title: Optional[str] = Field(None, description="Job title of the user")
+    roles: List[str] = Field(default_factory=list, description="List of role names assigned to the user")
+    permissions: List[str] = Field(default_factory=list, description="List of permissions granted to the user")
+    
     model_config = ConfigDict(from_attributes=True)

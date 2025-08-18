@@ -7,28 +7,24 @@ class EmployeeEmergencyContactBase(BaseModel):
     contact_name: str = Field(..., max_length=255)
     relationship: str = Field(..., max_length=100)
     phone: str = Field(..., pattern=r'^[\+]?[0-9\s\-\(\)]+$')
+    alternate_phone: Optional[str] = Field(None, pattern=r'^[\+]?[0-9\s\-\(\)]+$')
     email: Optional[str] = Field(None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
     address: Optional[str] = None
     is_primary: bool = False
     is_active: bool = True
-    deleted_at: Optional[datetime] = None
 
 class EmployeeEmergencyContactCreate(EmployeeEmergencyContactBase):
-    user_id: int
-    contact_name: str
-    relationship: str
-    phone: str
-    alternate_phone: Optional[str] = None
-    email: Optional[str] = None
-    address: Optional[str] = None
+    pass
 
 class EmployeeEmergencyContactUpdate(BaseModel):
     contact_name: Optional[str] = Field(None, max_length=255)
     relationship: Optional[str] = Field(None, max_length=100)
     phone: Optional[str] = Field(None, pattern=r'^[\+]?[0-9\s\-\(\)]+$')
+    alternate_phone: Optional[str] = Field(None, pattern=r'^[\+]?[0-9\s\-\(\)]+$')
     email: Optional[str] = Field(None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
     address: Optional[str] = None
     is_primary: Optional[bool] = None
+    is_active: Optional[bool] = None
 
 class EmployeeEmergencyContactOut(EmployeeEmergencyContactBase):
     contact_id: int

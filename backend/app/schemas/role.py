@@ -21,8 +21,5 @@ class RoleOut(RoleBase):
     role_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
-    description: Optional[str]
-    permissions: dict
-    created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)

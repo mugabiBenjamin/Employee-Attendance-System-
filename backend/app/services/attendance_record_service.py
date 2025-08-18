@@ -25,24 +25,19 @@ async def clock_in(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.CLOCK_IN]))
 ) -> AttendanceRecordOut:
-    """
-    Handle employee clock-in with one-click functionality, validation, and logging.
-    Invalidates attendance history cache for the user.
-    """
+    """Handle employee clock-in with validation and logging."""
     try:
         current_date = datetime.now(timezone.utc).date()
-        # Check for existing active clock-in for today
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == user.user_id,
             AttendanceRecords.date == current_date,
-            AttendanceRecords.clock_out_time == None,
-            AttendanceRecords.is_active == True
+            AttendanceRecords.clock_out_time.is_(None),
+            AttendanceRecords.is_active.is_(True)
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise AttendanceError(detail="User already clocked in for today")
 
-        # Create attendance record
         db_record = AttendanceRecords(
             **AttendanceRecordCreate(
                 user_id=user.user_id,
@@ -58,7 +53,6 @@ async def clock_in(
         await db.commit()
         await db.refresh(db_record)
 
-        # Log action
         system_log = SystemLogs(
             user_id=user.user_id,
             action=SystemAction.CLOCK_IN,
@@ -73,9 +67,7 @@ async def clock_in(
         db.add(system_log)
         await db.commit()
 
-        # Invalidate attendance history cache for this user
         await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
-
         logger.info(f"User clocked in, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
         return AttendanceRecordOut.model_validate(db_record)
 
@@ -98,18 +90,14 @@ async def clock_out(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
-    """
-    Handle employee clock-out with validation, time calculations, and logging.
-    Invalidates attendance history cache for the user.
-    """
+    """Handle employee clock-out with validation, time calculations, and logging."""
     try:
         current_date = datetime.now(timezone.utc).date()
-        # Find active clock-in for today
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == user.user_id,
             AttendanceRecords.date == current_date,
-            AttendanceRecords.clock_out_time == None,
-            AttendanceRecords.is_active == True
+            AttendanceRecords.clock_out_time.is_(None),
+            AttendanceRecords.is_active.is_(True)
         )
         result = await db.execute(query)
         db_record = result.scalar_one_or_none()
@@ -132,7 +120,6 @@ async def clock_out(
         await db.commit()
         await db.refresh(db_record)
 
-        # Log action
         system_log = SystemLogs(
             user_id=user.user_id,
             action=SystemAction.CLOCK_OUT,
@@ -147,9 +134,7 @@ async def clock_out(
         db.add(system_log)
         await db.commit()
 
-        # Invalidate attendance history cache for this user
         await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
-
         logger.info(f"User clocked out, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}")
         return AttendanceRecordOut.model_validate(db_record)
 
@@ -176,28 +161,22 @@ async def get_attendance_history(
     settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
-    """
-    Retrieve attendance history for a user with optional date range and pagination.
-    Uses Redis caching with 5-minute TTL.
-    """
+    """Retrieve attendance history for a user with date range and pagination."""
     try:
         if skip < 0 or limit <= 0:
             raise ValidationError(detail="Invalid pagination parameters")
 
-        # Create cache key
         start_date_str = start_date.isoformat() if start_date else "none"
         end_date_str = end_date.isoformat() if end_date else "none"
         cache_key = f"attendance_history:{user.user_id}:{start_date_str}:{end_date_str}:{skip}:{limit}"
 
-        # Check cache
         cached_result = await get_cache(cache_key)
         if cached_result:
             return [AttendanceRecordOut(**record) for record in cached_result]
 
-        # Query database
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == user.user_id,
-            AttendanceRecords.is_active == True
+            AttendanceRecords.is_active.is_(True)
         )
         if start_date:
             query = query.where(AttendanceRecords.date >= start_date)
@@ -208,10 +187,7 @@ async def get_attendance_history(
         result = await db.execute(query)
         records = result.scalars().all()
 
-        # Convert records to dict for caching
         records_dict = [AttendanceRecordOut.model_validate(record).model_dump() for record in records]
-
-        # Cache the result for 5 minutes (300 seconds)
         await set_cache(cache_key, records_dict, ttl=300)
 
         logger.info(f"Retrieved {len(records)} attendance records for user_id: {user.user_id}")

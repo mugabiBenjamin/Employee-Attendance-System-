@@ -8,18 +8,39 @@ class SystemAction(str, Enum):
     LOGOUT = "LOGOUT"
     CLOCK_IN = "CLOCK_IN"
     CLOCK_OUT = "CLOCK_OUT"
-    PASSWORD_CHANGE = "password_change"
-    PROFILE_UPDATE = "profile_update"
-    DATA_EXPORT = "data_export"
-    DATA_IMPORT = "data_import"
-    ASSIGN_ROLE = "assign_role"
-    REVOKE_ROLE = "revoke_role"
-    VIEW_REPORT = "view_report"
-    APPROVE_LEAVE = "approve_leave"
-    REJECT_LEAVE = "reject_leave"
-    CREATE_DEPARTMENT = "create_department"
-    DELETE_DEPARTMENT = "delete_department"
-    TOKEN_REFRESH = "token_refresh"
+    PASSWORD_CHANGE = "PASSWORD_CHANGE"
+    PROFILE_UPDATE = "PROFILE_UPDATE"
+    DATA_EXPORT = "DATA_EXPORT"
+    DATA_IMPORT = "DATA_IMPORT"
+    ASSIGN_ROLE = "ASSIGN_ROLE"
+    REVOKE_ROLE = "REVOKE_ROLE"
+    VIEW_REPORT = "VIEW_REPORT"
+    APPROVE_LEAVE = "APPROVE_LEAVE"
+    REJECT_LEAVE = "REJECT_LEAVE"
+    CREATE_DEPARTMENT = "CREATE_DEPARTMENT"
+    DELETE_DEPARTMENT = "DELETE_DEPARTMENT"
+    TOKEN_REFRESH = "TOKEN_REFRESH"
+    DELETE_HOLIDAY = "DELETE_HOLIDAY"
+    CREATE_OVERTIME_RECORD = "CREATE_OVERTIME_RECORD"
+    UPDATE_ROLE = "UPDATE_ROLE"
+    DELETE_ROLE = "DELETE_ROLE"
+    UPDATE_DEPARTMENT = "UPDATE_DEPARTMENT"
+    DELETE_EMERGENCY_CONTACT = "DELETE_EMERGENCY_CONTACT"
+    UPDATE_EMERGENCY_CONTACT = "UPDATE_EMERGENCY_CONTACT"
+    CREATE_EMERGENCY_CONTACT = "CREATE_EMERGENCY_CONTACT"
+    DELETE_HIERARCHY = "DELETE_HIERARCHY"
+    UPDATE_HIERARCHY = "UPDATE_HIERARCHY"
+    CREATE_HIERARCHY = "CREATE_HIERARCHY"
+    UPDATE_HOLIDAY = "UPDATE_HOLIDAY"
+    CREATE_HOLIDAY = "CREATE_HOLIDAY"
+    DEFINE_WORKFLOW = "DEFINE_WORKFLOW"
+    UPDATE_LEAVE_BALANCE = "UPDATE_LEAVE_BALANCE"
+    DELETE_LEAVE_POLICY = "DELETE_LEAVE_POLICY"
+    UPDATE_LEAVE_POLICY = "UPDATE_LEAVE_POLICY"
+    CREATE_LEAVE_POLICY = "CREATE_LEAVE_POLICY"
+    APPROVE_LEAVE_REQUEST = "APPROVE_LEAVE_REQUEST"
+    CREATE_LEAVE_REQUEST = "CREATE_LEAVE_REQUEST"
+    APPROVE_OVERTIME_RECORD = "APPROVE_OVERTIME_RECORD"
 
 class AttendanceStatus(str, Enum):
     PRESENT = "present"
@@ -81,32 +102,38 @@ class Permission(str, Enum):
     VIEW_LEAVE_BALANCE = "view_leave_balance"
     VIEW_OWN_ATTENDANCE = "view_own_attendance"
     CREATE_LEAVE_REQUEST = "create_leave_request"
-    VIEW_LEAVE_REQUEST = "view_leave_request"  # MISSING - Added
-    UPDATE_LEAVE_REQUEST = "update_leave_request"  # MISSING - Added
-    DELETE_LEAVE_REQUEST = "delete_leave_request"  # MISSING - Added
+    VIEW_LEAVE_REQUEST = "view_leave_request"
+    UPDATE_LEAVE_REQUEST = "update_leave_request"
+    DELETE_LEAVE_REQUEST = "delete_leave_request"
     CREATE_TIME_CORRECTION = "create_time_correction"
     VIEW_TIME_CORRECTION = "view_time_correction"
     UPDATE_TIME_CORRECTION = "update_time_correction"
     DELETE_TIME_CORRECTION = "delete_time_correction"
     REFRESH_TOKEN = "refresh_token"
     VIEW_HOLIDAY = "view_holiday"
-    VIEW_OWN_PROFILE = "view_own_profile"  # MISSING - Added
-    UPDATE_OWN_PROFILE = "update_own_profile"  # MISSING - Added
+    VIEW_OWN_PROFILE = "view_own_profile"
+    UPDATE_OWN_PROFILE = "update_own_profile"
+    VIEW_OWN_LEAVE_BALANCE = "view_own_leave_balance"
+    VIEW_OWN_LEAVE_POLICY = "view_own_leave_policy"
+    VIEW_OWN_LEAVE_REQUEST = "view_own_leave_request"
+    VIEW_OWN_OVERTIME_RECORD = "view_own_overtime_record"
+    VIEW_OWN_EMERGENCY_CONTACT = "view_own_emergency_contact"
+    VIEW_OWN_HIERARCHY = "view_own_hierarchy"
     
     # Manager permissions
     APPROVE_LEAVE = "approve_leave"
-    REJECT_LEAVE = "reject_leave"  # MISSING - Added
+    REJECT_LEAVE = "reject_leave"
     MANAGE_OVERTIME = "manage_overtime"
     GENERATE_REPORTS = "generate_reports"
     VIEW_TEAM_ATTENDANCE = "view_team_attendance"
     VIEW_LEAVE_APPROVAL = "view_leave_approval"
-    VIEW_TEAM_LEAVE_REQUESTS = "view_team_leave_requests"  # MISSING - Added
+    VIEW_TEAM_LEAVE_REQUESTS = "view_team_leave_requests"
     CREATE_OVERTIME_RECORD = "create_overtime_record"
     VIEW_OVERTIME_RECORD = "view_overtime_record"
     VIEW_TEAM_OVERTIME_RECORDS = "view_team_overtime_records"
-    UPDATE_OVERTIME_RECORD = "update_overtime_record"  # MISSING - Added
-    DELETE_OVERTIME_RECORD = "delete_overtime_record"  # MISSING - Added
-    VIEW_TEAM_PROFILES = "view_team_profiles"  # MISSING - Added
+    UPDATE_OVERTIME_RECORD = "update_overtime_record"
+    DELETE_OVERTIME_RECORD = "delete_overtime_record"
+    VIEW_TEAM_PROFILES = "view_team_profiles"
     
     # HR permissions
     MANAGE_EMPLOYEES = "manage_employees"
@@ -115,7 +142,7 @@ class Permission(str, Enum):
     UPDATE_USER = "update_user"
     DELETE_USER = "delete_user"
     VIEW_ALL_ATTENDANCE = "view_all_attendance"
-    VIEW_ALL_LEAVE_REQUESTS = "view_all_leave_requests"  # MISSING - Added
+    VIEW_ALL_LEAVE_REQUESTS = "view_all_leave_requests"
     MANAGE_LEAVE_POLICIES = "manage_leave_policies"
     GENERATE_COMPLIANCE_REPORTS = "generate_compliance_reports"
     UPDATE_LEAVE_BALANCE = "update_leave_balance"
@@ -130,7 +157,23 @@ class Permission(str, Enum):
     VIEW_SHIFT_PATTERN = "view_shift_pattern"
     UPDATE_SHIFT_PATTERN = "update_shift_pattern"
     DELETE_SHIFT_PATTERN = "delete_shift_pattern"
-    VIEW_ALL_OVERTIME_RECORDS = "view_all_overtime_records"  # MISSING - Added
+    VIEW_ALL_OVERTIME_RECORDS = "view_all_overtime_records"
+    MANAGE_HOLIDAYS = "manage_holidays"
+    MANAGE_LEAVE = "manage_leave"
+    CREATE_ALL_OVERTIME = "create_all_overtime"
+    CREATE_EMERGENCY_CONTACT = "create_emergency_contact"
+    VIEW_EMERGENCY_CONTACT = "view_emergency_contact"
+    UPDATE_EMERGENCY_CONTACT = "update_emergency_contact"
+    DELETE_EMERGENCY_CONTACT = "delete_emergency_contact"
+    CREATE_HIERARCHY = "create_hierarchy"
+    VIEW_HIERARCHY = "view_hierarchy"
+    UPDATE_HIERARCHY = "update_hierarchy"
+    DELETE_HIERARCHY = "delete_hierarchy"
+    CREATE_SHIFT_ASSIGNMENT = "create_shift_assignment"
+    VIEW_SHIFT_ASSIGNMENT = "view_shift_assignment"
+    UPDATE_SHIFT_ASSIGNMENT = "update_shift_assignment"
+    DELETE_SHIFT_ASSIGNMENT = "delete_shift_assignment"
+    VIEW_OWN_SHIFT_ASSIGNMENT = "view_own_shift_assignment"
     
     # Admin permissions
     VIEW_LOGS = "view_logs"
@@ -141,10 +184,10 @@ class Permission(str, Enum):
     DELETE_USER_ROLE = "delete_user_role"
     MANAGE_USERS = "manage_users"
     MANAGE_DEPARTMENTS = "manage_departments"
-    CREATE_DEPARTMENT = "create_department"  # MISSING - Added
-    VIEW_DEPARTMENT = "view_department"  # MISSING - Added
-    UPDATE_DEPARTMENT = "update_department"  # MISSING - Added
-    DELETE_DEPARTMENT = "delete_department"  # MISSING - Added
+    CREATE_DEPARTMENT = "create_department"
+    VIEW_DEPARTMENT = "view_department"
+    UPDATE_DEPARTMENT = "update_department"
+    DELETE_DEPARTMENT = "delete_department"
     CREATE_USER_DEPARTMENT = "create_user_department"
     VIEW_USER_DEPARTMENT = "view_user_department"
     UPDATE_USER_DEPARTMENT = "update_user_department"
@@ -155,6 +198,14 @@ class Permission(str, Enum):
     UPDATE_ROLE = "update_role"
     DELETE_ROLE = "delete_role"
     CREATE_LOGS = "create_logs"
+    
+    # New additions
+    VIEW_WORKFLOWS = "view_workflows"
+    APPROVE_OVERTIME = "approve_overtime"
+    DEFINE_WORKFLOW = "define_workflow"
+    UPDATE_DEPARTMENT = "update_department"
+    APPROVE_LEAVE_REQUEST = "approve_leave_request"
+    APPROVE_OVERTIME_RECORD = "approve_overtime_record"
     
     # Super Admin permissions
     ALL_PERMISSIONS = "all_permissions"
@@ -184,6 +235,13 @@ _EMPLOYEE_PERMISSIONS = [
     Permission.VIEW_HOLIDAY,
     Permission.VIEW_OWN_PROFILE,
     Permission.UPDATE_OWN_PROFILE,
+    Permission.VIEW_OWN_LEAVE_BALANCE,
+    Permission.VIEW_OWN_LEAVE_POLICY,
+    Permission.VIEW_OWN_LEAVE_REQUEST,
+    Permission.VIEW_OWN_OVERTIME_RECORD,
+    Permission.VIEW_OWN_EMERGENCY_CONTACT,
+    Permission.VIEW_OWN_HIERARCHY,
+    Permission.VIEW_OWN_SHIFT_ASSIGNMENT,
 ]
 
 _MANAGER_PERMISSIONS = [
@@ -201,6 +259,10 @@ _MANAGER_PERMISSIONS = [
     Permission.DELETE_OVERTIME_RECORD,
     Permission.VIEW_TEAM_PROFILES,
     Permission.UPDATE_TIME_CORRECTION,
+    Permission.APPROVE_OVERTIME,
+    Permission.DEFINE_WORKFLOW,
+    Permission.APPROVE_LEAVE_REQUEST,
+    Permission.APPROVE_OVERTIME_RECORD,
 ]
 
 _HR_PERMISSIONS = [
@@ -226,6 +288,21 @@ _HR_PERMISSIONS = [
     Permission.UPDATE_SHIFT_PATTERN,
     Permission.DELETE_SHIFT_PATTERN,
     Permission.VIEW_ALL_OVERTIME_RECORDS,
+    Permission.MANAGE_HOLIDAYS,
+    Permission.MANAGE_LEAVE,
+    Permission.CREATE_ALL_OVERTIME,
+    Permission.CREATE_EMERGENCY_CONTACT,
+    Permission.VIEW_EMERGENCY_CONTACT,
+    Permission.UPDATE_EMERGENCY_CONTACT,
+    Permission.DELETE_EMERGENCY_CONTACT,
+    Permission.CREATE_HIERARCHY,
+    Permission.VIEW_HIERARCHY,
+    Permission.UPDATE_HIERARCHY,
+    Permission.DELETE_HIERARCHY,
+    Permission.CREATE_SHIFT_ASSIGNMENT,
+    Permission.VIEW_SHIFT_ASSIGNMENT,
+    Permission.UPDATE_SHIFT_ASSIGNMENT,
+    Permission.DELETE_SHIFT_ASSIGNMENT,
 ]
 
 _ADMIN_PERMISSIONS = [
@@ -252,6 +329,7 @@ _ADMIN_PERMISSIONS = [
     Permission.DELETE_ROLE,
     Permission.CREATE_LOGS,
     Permission.DELETE_TIME_CORRECTION,
+    Permission.VIEW_WORKFLOWS,
 ]
 
 # Permission mappings with proper inheritance

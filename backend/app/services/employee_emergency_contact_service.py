@@ -22,26 +22,21 @@ async def create_emergency_contact(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.CREATE_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
-    """
-    Create a new emergency contact for an employee with validation and logging.
-    """
+    """Create a new emergency contact for an employee with validation and logging."""
     try:
-        # Validate user_id
         query = select(Users).where(
             Users.user_id == contact.user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():
             raise UserNotFoundError(user_id=contact.user_id)
 
-        # Create emergency contact
         db_contact = EmployeeEmergencyContacts(
-            user_id=contact.user_id,
-            **EmployeeEmergencyContactCreate(**contact.model_dump(exclude={'user_id'})).model_dump(),
+            **contact.model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -49,10 +44,9 @@ async def create_emergency_contact(
         await db.commit()
         await db.refresh(db_contact)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.INSERT,
+            action=SystemAction.CREATE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=db_contact.contact_id,
             old_values=None,
@@ -67,28 +61,27 @@ async def create_emergency_contact(
         logger.info(f"Emergency contact created, contact_id: {db_contact.contact_id}, user_id: {contact.user_id}")
         return EmployeeEmergencyContactOut.model_validate(db_contact)
 
-    except HTTPException:
+    except UserNotFoundError:
         raise
     except Exception as e:
-        logger.error(f"Error creating emergency contact: {str(e)}")
+        logger.error(f"Error creating emergency contact for user_id {contact.user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating emergency contact"
         )
 
-async def get_emergency_contact_by_id(
+async def get_emergency_contact(
     contact_id: int,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
-) -> Optional[EmployeeEmergencyContactOut]:
-    """
-    Retrieve an emergency contact by ID.
-    """
+    _: bool = Depends(require_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+) -> EmployeeEmergencyContactOut:
+    """Retrieve an emergency contact by ID."""
     try:
         query = select(EmployeeEmergencyContacts).where(
             EmployeeEmergencyContacts.contact_id == contact_id,
-            EmployeeEmergencyContacts.is_active == True,
-            EmployeeEmergencyContacts.deleted_at == None
+            EmployeeEmergencyContacts.is_active.is_(True),
+            EmployeeEmergencyContacts.deleted_at.is_(None)
         )
         result = await db.execute(query)
         contact = result.scalar_one_or_none()
@@ -96,9 +89,15 @@ async def get_emergency_contact_by_id(
         if not contact:
             raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
+        if not any(p in current_user.permissions for p in [Permission.VIEW_EMERGENCY_CONTACT, Permission.MANAGE_EMPLOYEES]) and contact.user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to view this emergency contact"
+            )
+
         return EmployeeEmergencyContactOut.model_validate(contact)
 
-    except EmployeeEmergencyContactNotFoundError:
+    except (EmployeeEmergencyContactNotFoundError, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Error retrieving emergency contact {contact_id}: {str(e)}")
@@ -107,42 +106,49 @@ async def get_emergency_contact_by_id(
             detail="Error retrieving emergency contact"
         )
 
-async def get_emergency_contacts_by_employee(
-    employee_id: int,
+async def list_emergency_contacts(
+    user_id: Optional[int],
     skip: int = 0,
     limit: int = 50,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> List[EmployeeEmergencyContactOut]:
-    """
-    Retrieve a list of emergency contacts for an employee with pagination.
-    """
+    """Retrieve a list of emergency contacts for an employee with pagination."""
     try:
-        query = select(Users).where(
-            Users.user_id == employee_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise UserNotFoundError(user_id=employee_id)
+        target_user_id = user_id
+        if not any(p in current_user.permissions for p in [Permission.VIEW_EMERGENCY_CONTACT, Permission.MANAGE_EMPLOYEES]):
+            target_user_id = current_user.user_id
+
+        if target_user_id:
+            query = select(Users).where(
+                Users.user_id == target_user_id,
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
+            )
+            result = await db.execute(query)
+            if not result.scalar_one_or_none():
+                raise UserNotFoundError(user_id=target_user_id)
 
         query = select(EmployeeEmergencyContacts).where(
-            EmployeeEmergencyContacts.user_id == employee_id,
-            EmployeeEmergencyContacts.is_active == True,
-            EmployeeEmergencyContacts.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
+            EmployeeEmergencyContacts.is_active.is_(True),
+            EmployeeEmergencyContacts.deleted_at.is_(None)
+        )
+        if target_user_id:
+            query = query.where(EmployeeEmergencyContacts.user_id == target_user_id)
+
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         contacts = result.scalars().all()
 
-        logger.info(f"Retrieved {len(contacts)} emergency contacts for user_id: {employee_id}")
+        logger.info(f"Retrieved {len(contacts)} emergency contacts for user_id: {target_user_id or 'all'}")
         return [EmployeeEmergencyContactOut.model_validate(contact) for contact in contacts]
 
-    except HTTPException:
+    except UserNotFoundError:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving emergency contacts for user_id {employee_id}: {str(e)}")
+        logger.error(f"Error retrieving emergency contacts for user_id {target_user_id or 'all'}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving emergency contacts"
@@ -154,17 +160,14 @@ async def update_emergency_contact(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.UPDATE_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
-    """
-    Update an emergency contact with validation and logging.
-    """
+    """Update an emergency contact with validation and logging."""
     try:
-        # Retrieve emergency contact
         query = select(EmployeeEmergencyContacts).where(
             EmployeeEmergencyContacts.contact_id == contact_id,
-            EmployeeEmergencyContacts.is_active == True,
-            EmployeeEmergencyContacts.deleted_at == None
+            EmployeeEmergencyContacts.is_active.is_(True),
+            EmployeeEmergencyContacts.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_contact = result.scalar_one_or_none()
@@ -172,10 +175,13 @@ async def update_emergency_contact(
         if not db_contact:
             raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
-        # Store old values for logging
-        old_values = db_contact.__dict__.copy()
+        if not any(p in current_user.permissions for p in [Permission.UPDATE_EMERGENCY_CONTACT, Permission.MANAGE_EMPLOYEES]) and db_contact.user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to update this emergency contact"
+            )
 
-        # Apply updates
+        old_values = db_contact.__dict__.copy()
         update_data = contact_update.model_dump(exclude_none=True)
         for key, value in update_data.items():
             setattr(db_contact, key, value)
@@ -185,10 +191,9 @@ async def update_emergency_contact(
         await db.commit()
         await db.refresh(db_contact)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE,
+            action=SystemAction.UPDATE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
             old_values=old_values,
@@ -203,7 +208,7 @@ async def update_emergency_contact(
         logger.info(f"Emergency contact updated, contact_id: {contact_id}")
         return EmployeeEmergencyContactOut.model_validate(db_contact)
 
-    except HTTPException:
+    except (EmployeeEmergencyContactNotFoundError, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Error updating emergency contact {contact_id}: {str(e)}")
@@ -217,16 +222,14 @@ async def delete_emergency_contact(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.DELETE_EMERGENCY_CONTACT]))
 ) -> None:
-    """
-    Soft delete an emergency contact with logging.
-    """
+    """Soft delete an emergency contact with logging."""
     try:
         query = select(EmployeeEmergencyContacts).where(
             EmployeeEmergencyContacts.contact_id == contact_id,
-            EmployeeEmergencyContacts.is_active == True,
-            EmployeeEmergencyContacts.deleted_at == None
+            EmployeeEmergencyContacts.is_active.is_(True),
+            EmployeeEmergencyContacts.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_contact = result.scalar_one_or_none()
@@ -238,10 +241,9 @@ async def delete_emergency_contact(
         db_contact.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE,
+            action=SystemAction.DELETE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
             old_values=db_contact.__dict__,
@@ -255,7 +257,7 @@ async def delete_emergency_contact(
 
         logger.info(f"Emergency contact soft deleted, contact_id: {contact_id}")
 
-    except HTTPException:
+    except EmployeeEmergencyContactNotFoundError:
         raise
     except Exception as e:
         logger.error(f"Error deleting emergency contact {contact_id}: {str(e)}")

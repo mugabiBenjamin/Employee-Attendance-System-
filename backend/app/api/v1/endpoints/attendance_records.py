@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 from typing import List
 from app.services.attendance_record_service import clock_in, clock_out, get_attendance_history
 from app.models.users import Users
@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/attendance-records", tags=["Attendance Records"])
 
-@router.post("/clock", 
-            response_model=AttendanceRecordOut, 
-            status_code=201,
-            summary="Clock in or out", 
-            description="Record clock-in or clock-out for an employee.")
+@router.post(
+    "/clock",
+    response_model=AttendanceRecordOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Clock in or out",
+    description="Record clock-in or clock-out for an employee."
+)
 @require_employee_permissions()
 async def clock_in_out_endpoint(
     request: Request,
@@ -27,8 +29,20 @@ async def clock_in_out_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> AttendanceRecordOut:
-    """
-    Handle clock-in or clock-out by delegating to service layer.
+    """Handle clock-in or clock-out requests.
+
+    Args:
+        request: The incoming HTTP request.
+        clock_data: Contains the action ('clock_in' or 'clock_out').
+        db: Database session dependency.
+        current_user: The authenticated user.
+        settings: Application settings.
+
+    Returns:
+        AttendanceRecordOut: The created or updated attendance record.
+
+    Raises:
+        HTTPException: If the action is invalid or an error occurs.
     """
     if clock_data.action == "clock_in":
         return await clock_in(request, current_user, None, db)
@@ -36,12 +50,14 @@ async def clock_in_out_endpoint(
         return await clock_out(request, current_user, db)
     else:
         logger.error(f"Invalid clock action: {clock_data.action}")
-        raise HTTPException(status_code=400, detail="Invalid action. Must be 'clock_in' or 'clock_out'")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action. Must be 'clock_in' or 'clock_out'")
 
-@router.get("/history", 
-            response_model=List[AttendanceRecordOut],
-            summary="Get attendance history", 
-            description="Retrieve attendance history for the current user with pagination.")
+@router.get(
+    "/history",
+    response_model=List[AttendanceRecordOut],
+    summary="Get attendance history",
+    description="Retrieve attendance history for the current user with pagination."
+)
 @require_permissions([Permission.VIEW_OWN_ATTENDANCE])
 async def get_attendance_history_endpoint(
     skip: int = 0,
@@ -50,7 +66,16 @@ async def get_attendance_history_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> List[AttendanceRecordOut]:
-    """
-    Retrieve attendance history by delegating to service layer.
+    """Retrieve attendance history for the current user.
+
+    Args:
+        skip: Number of records to skip for pagination.
+        limit: Maximum number of records to return.
+        db: Database session dependency.
+        current_user: The authenticated user.
+        settings: Application settings.
+
+    Returns:
+        List[AttendanceRecordOut]: List of attendance records.
     """
     return await get_attendance_history(current_user, None, None, skip, limit, db, settings)

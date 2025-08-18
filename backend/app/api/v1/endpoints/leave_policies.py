@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.permissions import require_permissions
-from app.core.security import get_current_active_user
+from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.enums import Permission
 from app.services.leave_policy_service import (
@@ -21,85 +21,132 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/leave-policies", tags=["Leave Policies"])
 
-@router.post("/", 
-             response_model=LeavePolicyOut, 
-             status_code=status.HTTP_201_CREATED,
-             summary="Create a new leave policy",
-             description="Create a new leave policy with role/department applicability.")
-@require_permissions([Permission.MANAGE_LEAVE_POLICIES])
+@router.post(
+    "/",
+    response_model=LeavePolicyOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new leave policy",
+    description="Create a new leave policy with role/department applicability."
+)
+@require_permissions([Permission.CREATE_LEAVE_POLICY])
 async def create_leave_policy_endpoint(
-    leave_policy: LeavePolicyCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    policy: LeavePolicyCreate,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> LeavePolicyOut:
-    """
-    Create a new leave policy by delegating to leave_policy_service.
-    """
-    return await create_leave_policy(leave_policy, current_user, db, settings)
+    """Create a new leave policy.
 
-@router.get("/{policy_id}", 
-            response_model=LeavePolicyOut,
-            summary="Get leave policy by ID",
-            description="Retrieve a specific leave policy by its ID.")
-@require_permissions([Permission.VIEW_LEAVE_POLICIES])
+    Args:
+        policy: Leave policy creation data.
+        request: The incoming HTTP request.
+        current_user: The authenticated user.
+        db: Database session dependency.
+
+    Returns:
+        LeavePolicyOut: The created leave policy.
+    """
+    return await create_leave_policy(policy, request, current_user, db)
+
+@router.get(
+    "/{policy_id}",
+    response_model=LeavePolicyOut,
+    summary="Get leave policy by ID",
+    description="Retrieve a specific leave policy by its ID."
+)
+@require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY])
 async def get_leave_policy_endpoint(
     policy_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> LeavePolicyOut:
-    """
-    Retrieve a leave policy by ID by delegating to leave_policy_service.
-    """
-    return await get_leave_policy(policy_id, current_user, db, settings)
+    """Retrieve a leave policy by ID.
 
-@router.get("/", 
-            response_model=List[LeavePolicyOut],
-            summary="List all leave policies",
-            description="List all active leave policies with pagination.")
-@require_permissions([Permission.VIEW_LEAVE_POLICIES])
+    Args:
+        policy_id: The ID of the leave policy to retrieve.
+        current_user: The authenticated user.
+        db: Database session dependency.
+
+    Returns:
+        LeavePolicyOut: The retrieved leave policy.
+    """
+    return await get_leave_policy(policy_id, current_user, db)
+
+@router.get(
+    "/",
+    response_model=List[LeavePolicyOut],
+    summary="List all leave policies",
+    description="List all active leave policies with pagination."
+)
+@require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY])
 async def list_leave_policies_endpoint(
     skip: int = 0,
     limit: int = 50,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
     settings: Settings = Depends(get_settings)
 ) -> List[LeavePolicyOut]:
-    """
-    List all leave policies by delegating to leave_policy_service.
+    """List all active leave policies with pagination.
+
+    Args:
+        skip: Number of records to skip for pagination.
+        limit: Maximum number of records to return.
+        current_user: The authenticated user.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[LeavePolicyOut]: List of active leave policies.
     """
     return await list_leave_policies(skip, limit, current_user, db, settings)
 
-@router.put("/{policy_id}", 
-            response_model=LeavePolicyOut,
-            summary="Update a leave policy",
-            description="Update an existing leave policy with role/department applicability.")
-@require_permissions([Permission.MANAGE_LEAVE_POLICIES])
+@router.put(
+    "/{policy_id}",
+    response_model=LeavePolicyOut,
+    summary="Update a leave policy",
+    description="Update an existing leave policy with role/department applicability."
+)
+@require_permissions([Permission.UPDATE_LEAVE_POLICY])
 async def update_leave_policy_endpoint(
     policy_id: int,
-    leave_policy_update: LeavePolicyUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    policy_update: LeavePolicyUpdate,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> LeavePolicyOut:
-    """
-    Update a leave policy by delegating to leave_policy_service.
-    """
-    return await update_leave_policy(policy_id, leave_policy_update, current_user, db, settings)
+    """Update a leave policy.
 
-@router.delete("/{policy_id}", 
-               status_code=status.HTTP_204_NO_CONTENT,
-               summary="Delete a leave policy",
-               description="Soft delete a leave policy.")
-@require_permissions([Permission.MANAGE_LEAVE_POLICIES])
+    Args:
+        policy_id: The ID of the leave policy to update.
+        policy_update: Leave policy update data.
+        request: The incoming HTTP request.
+        current_user: The authenticated user.
+        db: Database session dependency.
+
+    Returns:
+        LeavePolicyOut: The updated leave policy.
+    """
+    return await update_leave_policy(policy_id, policy_update, request, current_user, db)
+
+@router.delete(
+    "/{policy_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a leave policy",
+    description="Soft delete a leave policy."
+)
+@require_permissions([Permission.DELETE_LEAVE_POLICY])
 async def delete_leave_policy_endpoint(
     policy_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> None:
+    """Soft delete a leave policy.
+
+    Args:
+        policy_id: The ID of the leave policy to delete.
+        request: The incoming HTTP request.
+        current_user: The authenticated user.
+        db: Database session dependency.
     """
-    Soft delete a leave policy by delegating to leave_policy_service.
-    """
-    await delete_leave_policy(policy_id, current_user, db, settings)
+    await delete_leave_policy(policy_id, request, current_user, db)

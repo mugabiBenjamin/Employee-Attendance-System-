@@ -29,10 +29,7 @@ async def get_attendance_summary_by_user(
     settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE]))
 ) -> List[AttendanceSummaryOut]:
-    """
-    Retrieve attendance summary for a specific user with optional date range and pagination.
-    Requires VIEW_OWN_ATTENDANCE or VIEW_ALL_ATTENDANCE permission.
-    """
+    """Retrieve attendance summary for a specific user with optional date range and pagination."""
     try:
         if skip < 0 or limit <= 0:
             raise HTTPException(
@@ -46,14 +43,14 @@ async def get_attendance_summary_by_user(
             .join(Departments, Departments.department_id == Users.department_id, isouter=True)
             .where(
                 AttendanceSummary.user_id == user_id,
-                AttendanceSummary.is_active == True
+                AttendanceSummary.is_active.is_(True)
             )
         )
 
         if start_date:
-            query = query.where(AttendanceSummary.date >= start_date)
+            query = query.where(AttendanceSummary.attendance_summary_date >= start_date)
         if end_date:
-            query = query.where(AttendanceSummary.date <= end_date)
+            query = query.where(AttendanceSummary.attendance_summary_date <= end_date)
 
         query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
@@ -86,10 +83,7 @@ async def get_all_attendance_summaries(
     settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_ALL_ATTENDANCE]))
 ) -> List[AttendanceSummaryOut]:
-    """
-    Retrieve all attendance summaries with optional date range and pagination.
-    Requires VIEW_ALL_ATTENDANCE permission.
-    """
+    """Retrieve all attendance summaries with optional date range and pagination."""
     try:
         if skip < 0 or limit <= 0:
             raise HTTPException(
@@ -101,13 +95,13 @@ async def get_all_attendance_summaries(
             select(AttendanceSummary)
             .join(Users, Users.user_id == AttendanceSummary.user_id)
             .join(Departments, Departments.department_id == Users.department_id, isouter=True)
-            .where(AttendanceSummary.is_active == True)
+            .where(AttendanceSummary.is_active.is_(True))
         )
 
         if start_date:
-            query = query.where(AttendanceSummary.date >= start_date)
+            query = query.where(AttendanceSummary.attendance_summary_date >= start_date)
         if end_date:
-            query = query.where(AttendanceSummary.date <= end_date)
+            query = query.where(AttendanceSummary.attendance_summary_date <= end_date)
 
         query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
@@ -128,57 +122,50 @@ async def get_all_attendance_summaries(
 
 async def generate_attendance_summary(
     user_id: int,
-    date: date,
+    attendance_summary_date: date,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.GENERATE_REPORTS]))
 ) -> AttendanceSummaryOut:
-    """
-    Generate an attendance summary for a specific user and date.
-    Requires GENERATE_REPORTS permission.
-    """
+    """Generate an attendance summary for a specific user and date."""
     try:
-        # Validate user
         query = select(Users).where(
             Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         user = result.scalar_one_or_none()
         if not user:
             raise ResourceNotFoundError(resource="User", identifier=f"user_id {user_id}")
 
-        # Get department
         department_name = None
         if user.department_id:
             query = select(Departments).where(
                 Departments.department_id == user.department_id,
-                Departments.is_active == True,
-                Departments.deleted_at == None
+                Departments.is_active.is_(True),
+                Departments.deleted_at.is_(None)
             )
             result = await db.execute(query)
             department = result.scalar_one_or_none()
             department_name = department.department_name if department else None
 
-        # Get attendance record
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == user_id,
-            AttendanceRecords.date == date,
-            AttendanceRecords.is_active == True
+            AttendanceRecords.date == attendance_summary_date,
+            AttendanceRecords.is_active.is_(True)
         )
         result = await db.execute(query)
         attendance = result.scalar_one_or_none()
-
         if not attendance:
-            raise ResourceNotFoundError(resource="Attendance record", identifier=f"user_id {user_id}, date {date}")
+            raise ResourceNotFoundError(resource="Attendance record", 
+                                     identifier=f"user_id {user_id}, date {attendance_summary_date}")
 
-        # Create or update summary
         query = select(AttendanceSummary).where(
             AttendanceSummary.user_id == user_id,
-            AttendanceSummary.date == date
+            AttendanceSummary.attendance_summary_date == attendance_summary_date
         )
         result = await db.execute(query)
         db_summary = result.scalar_one_or_none()
@@ -188,7 +175,7 @@ async def generate_attendance_summary(
             "employee_id": user.employee_id,
             "full_name": f"{user.first_name} {user.last_name}",
             "department_name": department_name,
-            "date": date,
+            "attendance_summary_date": attendance_summary_date,
             "status": attendance.status,
             "total_hours": str(attendance.total_hours) if attendance.total_hours else None,
             "overtime_hours": str(attendance.overtime_hours) if attendance.overtime_hours else None,
@@ -200,7 +187,7 @@ async def generate_attendance_summary(
 
         if db_summary:
             for key, value in summary_data.items():
-                if key not in ("created_at",):
+                if key != "created_at":
                     setattr(db_summary, key, value)
         else:
             db_summary = AttendanceSummary(**summary_data)
@@ -209,12 +196,11 @@ async def generate_attendance_summary(
         await db.commit()
         await db.refresh(db_summary)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
             action=SystemAction.VIEW_REPORT,
             table_affected="attendance_summary",
-            record_id=user_id,
+            record_id=db_summary.id,
             old_values=None,
             new_values=db_summary.__dict__,
             ip_address=request.client.host,
@@ -224,7 +210,7 @@ async def generate_attendance_summary(
         db.add(system_log)
         await db.commit()
 
-        logger.info(f"Attendance summary generated for user_id: {user_id}, date: {date}")
+        logger.info(f"Attendance summary generated for user_id: {user_id}, date: {attendance_summary_date}")
         return AttendanceSummaryOut.model_validate(db_summary)
 
     except ResourceNotFoundError:

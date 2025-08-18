@@ -9,7 +9,7 @@ from app.models.system_logs import SystemLogs
 from app.schemas.employee_hierarchy import EmployeeHierarchyCreate, EmployeeHierarchyUpdate, EmployeeHierarchyOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserNotFoundError, EmployeeHierarchyError, ResourceNotFoundError
+from app.core.exceptions import UserNotFoundError, EmployeeHierarchyError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -22,40 +22,34 @@ async def create_employee_hierarchy(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.CREATE_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
-    """
-    Create a new employee-manager relationship with validation and logging.
-    """
+    """Create a new employee-manager relationship with validation and logging."""
     try:
-        # Validate employee_id and manager_id
         query = select(Users).where(
             Users.user_id.in_([hierarchy.employee_id, hierarchy.manager_id]),
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         users = result.scalars().all()
         if len(users) != 2:
             raise UserNotFoundError(detail="Employee or manager not found")
 
-        # Check for existing hierarchy
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.employee_id == hierarchy.employee_id,
-            EmployeeHierarchy.is_active == True,
-            EmployeeHierarchy.deleted_at == None
+            EmployeeHierarchy.is_active.is_(True),
+            EmployeeHierarchy.deleted_at.is_(None)
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise EmployeeHierarchyError(detail="Employee already has a manager assigned")
 
-        # Prevent self-reporting
         if hierarchy.employee_id == hierarchy.manager_id:
             raise EmployeeHierarchyError(detail="Employee cannot be their own manager")
 
-        # Create hierarchy
         db_hierarchy = EmployeeHierarchy(
-            **EmployeeHierarchyCreate(**hierarchy.model_dump()).model_dump(),
+            **hierarchy.model_dump(),
             effective_from=datetime.now(timezone.utc).date(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
@@ -64,10 +58,9 @@ async def create_employee_hierarchy(
         await db.commit()
         await db.refresh(db_hierarchy)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.INSERT,
+            action=SystemAction.CREATE_HIERARCHY,
             table_affected="employee_hierarchy",
             record_id=db_hierarchy.hierarchy_id,
             old_values=None,
@@ -82,38 +75,43 @@ async def create_employee_hierarchy(
         logger.info(f"Employee hierarchy created, hierarchy_id: {db_hierarchy.hierarchy_id}, employee_id: {hierarchy.employee_id}")
         return EmployeeHierarchyOut.model_validate(db_hierarchy)
 
-    except HTTPException:
+    except (UserNotFoundError, EmployeeHierarchyError):
         raise
     except Exception as e:
-        logger.error(f"Error creating employee hierarchy: {str(e)}")
+        logger.error(f"Error creating employee hierarchy for employee_id {hierarchy.employee_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating employee hierarchy"
         )
 
-async def get_employee_hierarchy_by_id(
+async def get_employee_hierarchy(
     hierarchy_id: int,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
-) -> Optional[EmployeeHierarchyOut]:
-    """
-    Retrieve an employee-manager relationship by ID.
-    """
+    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
+) -> EmployeeHierarchyOut:
+    """Retrieve an employee-manager relationship by ID."""
     try:
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.hierarchy_id == hierarchy_id,
-            EmployeeHierarchy.is_active == True,
-            EmployeeHierarchy.deleted_at == None
+            EmployeeHierarchy.is_active.is_(True),
+            EmployeeHierarchy.deleted_at.is_(None)
         )
         result = await db.execute(query)
         hierarchy = result.scalar_one_or_none()
 
         if not hierarchy:
-            raise ResourceNotFoundError(resource="Employee hierarchy", identifier=f"ID {hierarchy_id}")
+            raise EmployeeHierarchyError(detail=f"Employee hierarchy with ID {hierarchy_id} not found")
+
+        if not any(p in current_user.permissions for p in [Permission.VIEW_HIERARCHY, Permission.MANAGE_EMPLOYEES]) and hierarchy.employee_id != current_user.user_id and hierarchy.manager_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to view this hierarchy"
+            )
 
         return EmployeeHierarchyOut.model_validate(hierarchy)
 
-    except HTTPException:
+    except (EmployeeHierarchyError, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Error retrieving employee hierarchy {hierarchy_id}: {str(e)}")
@@ -122,29 +120,52 @@ async def get_employee_hierarchy_by_id(
             detail="Error retrieving employee hierarchy"
         )
 
-async def get_employee_hierarchies(
+async def list_employee_hierarchies(
+    employee_id: Optional[int],
     skip: int = 0,
     limit: int = 50,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
 ) -> List[EmployeeHierarchyOut]:
-    """
-    Retrieve a list of active employee-manager relationships with pagination.
-    """
+    """Retrieve a list of active employee-manager relationships with pagination."""
     try:
+        target_employee_id = employee_id
+        if not any(p in current_user.permissions for p in [Permission.VIEW_HIERARCHY, Permission.MANAGE_EMPLOYEES]):
+            target_employee_id = current_user.user_id
+
+        if target_employee_id:
+            query = select(Users).where(
+                Users.user_id == target_employee_id,
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
+            )
+            result = await db.execute(query)
+            if not result.scalar_one_or_none():
+                raise UserNotFoundError(user_id=target_employee_id)
+
         query = select(EmployeeHierarchy).where(
-            EmployeeHierarchy.is_active == True,
-            EmployeeHierarchy.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
+            EmployeeHierarchy.is_active.is_(True),
+            EmployeeHierarchy.deleted_at.is_(None)
+        )
+        if target_employee_id:
+            query = query.where(
+                (EmployeeHierarchy.employee_id == target_employee_id) |
+                (EmployeeHierarchy.manager_id == target_employee_id)
+            )
+
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         hierarchies = result.scalars().all()
 
-        logger.info(f"Retrieved {len(hierarchies)} employee hierarchies")
+        logger.info(f"Retrieved {len(hierarchies)} employee hierarchies for employee_id: {target_employee_id or 'all'}")
         return [EmployeeHierarchyOut.model_validate(hierarchy) for hierarchy in hierarchies]
 
+    except UserNotFoundError:
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving employee hierarchies: {str(e)}")
+        logger.error(f"Error retrieving employee hierarchies for employee_id {target_employee_id or 'all'}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving employee hierarchies"
@@ -156,44 +177,36 @@ async def update_employee_hierarchy(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.UPDATE_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
-    """
-    Update an employee-manager relationship with validation and logging.
-    """
+    """Update an employee-manager relationship with validation and logging."""
     try:
-        # Retrieve hierarchy
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.hierarchy_id == hierarchy_id,
-            EmployeeHierarchy.is_active == True,
-            EmployeeHierarchy.deleted_at == None
+            EmployeeHierarchy.is_active.is_(True),
+            EmployeeHierarchy.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_hierarchy = result.scalar_one_or_none()
 
         if not db_hierarchy:
-            raise ResourceNotFoundError(resource="Employee hierarchy", identifier=f"ID {hierarchy_id}")
+            raise EmployeeHierarchyError(detail=f"Employee hierarchy with ID {hierarchy_id} not found")
 
-        # Validate manager_id if updated
         update_data = hierarchy_update.model_dump(exclude_none=True)
         if "manager_id" in update_data:
             query = select(Users).where(
                 Users.user_id == update_data["manager_id"],
-                Users.is_active == True,
-                Users.deleted_at == None
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise UserNotFoundError(user_id=update_data["manager_id"])
 
-            # Prevent self-reporting
             if update_data["manager_id"] == db_hierarchy.employee_id:
                 raise EmployeeHierarchyError(detail="Employee cannot be their own manager")
 
-        # Store old values for logging
         old_values = db_hierarchy.__dict__.copy()
-
-        # Apply updates
         for key, value in update_data.items():
             setattr(db_hierarchy, key, value)
 
@@ -202,10 +215,9 @@ async def update_employee_hierarchy(
         await db.commit()
         await db.refresh(db_hierarchy)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE,
+            action=SystemAction.UPDATE_HIERARCHY,
             table_affected="employee_hierarchy",
             record_id=hierarchy_id,
             old_values=old_values,
@@ -220,7 +232,7 @@ async def update_employee_hierarchy(
         logger.info(f"Employee hierarchy updated, hierarchy_id: {hierarchy_id}")
         return EmployeeHierarchyOut.model_validate(db_hierarchy)
 
-    except HTTPException:
+    except (EmployeeHierarchyError, UserNotFoundError):
         raise
     except Exception as e:
         logger.error(f"Error updating employee hierarchy {hierarchy_id}: {str(e)}")
@@ -234,31 +246,28 @@ async def delete_employee_hierarchy(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.MANAGE_EMPLOYEES]))
+    _: bool = Depends(require_permissions([Permission.DELETE_HIERARCHY]))
 ) -> None:
-    """
-    Soft delete an employee-manager relationship with logging.
-    """
+    """Soft delete an employee-manager relationship with logging."""
     try:
         query = select(EmployeeHierarchy).where(
             EmployeeHierarchy.hierarchy_id == hierarchy_id,
-            EmployeeHierarchy.is_active == True,
-            EmployeeHierarchy.deleted_at == None
+            EmployeeHierarchy.is_active.is_(True),
+            EmployeeHierarchy.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_hierarchy = result.scalar_one_or_none()
 
         if not db_hierarchy:
-            raise ResourceNotFoundError(resource="Employee hierarchy", identifier=f"ID {hierarchy_id}")
+            raise EmployeeHierarchyError(detail=f"Employee hierarchy with ID {hierarchy_id} not found")
 
         db_hierarchy.is_active = False
         db_hierarchy.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE,
+            action=SystemAction.DELETE_HIERARCHY,
             table_affected="employee_hierarchy",
             record_id=hierarchy_id,
             old_values=db_hierarchy.__dict__,
@@ -272,7 +281,7 @@ async def delete_employee_hierarchy(
 
         logger.info(f"Employee hierarchy soft deleted, hierarchy_id: {hierarchy_id}")
 
-    except HTTPException:
+    except EmployeeHierarchyError:
         raise
     except Exception as e:
         logger.error(f"Error deleting employee hierarchy {hierarchy_id}: {str(e)}")

@@ -9,11 +9,11 @@ class EmployeeHierarchyBase(BaseModel):
     effective_from: date
     effective_to: Optional[date] = None
     is_active: bool = True
-    deleted_at: Optional[datetime] = None
 
 class EmployeeHierarchyCreate(EmployeeHierarchyBase):
     employee_id: int
     manager_id: int
+    level: Optional[int] = Field(1, ge=1, le=10)
 
 class EmployeeHierarchyUpdate(BaseModel):
     manager_id: Optional[int] = None

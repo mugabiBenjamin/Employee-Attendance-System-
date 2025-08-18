@@ -10,17 +10,20 @@ class LeaveApprovalWorkflowBase(BaseModel):
     status: LeaveRequestStatus = LeaveRequestStatus.UNDER_REVIEW
     comments: Optional[str] = None
     action_taken_at: Optional[datetime] = None
+    is_active: bool = True
 
 class LeaveApprovalWorkflowCreate(LeaveApprovalWorkflowBase):
-    request_id: int
+    request_id: int = Field(..., alias="request_id")
     approver_id: int
     status: LeaveRequestStatus
     comments: Optional[str] = None
+    level: int = Field(..., ge=1, le=5)
 
 class LeaveApprovalWorkflowUpdate(BaseModel):
     status: Optional[LeaveRequestStatus] = None
     comments: Optional[str] = None
     action_taken_at: Optional[datetime] = None
+    is_active: Optional[bool] = None
 
 class LeaveApprovalWorkflowOut(LeaveApprovalWorkflowBase):
     workflow_id: int
@@ -28,3 +31,13 @@ class LeaveApprovalWorkflowOut(LeaveApprovalWorkflowBase):
     updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)
+
+class WorkflowStepCreate(BaseModel):
+    request_id: int
+    approver_id: int
+    level: int = Field(..., ge=1, le=5)
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class WorkflowStepOut(LeaveApprovalWorkflowOut):
+    pass

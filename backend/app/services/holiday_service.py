@@ -10,7 +10,7 @@ from app.models.system_logs import SystemLogs
 from app.schemas.holiday_calendar import HolidayCalendarCreate, HolidayCalendarUpdate, HolidayCalendarOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import HolidayNotFoundError, DepartmentNotFoundError, DatabaseError
+from app.core.exceptions import HolidayNotFoundError, DepartmentNotFoundError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db
@@ -25,15 +25,12 @@ async def create_holiday(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.CREATE_HOLIDAY]))
 ) -> HolidayCalendarOut:
-    """
-    Create a new holiday with validation and logging.
-    """
+    """Create a new holiday with validation and logging."""
     try:
-        # Check for existing holiday on the same date
         query = select(HolidayCalendar).where(
             HolidayCalendar.holiday_date == holiday.date,
-            HolidayCalendar.is_active == True,
-            HolidayCalendar.deleted_at == None
+            HolidayCalendar.is_active.is_(True),
+            HolidayCalendar.deleted_at.is_(None)
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
@@ -42,24 +39,19 @@ async def create_holiday(
                 detail="Holiday already exists for this date"
             )
 
-        # Validate department_id if provided
         if holiday.department_id:
             query = select(Departments).where(
                 Departments.department_id == holiday.department_id,
-                Departments.is_active == True,
-                Departments.deleted_at == None
+                Departments.is_active.is_(True),
+                Departments.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise DepartmentNotFoundError(dept_id=holiday.department_id)
 
-        # Create holiday
         db_holiday = HolidayCalendar(
-            holiday_name=holiday.holiday_name,
-            holiday_date=holiday.date,
-            is_recurring=holiday.is_recurring,
+            **holiday.model_dump(),
             applies_to_all=holiday.department_id is None,
-            department_id=holiday.department_id,
             year=holiday.date.year,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
@@ -68,10 +60,9 @@ async def create_holiday(
         await db.commit()
         await db.refresh(db_holiday)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.INSERT,
+            action=SystemAction.CREATE_HOLIDAY,
             table_affected="holiday_calendar",
             record_id=db_holiday.holiday_id,
             old_values=None,
@@ -86,31 +77,26 @@ async def create_holiday(
         logger.info(f"Holiday created, holiday_id: {db_holiday.holiday_id}, name: {db_holiday.holiday_name}")
         return HolidayCalendarOut.model_validate(db_holiday)
 
-    except HTTPException:
-        raise
-    except DatabaseError as e:
-        logger.error(f"Database error creating holiday: {str(e)}")
+    except (HTTPException, DepartmentNotFoundError):
         raise
     except Exception as e:
-        logger.error(f"Unexpected error creating holiday: {str(e)}")
+        logger.error(f"Error creating holiday: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating holiday"
         )
 
-async def get_holiday_by_id(
+async def get_holiday(
     holiday_id: int,
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
-) -> Optional[HolidayCalendarOut]:
-    """
-    Retrieve a holiday by ID.
-    """
+) -> HolidayCalendarOut:
+    """Retrieve a holiday by ID."""
     try:
         query = select(HolidayCalendar).where(
             HolidayCalendar.holiday_id == holiday_id,
-            HolidayCalendar.is_active == True,
-            HolidayCalendar.deleted_at == None
+            HolidayCalendar.is_active.is_(True),
+            HolidayCalendar.deleted_at.is_(None)
         )
         result = await db.execute(query)
         holiday = result.scalar_one_or_none()
@@ -122,42 +108,42 @@ async def get_holiday_by_id(
 
     except HolidayNotFoundError:
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving holiday {holiday_id}: {str(e)}")
-        raise
     except Exception as e:
-        logger.error(f"Unexpected error retrieving holiday {holiday_id}: {str(e)}")
+        logger.error(f"Error retrieving holiday {holiday_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving holiday"
         )
 
-async def get_holidays(
+async def list_holidays(
     skip: int = 0,
     limit: int = 50,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> List[HolidayCalendarOut]:
-    """
-    Retrieve a list of active holidays with pagination.
-    """
+    """Retrieve a list of active holidays with pagination."""
     try:
         query = select(HolidayCalendar).where(
-            HolidayCalendar.is_active == True,
-            HolidayCalendar.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
+            HolidayCalendar.is_active.is_(True),
+            HolidayCalendar.deleted_at.is_(None)
+        )
+        if not any(p in current_user.permissions for p in [Permission.VIEW_HOLIDAY, Permission.MANAGE_HOLIDAYS]) and current_user.department_id:
+            query = query.where(
+                (HolidayCalendar.applies_to_all.is_(True)) |
+                (HolidayCalendar.department_id == current_user.department_id)
+            )
+
+        query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         holidays = result.scalars().all()
 
         logger.info(f"Retrieved {len(holidays)} holidays")
         return [HolidayCalendarOut.model_validate(holiday) for holiday in holidays]
 
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving holidays: {str(e)}")
-        raise
     except Exception as e:
-        logger.error(f"Unexpected error retrieving holidays: {str(e)}")
+        logger.error(f"Error retrieving holidays: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving holidays"
@@ -171,15 +157,12 @@ async def update_holiday(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.UPDATE_HOLIDAY]))
 ) -> HolidayCalendarOut:
-    """
-    Update a holiday with validation and logging.
-    """
+    """Update a holiday with validation and logging."""
     try:
-        # Retrieve holiday
         query = select(HolidayCalendar).where(
             HolidayCalendar.holiday_id == holiday_id,
-            HolidayCalendar.is_active == True,
-            HolidayCalendar.deleted_at == None
+            HolidayCalendar.is_active.is_(True),
+            HolidayCalendar.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_holiday = result.scalar_one_or_none()
@@ -187,17 +170,13 @@ async def update_holiday(
         if not db_holiday:
             raise HolidayNotFoundError(holiday_id=holiday_id)
 
-        # Store old values for logging
-        old_values = db_holiday.__dict__.copy()
-
-        # Check for duplicate date if updated
         update_data = holiday_update.model_dump(exclude_none=True)
         if "holiday_date" in update_data:
             query = select(HolidayCalendar).where(
                 HolidayCalendar.holiday_date == update_data["holiday_date"],
                 HolidayCalendar.holiday_id != holiday_id,
-                HolidayCalendar.is_active == True,
-                HolidayCalendar.deleted_at == None
+                HolidayCalendar.is_active.is_(True),
+                HolidayCalendar.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
@@ -206,24 +185,22 @@ async def update_holiday(
                     detail="Another holiday exists for this date"
                 )
 
-        # Validate department_id if provided
         if "department_id" in update_data and update_data["department_id"] is not None:
             query = select(Departments).where(
                 Departments.department_id == update_data["department_id"],
-                Departments.is_active == True,
-                Departments.deleted_at == None
+                Departments.is_active.is_(True),
+                Departments.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise DepartmentNotFoundError(dept_id=update_data["department_id"])
 
-        # Update applies_to_all and year if necessary
+        old_values = db_holiday.__dict__.copy()
         if "department_id" in update_data:
             update_data["applies_to_all"] = update_data["department_id"] is None
         if "holiday_date" in update_data:
             update_data["year"] = update_data["holiday_date"].year
 
-        # Apply updates
         for key, value in update_data.items():
             setattr(db_holiday, key, value)
 
@@ -232,10 +209,9 @@ async def update_holiday(
         await db.commit()
         await db.refresh(db_holiday)
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE,
+            action=SystemAction.UPDATE_HOLIDAY,
             table_affected="holiday_calendar",
             record_id=holiday_id,
             old_values=old_values,
@@ -250,13 +226,10 @@ async def update_holiday(
         logger.info(f"Holiday updated, holiday_id: {holiday_id}")
         return HolidayCalendarOut.model_validate(db_holiday)
 
-    except HTTPException:
-        raise
-    except DatabaseError as e:
-        logger.error(f"Database error updating holiday {holiday_id}: {str(e)}")
+    except (HolidayNotFoundError, DepartmentNotFoundError, HTTPException):
         raise
     except Exception as e:
-        logger.error(f"Unexpected error updating holiday {holiday_id}: {str(e)}")
+        logger.error(f"Error updating holiday {holiday_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error updating holiday"
@@ -269,14 +242,12 @@ async def delete_holiday(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.DELETE_HOLIDAY]))
 ) -> None:
-    """
-    Soft delete a holiday with logging.
-    """
+    """Soft delete a holiday with logging."""
     try:
         query = select(HolidayCalendar).where(
             HolidayCalendar.holiday_id == holiday_id,
-            HolidayCalendar.is_active == True,
-            HolidayCalendar.deleted_at == None
+            HolidayCalendar.is_active.is_(True),
+            HolidayCalendar.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_holiday = result.scalar_one_or_none()
@@ -288,10 +259,9 @@ async def delete_holiday(
         db_holiday.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
-        # Log action
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE,
+            action=SystemAction.DELETE_HOLIDAY,
             table_affected="holiday_calendar",
             record_id=holiday_id,
             old_values=db_holiday.__dict__,
@@ -307,11 +277,8 @@ async def delete_holiday(
 
     except HolidayNotFoundError:
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error deleting holiday {holiday_id}: {str(e)}")
-        raise
     except Exception as e:
-        logger.error(f"Unexpected error deleting holiday {holiday_id}: {str(e)}")
+        logger.error(f"Error deleting holiday {holiday_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting holiday"

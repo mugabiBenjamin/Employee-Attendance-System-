@@ -1,99 +1,136 @@
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.security import get_current_active_user, oauth2_scheme
-from app.services.auth_service import login_for_access_token, refresh_access_token, logout, get_current_user_profile, validate_token
+from app.core.security import get_current_user, oauth2_scheme
 from app.core.config import Settings, get_settings
+from app.services.auth_service import  ( 
+    login_user, 
+    logout_user, 
+    refresh_token, 
+    get_current_user_profile, 
+    validate_token
+)
+from app.schemas.auth_schema import Token, RefreshTokenRequest, UserProfile
 import logging
-
-from backend.app.schemas.user_role import UserProfile
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-class Token(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int = 1800  # Access token expiry (30 minutes)
-    model_config = ConfigDict(from_attributes=True)
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-    model_config = ConfigDict(from_attributes=True)
-
-@router.post("/token", 
-            response_model=Token, 
-            status_code=status.HTTP_200_OK, 
-            summary="User login", 
-            description="Authenticate user with email and password to get JWT tokens.")
+@router.post(
+    "/token",
+    response_model=Token,
+    status_code=status.HTTP_200_OK,
+    summary="User login",
+    description="Authenticate user with email and password to get JWT tokens."
+)
 async def login_endpoint(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> Token:
-    """
-    Handle user login by delegating to auth_service.
-    """
-    return await login_for_access_token(form_data, db, settings)
+    """Handle user login.
 
-@router.post("/refresh", 
-             response_model=Token, 
-             status_code=status.HTTP_200_OK, 
-             summary="Refresh access token", 
-             description="Generate new access token using a valid refresh token.")
+    Args:
+        request: The incoming HTTP request.
+        form_data: OAuth2 form data with username (email) and password.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        Token: JWT access and refresh tokens.
+    """
+    return await login_user({"username": form_data.username, "password": form_data.password}, request, db, settings)
+
+@router.post(
+    "/refresh",
+    response_model=Token,
+    status_code=status.HTTP_200_OK,
+    summary="Refresh access token",
+    description="Generate new access token using a valid refresh token."
+)
 async def refresh_token_endpoint(
     request: Request,
     token_request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> Token:
-    """
-    Handle token refresh by delegating to auth_service.
-    """
-    return await refresh_access_token(token_request, db, settings)
+    """Handle token refresh.
 
-@router.post("/logout", 
-             status_code=status.HTTP_200_OK, 
-             summary="User logout", 
-             description="Log out current user and blacklist tokens.")
+    Args:
+        request: The incoming HTTP request.
+        token_request: Refresh token data.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        Token: New JWT access and refresh tokens.
+    """
+    return await refresh_token(token_request.dict(), request, db, settings)
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_200_OK,
+    summary="User logout",
+    description="Log out current user."
+)
 async def logout_endpoint(
-    current_user: Users = Depends(get_current_active_user),
+    current_user: Users = Depends(get_current_user),
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db)
-):
+) -> dict:
+    """Handle user logout.
+
+    Args:
+        current_user: The authenticated user.
+        token: The JWT token to blacklist.
+        db: Database session dependency.
+
+    Returns:
+        dict: Logout confirmation message.
     """
-    Handle user logout by delegating to auth_service.
-    """
-    await logout(current_user, token, db)
+    await logout_user(current_user, token, db)
     return {"message": "Successfully logged out"}
 
-@router.get("/me", 
-            response_model=UserProfile, 
-            summary="Get current user profile", 
-            description="Retrieve profile information for the current user.")
+@router.get(
+    "/me",
+    response_model=UserProfile,
+    summary="Get current user profile",
+    description="Retrieve profile information for the current user."
+)
 async def get_profile_endpoint(
-    current_user: Users = Depends(get_current_active_user),
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
-    """
-    Retrieve current user profile by delegating to auth_service.
+    """Retrieve current user profile.
+
+    Args:
+        current_user: The authenticated user.
+        db: Database session dependency.
+
+    Returns:
+        UserProfile: User profile data.
     """
     return await get_current_user_profile(current_user, db)
 
-@router.post("/validate-token", 
-            status_code=status.HTTP_200_OK, 
-            summary="Validate access token", 
-            description="Validate if the current access token is valid and user is active.")
+@router.post(
+    "/validate-token",
+    status_code=status.HTTP_200_OK,
+    summary="Validate access token",
+    description="Validate if the current access token is valid and user is active."
+)
 async def validate_token_endpoint(
-    current_user: Users = Depends(get_current_active_user)
-):
-    """
-    Validate access token by delegating to auth_service.
+    current_user: Users = Depends(get_current_user)
+) -> dict:
+    """Validate access token.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        dict: Token validation result.
     """
     return await validate_token(current_user)

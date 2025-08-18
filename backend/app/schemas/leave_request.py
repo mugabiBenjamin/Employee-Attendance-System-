@@ -15,19 +15,18 @@ class LeaveRequestBase(BaseModel):
     comments: Optional[str] = None
     attachment_url: Optional[str] = Field(None, max_length=500)
     is_active: bool = True
-    deleted_at: Optional[datetime] = None
 
     @field_validator('start_date', 'end_date')
     @classmethod
     def validate_dates(cls, value):
-        if value > date.today():
+        if value > datetime.now(timezone.utc).date():
             raise ValidationError(detail="Date cannot be in the future.")
         return value
 
     @field_validator('end_date')
     @classmethod
     def validate_end_date(cls, end_date, info):
-        if hasattr(info, 'data') and 'start_date' in info.data and info.data['start_date']:
+        if 'start_date' in info.data and info.data['start_date']:
             if end_date < info.data['start_date']:
                 raise ValidationError(detail="end_date must be on or after start_date")
         return end_date
@@ -35,16 +34,14 @@ class LeaveRequestBase(BaseModel):
     @field_validator('days_requested')
     @classmethod
     def validate_days_requested(cls, days, info):
-        if hasattr(info, 'data'):
-            start_date = info.data.get('start_date')
-            end_date = info.data.get('end_date')
+        if 'start_date' in info.data and 'end_date' in info.data:
+            start_date = info.data['start_date']
+            end_date = info.data['end_date']
             if start_date and end_date:
                 expected_days = (end_date - start_date).days + 1
                 if days is not None and days != expected_days:
-                    raise ValidationError(detail=f"days_requested must equal the number of days between start_date and end_date ({expected_days})")
-                elif days is None:
-                    # Auto-calculate days if not provided
-                    return expected_days
+                    raise ValidationError(detail=f"days_requested must equal {expected_days}")
+                return expected_days
         return days
 
 class LeaveRequestCreate(LeaveRequestBase):
@@ -52,6 +49,7 @@ class LeaveRequestCreate(LeaveRequestBase):
     start_date: date
     end_date: date
     reason: Optional[str] = None
+    attachment_url: Optional[str] = Field(None, max_length=500)
 
 class LeaveRequestUpdate(BaseModel):
     leave_type: Optional[LeaveType] = None
@@ -69,14 +67,14 @@ class LeaveRequestUpdate(BaseModel):
     @field_validator('start_date', 'end_date')
     @classmethod
     def validate_dates(cls, value):
-        if value and value > date.today():
+        if value and value > datetime.now(timezone.utc).date():
             raise ValidationError(detail="Date cannot be in the future.")
         return value
 
     @field_validator('end_date')
     @classmethod
     def validate_end_date(cls, end_date, info):
-        if end_date and hasattr(info, 'data') and 'start_date' in info.data and info.data['start_date']:
+        if end_date and 'start_date' in info.data and info.data['start_date']:
             if end_date < info.data['start_date']:
                 raise ValidationError(detail="end_date must be on or after start_date")
         return end_date
@@ -84,13 +82,13 @@ class LeaveRequestUpdate(BaseModel):
     @field_validator('days_requested')
     @classmethod
     def validate_days_requested(cls, days, info):
-        if days is not None and hasattr(info, 'data'):
-            start_date = info.data.get('start_date')
-            end_date = info.data.get('end_date')
+        if days is not None and 'start_date' in info.data and 'end_date' in info.data:
+            start_date = info.data['start_date']
+            end_date = info.data['end_date']
             if start_date and end_date:
                 expected_days = (end_date - start_date).days + 1
                 if days != expected_days:
-                    raise ValidationError(detail=f"days_requested must equal the number of days between start_date and end_date ({expected_days})")
+                    raise ValidationError(detail=f"days_requested must equal {expected_days}")
         return days
 
     @field_validator('approved_at', mode='before')
@@ -106,7 +104,7 @@ class LeaveRequestUpdate(BaseModel):
                 value = datetime.fromisoformat(value.replace('Z', '+00:00'))
             except ValueError:
                 raise ValidationError(detail="Invalid datetime value for approved_at.")
-        if value > datetime.now(value.tzinfo or timezone.utc):
+        if value > datetime.now(timezone.utc):
             raise ValidationError(detail="approved_at cannot be in the future.")
         return value
 
@@ -119,3 +117,7 @@ class LeaveRequestOut(LeaveRequestBase):
     updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)
+
+class LeaveApprovalUpdate(BaseModel):
+    status: LeaveRequestStatus
+    comments: Optional[str] = None

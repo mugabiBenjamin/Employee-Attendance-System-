@@ -246,3 +246,23 @@ def require_user_management():
         Permission.DELETE_USER,
         Permission.MANAGE_USERS
     ])
+
+# New permission decorators for added permissions
+def require_workflow_management():
+    return require_permissions([Permission.DEFINE_WORKFLOW, Permission.VIEW_WORKFLOWS])
+
+def require_leave_approval():
+    return require_permissions([Permission.APPROVE_LEAVE_REQUEST])
+
+def require_overtime_approval():
+    return require_permissions([Permission.APPROVE_OVERTIME_RECORD])
+
+def require_department_management():
+    return require_permissions([Permission.UPDATE_DEPARTMENT, Permission.CREATE_DEPARTMENT])
+
+def require_overtime_management():
+    return require_any_permissions([
+        Permission.APPROVE_OVERTIME,
+        Permission.APPROVE_OVERTIME_RECORD,
+        Permission.MANAGE_OVERTIME
+    ])

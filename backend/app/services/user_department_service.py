@@ -5,12 +5,12 @@ from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.user_departments import UserDepartments
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
+from app.schemas.system_log import SystemLogCreate
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import UserDepartmentNotFoundError, DatabaseError, ResourceConflictError, UserNotFoundError, DepartmentNotFoundError
+from app.core.exceptions import UserDepartmentNotFoundError, DatabaseError, ResourceConflictError, UserNotFoundError, DepartmentNotFoundError, ValidationError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
-from app.services.system_log_service import SystemLogService, get_system_log_service
-from app.schemas.system_log import SystemLogCreate
+from app.services.system_log_service import create_system_log
 from app.core.validators import validate_user_exists, validate_department_exists
 from app.core.config import Settings, get_settings
 from app.models.users import Users
@@ -21,26 +21,27 @@ logger = logging.getLogger(__name__)
 
 async def create_user_department(
     user_department: UserDepartmentCreate,
-    request: Request,
+    request: Optional[Request] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    log_service: SystemLogService = Depends(get_system_log_service),
     settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.CREATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
-    """Assign a user to a department. Requires CREATE_USER_DEPARTMENT permission."""
+    """
+    Create a new user-department assignment with validation and logging."""
     try:
         # Validate user and department exist
-        await validate_user_exists(db, user_department.user_id)
-        await validate_department_exists(db, user_department.department_id)
+        await validate_user_exists(db, user_department.user_id, request_id)
+        await validate_department_exists(db, user_department.department_id, request_id)
         
         # Check for existing assignment
-        if await _assignment_exists(db, user_department.user_id, user_department.department_id):
+        if await _assignment_exists(db, user_department.user_id, user_department.department_id, request_id=request_id):
             raise ResourceConflictError(detail="User is already assigned to this department")
 
         # Handle primary assignment logic
         if user_department.is_primary:
-            await _clear_existing_primary(db, user_department.user_id)
+            await _clear_existing_primary(db, user_department.user_id, request_id=request_id)
 
         # Create assignment
         db_user_department = UserDepartments(
@@ -62,33 +63,42 @@ async def create_user_department(
             record_id=db_user_department.user_department_id,
             old_values=None,
             new_values=db_user_department.__dict__,
-            ip_address=request.client.host,
-            user_agent=request.headers.get("user-agent")
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
         )
-        await log_service.create_system_log(log, current_user, request)
+        await create_system_log(log, request, current_user, db, request_id)
 
-        logger.info(f"User department assignment created: {db_user_department.user_department_id}")
+        logger.info(
+            f"User department assignment created: user_department_id={db_user_department.user_department_id}",
+            extra={"request_id": request_id, "user_id": current_user.user_id}
+        )
         return UserDepartmentOut.model_validate(db_user_department)
 
-    except HTTPException:
-        raise
+    except UserNotFoundError as e:
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DepartmentNotFoundError as e:
+        logger.error(f"Department not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ResourceConflictError as e:
+        logger.error(f"Resource conflict: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error creating user department assignment: {str(e)}")
-        raise
+        logger.error(f"Database error creating user department assignment: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error creating user department assignment: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user department assignment"
-        )
+        logger.error(f"Unexpected error creating user department assignment: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-async def get_user_department_by_id(
+async def read_user_department(
     user_department_id: int,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
-) -> Optional[UserDepartmentOut]:
-    """Retrieve a user-department assignment by ID. Requires VIEW_USER_DEPARTMENT permission."""
+) -> UserDepartmentOut:
+    """
+    Retrieve a user-department assignment by ID."""
     try:
         query = select(UserDepartments).where(
             UserDepartments.user_department_id == user_department_id,
@@ -101,75 +111,86 @@ async def get_user_department_by_id(
         if not user_department:
             raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
+        logger.info(
+            f"Retrieved user department assignment: user_department_id={user_department_id}",
+            extra={"request_id": request_id}
+        )
         return UserDepartmentOut.model_validate(user_department)
 
-    except UserDepartmentNotFoundError:
-        raise
+    except UserDepartmentNotFoundError as e:
+        logger.error(f"User department not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error retrieving user department assignment {user_department_id}: {str(e)}")
-        raise
+        logger.error(f"Database error retrieving user department assignment {user_department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error retrieving user department assignment {user_department_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve user department assignment"
-        )
+        logger.error(f"Unexpected error retrieving user department assignment {user_department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-async def get_user_departments(
-    user_id: int,
+async def read_user_departments(
+    user_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
-    """Get department assignments for a user. Requires VIEW_USER_DEPARTMENT permission."""
+    """
+    List user-department assignments with optional filters and pagination."""
     try:
-        await validate_user_exists(db, user_id)
-        
         limit = limit or settings.DEFAULT_PAGE_SIZE
         
-        query = (
-            select(UserDepartments)
-            .where(
-                UserDepartments.user_id == user_id,
-                UserDepartments.is_active == True,
-                UserDepartments.deleted_at == None
-            )
-            .order_by(UserDepartments.is_primary.desc(), UserDepartments.assigned_at.desc())
-            .offset(skip)
-            .limit(limit)
+        query = select(UserDepartments).where(
+            UserDepartments.is_active == True,
+            UserDepartments.deleted_at == None
         )
+        
+        if user_id:
+            await validate_user_exists(db, user_id, request_id)
+            query = query.where(UserDepartments.user_id == user_id)
+        
+        if department_id:
+            await validate_department_exists(db, department_id, request_id)
+            query = query.where(UserDepartments.department_id == department_id)
+        
+        query = query.order_by(UserDepartments.is_primary.desc(), UserDepartments.assigned_at.desc()).offset(skip).limit(limit)
         
         result = await db.execute(query)
         user_departments = result.scalars().all()
 
-        logger.info(f"Retrieved {len(user_departments)} department assignments for user {user_id}")
+        logger.info(
+            f"Retrieved {len(user_departments)} user department assignments",
+            extra={"request_id": request_id}
+        )
         return [UserDepartmentOut.model_validate(ud) for ud in user_departments]
 
-    except UserNotFoundError:
-        raise
+    except UserNotFoundError as e:
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DepartmentNotFoundError as e:
+        logger.error(f"Department not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error retrieving department assignments for user {user_id}: {str(e)}")
-        raise
+        logger.error(f"Database error retrieving user department assignments: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error retrieving department assignments for user {user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve department assignments"
-        )
+        logger.error(f"Unexpected error retrieving user department assignments: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 async def update_user_department(
     user_department_id: int,
     update_data: UserDepartmentUpdate,
-    request: Request,
+    request: Optional[Request] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    log_service: SystemLogService = Depends(get_system_log_service),
     settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.UPDATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
-    """Update a user-department assignment. Requires UPDATE_USER_DEPARTMENT permission."""
+    """
+    Update a user-department assignment with validation and logging."""
     try:
         # Get existing assignment
         query = select(UserDepartments).where(
@@ -183,24 +204,27 @@ async def update_user_department(
         if not db_user_department:
             raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
-        old_values = {k: v for k, v in db_user_department.__dict__.items() if not k.startswith('_')}
         changes = update_data.model_dump(exclude_none=True)
+        if not changes:
+            raise ValidationError(detail="No fields provided for update")
 
         # Validate changes
         if "user_id" in changes:
-            await validate_user_exists(db, changes["user_id"])
+            await validate_user_exists(db, changes["user_id"], request_id)
             
         if "department_id" in changes:
-            await validate_department_exists(db, changes["department_id"])
-            # Check for duplicate assignment
+            await validate_department_exists(db, changes["department_id"], request_id)
             new_user_id = changes.get("user_id", db_user_department.user_id)
-            if await _assignment_exists(db, new_user_id, changes["department_id"], exclude_id=user_department_id):
+            if await _assignment_exists(db, new_user_id, changes["department_id"], exclude_id=user_department_id, request_id=request_id):
                 raise ResourceConflictError(detail="User is already assigned to this department")
 
         # Handle primary assignment logic
         if changes.get("is_primary"):
             user_id = changes.get("user_id", db_user_department.user_id)
-            await _clear_existing_primary(db, user_id, exclude_id=user_department_id)
+            await _clear_existing_primary(db, user_id, exclude_id=user_department_id, request_id=request_id)
+
+        # Store old values for logging
+        old_values = db_user_department.__dict__.copy()
 
         # Apply updates
         for key, value in changes.items():
@@ -219,36 +243,51 @@ async def update_user_department(
             record_id=user_department_id,
             old_values=old_values,
             new_values=db_user_department.__dict__,
-            ip_address=request.client.host,
-            user_agent=request.headers.get("user-agent")
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
         )
-        await log_service.create_system_log(log, current_user, request)
+        await create_system_log(log, request, current_user, db, request_id)
 
-        logger.info(f"User department assignment updated: {user_department_id}")
+        logger.info(
+            f"User department assignment updated: user_department_id={user_department_id}",
+            extra={"request_id": request_id, "user_id": current_user.user_id}
+        )
         return UserDepartmentOut.model_validate(db_user_department)
 
-    except HTTPException:
-        raise
+    except UserDepartmentNotFoundError as e:
+        logger.error(f"User department not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except UserNotFoundError as e:
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DepartmentNotFoundError as e:
+        logger.error(f"Department not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ResourceConflictError as e:
+        logger.error(f"Resource conflict: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error updating user department assignment {user_department_id}: {str(e)}")
-        raise
+        logger.error(f"Database error updating user department assignment {user_department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error updating user department assignment {user_department_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update user department assignment"
-        )
+        logger.error(f"Unexpected error updating user department assignment {user_department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 async def delete_user_department(
     user_department_id: int,
-    request: Request,
+    request: Optional[Request] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    log_service: SystemLogService = Depends(get_system_log_service),
     settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.DELETE_USER_DEPARTMENT]))
 ) -> None:
-    """Soft delete a user-department assignment. Requires DELETE_USER_DEPARTMENT permission."""
+    """
+    Soft delete a user-department assignment with logging."""
     try:
         query = select(UserDepartments).where(
             UserDepartments.user_department_id == user_department_id,
@@ -261,7 +300,8 @@ async def delete_user_department(
         if not db_user_department:
             raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
-        old_values = {k: v for k, v in db_user_department.__dict__.items() if not k.startswith('_')}
+        # Store old values for logging
+        old_values = db_user_department.__dict__.copy()
         
         db_user_department.is_active = False
         db_user_department.deleted_at = datetime.now(timezone.utc)
@@ -276,28 +316,36 @@ async def delete_user_department(
             record_id=user_department_id,
             old_values=old_values,
             new_values=None,
-            ip_address=request.client.host,
-            user_agent=request.headers.get("user-agent")
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
         )
-        await log_service.create_system_log(log, current_user, request)
+        await create_system_log(log, request, current_user, db, request_id)
 
-        logger.info(f"User department assignment soft deleted: {user_department_id}")
+        logger.info(
+            f"User department assignment soft deleted: user_department_id={user_department_id}",
+            extra={"request_id": request_id, "user_id": current_user.user_id}
+        )
 
-    except UserDepartmentNotFoundError:
-        raise
+    except UserDepartmentNotFoundError as e:
+        logger.error(f"User department not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        logger.error(f"Database error deleting user department assignment {user_department_id}: {str(e)}")
-        raise
+        logger.error(f"Database error deleting user department assignment {user_department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
-        logger.error(f"Unexpected error deleting user department assignment {user_department_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete user department assignment"
-        )
+        logger.error(f"Unexpected error deleting user department assignment {user_department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-# Helper functions
-async def _assignment_exists(db: AsyncSession, user_id: int, department_id: int, exclude_id: Optional[int] = None) -> bool:
-    """Check if user is already assigned to department."""
+async def _assignment_exists(
+    db: AsyncSession,
+    user_id: int,
+    department_id: int,
+    exclude_id: Optional[int] = None,
+    request_id: Optional[str] = None
+) -> bool:
+    """
+    Check if a user is already assigned to a department."""
     try:
         query = select(UserDepartments).where(
             UserDepartments.user_id == user_id,
@@ -309,13 +357,27 @@ async def _assignment_exists(db: AsyncSession, user_id: int, department_id: int,
             query = query.where(UserDepartments.user_department_id != exclude_id)
         
         result = await db.execute(query)
-        return result.scalar_one_or_none() is not None
+        exists = result.scalar_one_or_none() is not None
+        logger.debug(
+            f"Checked assignment existence: user_id={user_id}, department_id={department_id}, exists={exists}",
+            extra={"request_id": request_id}
+        )
+        return exists
     except DatabaseError as e:
-        logger.error(f"Database error checking assignment existence for user_id {user_id}, department_id {department_id}: {str(e)}")
+        logger.error(
+            f"Database error checking assignment existence for user_id={user_id}, department_id={department_id}: {str(e)}",
+            extra={"request_id": request_id}
+        )
         raise
 
-async def _clear_existing_primary(db: AsyncSession, user_id: int, exclude_id: Optional[int] = None) -> None:
-    """Clear existing primary department assignments for user."""
+async def _clear_existing_primary(
+    db: AsyncSession,
+    user_id: int,
+    exclude_id: Optional[int] = None,
+    request_id: Optional[str] = None
+) -> None:
+    """
+    Clear existing primary department assignments for a user."""
     try:
         query = select(UserDepartments).where(
             UserDepartments.user_id == user_id,
@@ -333,6 +395,13 @@ async def _clear_existing_primary(db: AsyncSession, user_id: int, exclude_id: Op
             assignment.is_primary = False
             db.add(assignment)
         await db.commit()
+        logger.debug(
+            f"Cleared {len(existing_primary)} primary assignments for user_id={user_id}",
+            extra={"request_id": request_id}
+        )
     except DatabaseError as e:
-        logger.error(f"Database error clearing primary assignments for user_id {user_id}: {str(e)}")
+        logger.error(
+            f"Database error clearing primary assignments for user_id={user_id}: {str(e)}",
+            extra={"request_id": request_id}
+        )
         raise
