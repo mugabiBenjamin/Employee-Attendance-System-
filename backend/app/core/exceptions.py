@@ -438,6 +438,15 @@ class AttendanceSummaryError(BusinessLogicError):
     def __init__(self, detail: str = "Invalid attendance summary"):
         super().__init__(detail, "AttendanceSummary")
         self.error_code = "ATTENDANCE_SUMMARY_INVALID"
+        
+class FileUploadError(BaseCustomException):
+    """File upload related errors."""
+    def __init__(self, detail: str = "File upload error", status_override: Optional[int] = None):
+        super().__init__(
+            detail=detail,
+            status_code=status_override or status.HTTP_400_BAD_REQUEST,
+            error_code="FILE_UPLOAD_ERROR"
+        )
 
 class WorkflowStateError(BusinessLogicError):
     """Invalid workflow state transitions."""

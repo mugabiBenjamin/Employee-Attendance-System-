@@ -3,9 +3,11 @@ from typing import Optional, List
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi import UploadFile
-from app.core.config import settings
+from app.core.config import get_settings
 from app.core.exceptions import FileUploadError
 import os
+
+settings = get_settings()
 
 class TimeCalculation(BaseModel):
     clock_in: Optional[datetime] = None

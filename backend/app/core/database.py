@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
 from sqlalchemy.ext.declarative import declarative_base
-from app.core.config import settings
+from app.core.config import get_settings
 from app.core.db_enums import (
     attendance_status_enum, leave_request_status_enum, leave_type_enum,
     correction_status_enum, employee_type_enum, shift_type_enum, system_action_enum
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 # Validate DATABASE_URL for async driver
+settings = get_settings()
 if not settings.DATABASE_URL.startswith("postgresql+asyncpg://"):
     logger.error("DATABASE_URL must use asyncpg driver (e.g., postgresql+asyncpg://)")
     raise ValueError("DATABASE_URL must use asyncpg driver (e.g., postgresql+asyncpg://)")

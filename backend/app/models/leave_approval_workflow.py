@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
+from sqlalchemy import Boolean, Column, Integer, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 from app.core.db_enums import leave_request_status_enum
@@ -14,6 +14,9 @@ class LeaveApprovalWorkflow(Base):
     comments = Column(Text)
     action_taken_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
+    is_active = Column(Boolean, nullable=False, default=True)
+    deleted_at = Column(DateTime(timezone=True))
+    updated_at = Column(DateTime(timezone=True), onupdate=func.current_timestamp())
     
     __table_args__ = (
         CheckConstraint("level >= 1 AND level <= 5", name="level_valid"),

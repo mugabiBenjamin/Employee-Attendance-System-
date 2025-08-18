@@ -6,11 +6,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
-from app.core.config import settings
+from app.core.config import get_settings
 from app.models.users import Users
 from app.core.exceptions import DatabaseError
 from datetime import datetime
 import anyio
+
+settings = get_settings()
 
 class EmailSchema(BaseModel):
     to_email: EmailStr

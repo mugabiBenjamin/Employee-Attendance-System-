@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 from pythonjsonlogger import jsonlogger
-from app.core.config import settings
+from app.core.config import get_settings
 from app.core.database import (
     initialize_engine_and_session,
     init_db,
@@ -12,15 +12,15 @@ from app.core.database import (
 )
 from app.core.middleware import setup_middleware
 from app.api.v1.api import api_router
-from slowapi import Limiter
+from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.errors import _rate_limit_exceeded_handler
 
 # -----------------------
 # Logging Configuration
 # -----------------------
+settings = get_settings()
 logger = logging.getLogger(__name__)
 log_handler = logging.FileHandler(settings.LOG_FILE)
 formatter = jsonlogger.JsonFormatter(

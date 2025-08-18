@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
-from database import AsyncSessionLocal, startup
-from enums import SystemAction
-from models.system_logs import SystemLogs
+from app.core.database import AsyncSessionLocal, startup
+from app.core.enums import SystemAction
+from app.models.system_logs import SystemLogs
 import logging
 import uuid
 

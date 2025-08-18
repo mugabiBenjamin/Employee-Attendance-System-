@@ -9,7 +9,7 @@ import csv
 import io
 import os
 import re
-from app.core.config import settings
+from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, initialize_engine_and_session
 from app.models.attendance_records import AttendanceRecords
 from app.core.mail import send_email, EmailSchema
@@ -20,6 +20,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 logger = logging.getLogger(__name__)
 
 # Initialize Celery
+settings = get_settings()
 app = Celery(
     'ems_tasks',
     broker=settings.CELERY_BROKER_URL,
