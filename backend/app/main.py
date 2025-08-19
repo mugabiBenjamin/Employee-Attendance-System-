@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 from pythonjsonlogger import jsonlogger
-from app.core.config import get_settings
+from app.core.config import settings
 from app.core.database import (
     initialize_engine_and_session,
     init_db,
@@ -16,11 +16,11 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
+from app.core.celery import app as celery_app  # Import Celery app for task integration
 
 # -----------------------
 # Logging Configuration
 # -----------------------
-settings = get_settings()
 logger = logging.getLogger(__name__)
 log_handler = logging.FileHandler(settings.LOG_FILE)
 formatter = jsonlogger.JsonFormatter(
@@ -42,13 +42,14 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup: initializing database, Redis, and views...", extra={"request_id": None})
-    await initialize_engine_and_session()   # Create DB engine, session factory, Redis
-    await init_db()                         # Create enums, tables, views
-    await start_background_refresh()        # Start background refresh for materialized views
+    await initialize_engine_and_session()  # Initialize DB engine, session factory, and Redis
+    await init_db()                       # Create enums, tables, and materialized views
+    await start_background_refresh()      # Start background refresh for materialized views
+    celery_app.setup_periodic_tasks()     # Configure Celery periodic tasks
     logger.info("Startup complete.", extra={"request_id": None})
     yield
     logger.info("Application shutdown...", extra={"request_id": None})
-    await shutdown()
+    await shutdown()                      # Close DB engine and Redis connections
     logger.info("Shutdown complete.", extra={"request_id": None})
 
 # -----------------------
