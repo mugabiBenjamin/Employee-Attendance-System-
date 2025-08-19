@@ -67,14 +67,14 @@ class ValidationError(BaseCustomException):
 
 class ResourceNotFoundError(BaseCustomException):
     """Generic resource not found error."""
-    def __init__(self, resource: str, identifier: Optional[str] = None):
+    def __init__(self, resource: str, identifier: Optional[int] = None):
         detail = f"{resource} not found"
         if identifier:
-            detail += f": {identifier}"
+            detail += f": ID {identifier}"
         super().__init__(
             detail=detail,
             status_code=status.HTTP_404_NOT_FOUND,
-            error_code="RESOURCE_NOT_FOUND"
+            error_code=f"{resource.upper()}_NOT_FOUND"
         )
 
 class ResourceConflictError(BaseCustomException):
@@ -99,235 +99,6 @@ class BusinessLogicError(BaseCustomException):
             detail=detail,
             status_code=status.HTTP_400_BAD_REQUEST,
             error_code="BUSINESS_LOGIC_ERROR"
-        )
-
-# Resource-specific Not Found Errors
-class UserNotFoundError(BaseCustomException):
-    """User not found errors."""
-    def __init__(self, user_id: Optional[int] = None):
-        detail = "User not found"
-        if user_id:
-            detail += f": ID {user_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="USER_NOT_FOUND"
-        )
-
-class DepartmentNotFoundError(BaseCustomException):
-    """Department not found errors."""
-    def __init__(self, dept_id: Optional[int] = None):
-        detail = "Department not found"
-        if dept_id:
-            detail += f": ID {dept_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="DEPARTMENT_NOT_FOUND"
-        )
-
-class RoleNotFoundError(BaseCustomException):
-    """Role not found errors."""
-    def __init__(self, role_id: Optional[int] = None):
-        detail = "Role not found"
-        if role_id:
-            detail += f": ID {role_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="ROLE_NOT_FOUND"
-        )
-
-class UserDepartmentNotFoundError(BaseCustomException):
-    """User department assignment not found errors."""
-    def __init__(self, user_department_id: Optional[int] = None):
-        detail = "User department assignment not found"
-        if user_department_id:
-            detail += f": ID {user_department_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="USER_DEPARTMENT_NOT_FOUND"
-        )
-
-class UserRoleNotFoundError(BaseCustomException):
-    """User role assignment not found errors."""
-    def __init__(self, user_role_id: Optional[int] = None):
-        detail = "User role assignment not found"
-        if user_role_id:
-            detail += f": ID {user_role_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="USER_ROLE_NOT_FOUND"
-        )
-
-class LeavePolicyNotFoundError(BaseCustomException):
-    """Leave policy not found errors."""
-    def __init__(self, policy_id: Optional[int] = None):
-        detail = "Leave policy not found"
-        if policy_id:
-            detail += f": ID {policy_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="LEAVE_POLICY_NOT_FOUND"
-        )
-
-class ShiftAssignmentNotFoundError(BaseCustomException):
-    """Shift assignment not found errors."""
-    def __init__(self, shift_id: Optional[int] = None):
-        detail = "Shift assignment not found"
-        if shift_id:
-            detail += f": ID {shift_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SHIFT_ASSIGNMENT_NOT_FOUND"
-        )
-
-class ShiftPatternNotFoundError(BaseCustomException):
-    """Shift pattern not found errors."""
-    def __init__(self, pattern_id: Optional[int] = None):
-        detail = "Shift pattern not found"
-        if pattern_id:
-            detail += f": ID {pattern_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SHIFT_PATTERN_NOT_FOUND"
-        )
-
-class OvertimeRecordNotFoundError(BaseCustomException):
-    """Overtime record not found errors."""
-    def __init__(self, record_id: Optional[int] = None):
-        detail = "Overtime record not found"
-        if record_id:
-            detail += f": ID {record_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="OVERTIME_RECORD_NOT_FOUND"
-        )
-
-class LeaveBalanceNotFoundError(BaseCustomException):
-    """Leave balance not found errors."""
-    def __init__(self, balance_id: Optional[int] = None):
-        detail = "Leave balance not found"
-        if balance_id:
-            detail += f": ID {balance_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="LEAVE_BALANCE_NOT_FOUND"
-        )
-
-class HolidayNotFoundError(BaseCustomException):
-    """Holiday not found errors."""
-    def __init__(self, holiday_id: Optional[int] = None):
-        detail = "Holiday not found"
-        if holiday_id:
-            detail += f": ID {holiday_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="HOLIDAY_NOT_FOUND"
-        )
-
-class LeaveRequestNotFoundError(BaseCustomException):
-    """Leave request not found errors."""
-    def __init__(self, request_id: Optional[int] = None):
-        detail = "Leave request not found"
-        if request_id:
-            detail += f": ID {request_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="LEAVE_REQUEST_NOT_FOUND"
-        )
-
-class TimeCorrectionNotFoundError(BaseCustomException):
-    """Time correction not found errors."""
-    def __init__(self, correction_id: Optional[int] = None):
-        detail = "Time correction not found"
-        if correction_id:
-            detail += f": ID {correction_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="TIME_CORRECTION_NOT_FOUND"
-        )
-
-class EmployeeEmergencyContactNotFoundError(BaseCustomException):
-    """Employee emergency contact not found errors."""
-    def __init__(self, contact_id: Optional[int] = None):
-        detail = "Emergency contact not found"
-        if contact_id:
-            detail += f": ID {contact_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EMERGENCY_CONTACT_NOT_FOUND"
-        )
-
-class AttendanceRecordNotFoundError(BaseCustomException):
-    """Attendance record not found errors."""
-    def __init__(self, record_id: Optional[int] = None):
-        detail = "Attendance record not found"
-        if record_id:
-            detail += f": ID {record_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="ATTENDANCE_RECORD_NOT_FOUND"
-        )
-
-class EmployeeHierarchyNotFoundError(BaseCustomException):
-    """Employee hierarchy not found errors."""
-    def __init__(self, hierarchy_id: Optional[int] = None):
-        detail = "Employee hierarchy not found"
-        if hierarchy_id:
-            detail += f": ID {hierarchy_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EMPLOYEE_HIERARCHY_NOT_FOUND"
-        )
-
-class HolidayCalendarNotFoundError(BaseCustomException):
-    """Holiday calendar not found errors."""
-    def __init__(self, holiday_id: Optional[int] = None):
-        detail = "Holiday calendar not found"
-        if holiday_id:
-            detail += f": ID {holiday_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="HOLIDAY_CALENDAR_NOT_FOUND"
-        )
-
-class LeaveApprovalWorkflowNotFoundError(BaseCustomException):
-    """Leave approval workflow not found errors."""
-    def __init__(self, workflow_id: Optional[int] = None):
-        detail = "Leave approval workflow not found"
-        if workflow_id:
-            detail += f": ID {workflow_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="LEAVE_APPROVAL_WORKFLOW_NOT_FOUND"
-        )
-
-class SystemLogNotFoundError(BaseCustomException):
-    """System log not found errors."""
-    def __init__(self, log_id: Optional[int] = None):
-        detail = "System log not found"
-        if log_id:
-            detail += f": ID {log_id}"
-        super().__init__(
-            detail=detail,
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SYSTEM_LOG_NOT_FOUND"
         )
 
 # Business Logic Errors
@@ -438,7 +209,7 @@ class AttendanceSummaryError(BusinessLogicError):
     def __init__(self, detail: str = "Invalid attendance summary"):
         super().__init__(detail, "AttendanceSummary")
         self.error_code = "ATTENDANCE_SUMMARY_INVALID"
-        
+
 class FileUploadError(BaseCustomException):
     """File upload related errors."""
     def __init__(self, detail: str = "File upload error", status_override: Optional[int] = None):
@@ -456,64 +227,69 @@ class WorkflowStateError(BusinessLogicError):
         super().__init__(detail, "WorkflowState")
         self.error_code = "WORKFLOW_STATE_INVALID"
 
-# Convenience functions for common cases
+# Convenience function for resource not found
+def resource_not_found(resource: str, identifier: Optional[int] = None):
+    return ResourceNotFoundError(resource, identifier)
+
+# Specific resource not found convenience functions
 def user_not_found(user_id: Optional[int] = None):
-    return UserNotFoundError(user_id)
+    return ResourceNotFoundError("User", user_id)
 
 def department_not_found(dept_id: Optional[int] = None):
-    return DepartmentNotFoundError(dept_id)
+    return ResourceNotFoundError("Department", dept_id)
 
 def role_not_found(role_id: Optional[int] = None):
-    return RoleNotFoundError(role_id)
+    return ResourceNotFoundError("Role", role_id)
 
 def user_department_not_found(user_department_id: Optional[int] = None):
-    return UserDepartmentNotFoundError(user_department_id)
+    return ResourceNotFoundError("UserDepartment", user_department_id)
 
 def user_role_not_found(user_role_id: Optional[int] = None):
-    return UserRoleNotFoundError(user_role_id)
+    return ResourceNotFoundError("UserRole", user_role_id)
 
 def leave_policy_not_found(policy_id: Optional[int] = None):
-    return LeavePolicyNotFoundError(policy_id)
+    return ResourceNotFoundError("LeavePolicy", policy_id)
 
 def shift_assignment_not_found(shift_id: Optional[int] = None):
-    return ShiftAssignmentNotFoundError(shift_id)
+    return ResourceNotFoundError("ShiftAssignment", shift_id)
 
 def shift_pattern_not_found(pattern_id: Optional[int] = None):
-    return ShiftPatternNotFoundError(pattern_id)
+    return ResourceNotFoundError("ShiftPattern", pattern_id)
 
 def overtime_record_not_found(record_id: Optional[int] = None):
-    return OvertimeRecordNotFoundError(record_id)
+    return ResourceNotFoundError("OvertimeRecord", record_id)
 
 def leave_balance_not_found(balance_id: Optional[int] = None):
-    return LeaveBalanceNotFoundError(balance_id)
+    return ResourceNotFoundError("LeaveBalance", balance_id)
 
 def holiday_not_found(holiday_id: Optional[int] = None):
-    return HolidayNotFoundError(holiday_id)
+    return ResourceNotFoundError("Holiday", holiday_id)
 
 def leave_request_not_found(request_id: Optional[int] = None):
-    return LeaveRequestNotFoundError(request_id)
+    return ResourceNotFoundError("LeaveRequest", request_id)
 
 def time_correction_not_found(correction_id: Optional[int] = None):
-    return TimeCorrectionNotFoundError(correction_id)
+    return ResourceNotFoundError("TimeCorrection", correction_id)
 
 def emergency_contact_not_found(contact_id: Optional[int] = None):
-    return EmployeeEmergencyContactNotFoundError(contact_id)
+    return ResourceNotFoundError("EmployeeEmergencyContact", contact_id)
 
 def attendance_record_not_found(record_id: Optional[int] = None):
-    return AttendanceRecordNotFoundError(record_id)
+    return ResourceNotFoundError("AttendanceRecord", record_id)
 
 def employee_hierarchy_not_found(hierarchy_id: Optional[int] = None):
-    return EmployeeHierarchyNotFoundError(hierarchy_id)
+    return ResourceNotFoundError("EmployeeHierarchy", hierarchy_id)
 
 def holiday_calendar_not_found(holiday_id: Optional[int] = None):
-    return HolidayCalendarNotFoundError(holiday_id)
+    return ResourceNotFoundError("HolidayCalendar", holiday_id)
 
 def leave_approval_workflow_not_found(workflow_id: Optional[int] = None):
-    return LeaveApprovalWorkflowNotFoundError(workflow_id)
+    return ResourceNotFoundError("LeaveApprovalWorkflow", workflow_id)
 
 def system_log_not_found(log_id: Optional[int] = None):
-    return SystemLogNotFoundError(log_id)
+    return ResourceNotFoundError("SystemLog", log_id)
 
+# Other convenience functions
 def insufficient_leave_balance(detail: str = "Insufficient leave balance"):
     return InsufficientLeaveBalanceError(detail)
 

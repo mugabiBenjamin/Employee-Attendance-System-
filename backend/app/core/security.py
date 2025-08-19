@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.config import get_settings
+from app.core.config import settings
 from app.models.users import Users
 from app.core.database import get_db, redis
 import logging
@@ -14,7 +14,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Configure bcrypt with configurable rounds from environment (minimum 12 for security)
-settings = get_settings()
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",

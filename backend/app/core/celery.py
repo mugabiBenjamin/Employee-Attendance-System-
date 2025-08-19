@@ -9,18 +9,18 @@ import csv
 import io
 import os
 import re
-from app.core.config import get_settings
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal, initialize_engine_and_session
 from app.models.attendance_records import AttendanceRecords
-from app.core.mail import send_email, EmailSchema
+from app.core.mail import send_email_notification
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 # Initialize Celery
-settings = get_settings()
 app = Celery(
     'ems_tasks',
     broker=settings.CELERY_BROKER_URL,
@@ -54,6 +54,22 @@ def sanitize_filename(filename: str) -> str:
     filename = filename.replace('..', '')
     return filename
 
+async def fetch_attendance_records(user_id: int, start_date: str, end_date: str, session: AsyncSession) -> list:
+    """Fetch attendance records for a user within a date range."""
+    try:
+        query = select(AttendanceRecords).where(
+            AttendanceRecords.user_id == user_id,
+            AttendanceRecords.clock_in_time >= start_date,
+            AttendanceRecords.clock_in_time <= end_date,
+            AttendanceRecords.is_active == True
+        ).order_by(AttendanceRecords.clock_in_time.desc())
+        
+        result = await session.execute(query)
+        return result.scalars().all()
+    except Exception as e:
+        logger.error(f"Error fetching attendance records for user_id {user_id}: {str(e)}")
+        raise
+
 @app.task
 def refresh_materialized_view():
     """Celery task to refresh the attendance_summary materialized view."""
@@ -71,23 +87,17 @@ def refresh_materialized_view():
     return asyncio.run(_refresh())
 
 @app.task
-def send_email_task(to_email: str, subject: str, body: str, cc_emails: list = None, bcc_emails: list = None):
+def send_email_task(notification_type: str, context: dict):
     """Celery task to send emails asynchronously."""
     async def _send_email():
-        try:
-            email_data = EmailSchema(
-                to_email=to_email,
-                subject=subject,
-                body=body,
-                cc_emails=cc_emails,
-                bcc_emails=bcc_emails
-            )
-            await send_email(email_data)
-            logger.info(f"Email sent successfully to {to_email}")
-            return {"status": "success", "message": f"Email sent to {to_email}"}
-        except Exception as e:
-            logger.error(f"Failed to send email to {to_email}: {str(e)}")
-            raise
+        async with AsyncSessionLocal() as session:
+            try:
+                await send_email_notification(notification_type, context, session)
+                logger.info(f"Email sent successfully for {notification_type} to user_id: {context.get('user_id')}")
+                return {"status": "success", "message": f"Email sent for {notification_type}"}
+            except Exception as e:
+                logger.error(f"Failed to send email for {notification_type}: {str(e)}")
+                raise
     return asyncio.run(_send_email())
 
 @app.task
@@ -100,15 +110,7 @@ def generate_attendance_csv_task(user_id: int, start_date: str, end_date: str, f
         
         async with AsyncSessionLocal() as session:
             try:
-                query = select(AttendanceRecords).where(
-                    AttendanceRecords.user_id == user_id,
-                    AttendanceRecords.clock_in_time >= start_date,
-                    AttendanceRecords.clock_in_time <= end_date,
-                    AttendanceRecords.is_active == True
-                ).order_by(AttendanceRecords.clock_in_time.desc())
-                
-                result = await session.execute(query)
-                records = result.scalars().all()
+                records = await fetch_attendance_records(user_id, start_date, end_date, session)
 
                 output = io.StringIO()
                 writer = csv.writer(output)
@@ -148,15 +150,7 @@ def generate_attendance_pdf_task(user_id: int, start_date: str, end_date: str, f
         
         async with AsyncSessionLocal() as session:
             try:
-                query = select(AttendanceRecords).where(
-                    AttendanceRecords.user_id == user_id,
-                    AttendanceRecords.clock_in_time >= start_date,
-                    AttendanceRecords.clock_in_time <= end_date,
-                    AttendanceRecords.is_active == True
-                ).order_by(AttendanceRecords.clock_in_time.desc())
-                
-                result = await session.execute(query)
-                records = result.scalars().all()
+                records = await fetch_attendance_records(user_id, start_date, end_date, session)
 
                 data = [[
                     "Record ID", "Date", "Clock In", "Clock Out", 

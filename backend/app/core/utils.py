@@ -3,11 +3,10 @@ from typing import Optional, List
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi import UploadFile
-from app.core.config import get_settings
+from app.core.config import settings
 from app.core.exceptions import FileUploadError
 import os
-
-settings = get_settings()
+from zoneinfo import ZoneInfo
 
 class TimeCalculation(BaseModel):
     clock_in: Optional[datetime] = None
@@ -25,7 +24,7 @@ def calculate_total_hours(clock_in: datetime, clock_out: Optional[datetime] = No
     total_hours = max(0, duration - break_hours)
     return round(total_hours, 2)
 
-def calculate_overtime_hours(total_hours: float, standard_hours: float = 8.0) -> float:
+def calculate_overtime_hours(total_hours: float, standard_hours: float = settings.OVERTIME_THRESHOLD) -> float:
     """Calculate overtime hours based on total hours exceeding standard hours."""
     overtime = max(0, total_hours - standard_hours)
     return round(overtime, 2)
@@ -69,5 +68,4 @@ def format_datetime(dt: Optional[datetime]) -> Optional[str]:
 
 def get_current_date() -> datetime:
     """Return current date in the configured timezone."""
-    from zoneinfo import ZoneInfo
     return datetime.now(ZoneInfo(settings.DEFAULT_TIMEZONE)).replace(hour=0, minute=0, second=0, microsecond=0)

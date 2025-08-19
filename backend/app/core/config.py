@@ -1,4 +1,4 @@
-from typing import List, ClassVar, Set
+from typing import List, ClassVar, Set, Dict, Tuple
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.core.enums import AttendanceStatus, LeaveType, LeaveRequestStatus, CorrectionStatus, SystemAction, EmployeeType, ShiftType, Permission
@@ -112,12 +112,91 @@ class Settings(BaseSettings):
     VALID_SHIFT_TYPES: List[str] = Field(default_factory=lambda: [e.value for e in ShiftType])
     PERMISSION_KEYS: List[str] = Field(default_factory=lambda: [e.value for e in Permission])
 
+    # System action and route table mappings for middleware
+    ACTION_MAPPING: Dict[Tuple[str, str], str] = Field(
+        default_factory=lambda: {
+            ("/auth/token", "POST"): SystemAction.LOGIN.value,
+            ("/auth/logout", "POST"): SystemAction.LOGOUT.value,
+            ("/attendance/clock_in", "POST"): SystemAction.CLOCK_IN.value,
+            ("/attendance/clock_out", "POST"): SystemAction.CLOCK_OUT.value,
+            ("/users/password", "PUT"): SystemAction.PASSWORD_CHANGE.value,
+            ("/users/me", "PUT"): SystemAction.PROFILE_UPDATE.value,
+            ("/users/export", "GET"): SystemAction.DATA_EXPORT.value,
+            ("/users/import", "POST"): SystemAction.DATA_IMPORT.value,
+            ("/users/roles", "POST"): SystemAction.ASSIGN_ROLE.value,
+            ("/users/roles", "DELETE"): SystemAction.REVOKE_ROLE.value,
+            ("/reports", "GET"): SystemAction.VIEW_REPORT.value,
+            ("/leave/approve", "POST"): SystemAction.APPROVE_LEAVE.value,
+            ("/leave/reject", "POST"): SystemAction.REJECT_LEAVE.value,
+            ("/departments", "POST"): SystemAction.CREATE_DEPARTMENT.value,
+            ("/departments", "DELETE"): SystemAction.DELETE_DEPARTMENT.value,
+            ("/holidays", "DELETE"): SystemAction.DELETE_HOLIDAY.value,
+            ("/overtime", "POST"): SystemAction.CREATE_OVERTIME_RECORD.value,
+            ("/roles", "PUT"): SystemAction.UPDATE_ROLE.value,
+            ("/roles", "DELETE"): SystemAction.DELETE_ROLE.value,
+            ("/departments", "PUT"): SystemAction.UPDATE_DEPARTMENT.value,
+            ("/emergency_contacts", "DELETE"): SystemAction.DELETE_EMERGENCY_CONTACT.value,
+            ("/emergency_contacts", "PUT"): SystemAction.UPDATE_EMERGENCY_CONTACT.value,
+            ("/emergency_contacts", "POST"): SystemAction.CREATE_EMERGENCY_CONTACT.value,
+            ("/hierarchy", "DELETE"): SystemAction.DELETE_HIERARCHY.value,
+            ("/hierarchy", "PUT"): SystemAction.UPDATE_HIERARCHY.value,
+            ("/hierarchy", "POST"): SystemAction.CREATE_HIERARCHY.value,
+            ("/holidays", "PUT"): SystemAction.UPDATE_HOLIDAY.value,
+            ("/holidays", "POST"): SystemAction.CREATE_HOLIDAY.value,
+            ("/workflows", "POST"): SystemAction.DEFINE_WORKFLOW.value,
+            ("/leave_balances", "PUT"): SystemAction.UPDATE_LEAVE_BALANCE.value,
+            ("/leave_policies", "DELETE"): SystemAction.DELETE_LEAVE_POLICY.value,
+            ("/leave_policies", "PUT"): SystemAction.UPDATE_LEAVE_POLICY.value,
+            ("/leave_policies", "POST"): SystemAction.CREATE_LEAVE_POLICY.value,
+            ("/leave_requests", "POST"): SystemAction.CREATE_LEAVE_REQUEST.value,
+            ("/leave_requests/approve", "POST"): SystemAction.APPROVE_LEAVE_REQUEST.value,
+            ("/overtime/approve", "POST"): SystemAction.APPROVE_OVERTIME_RECORD.value,
+        }
+    )
+    ROUTE_TABLE_MAPPING: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "/auth/token": "users",
+            "/auth/logout": "users",
+            "/attendance/clock_in": "attendance_records",
+            "/attendance/clock_out": "attendance_records",
+            "/users/password": "users",
+            "/users/me": "users",
+            "/users/export": "users",
+            "/users/import": "users",
+            "/users/roles": "user_roles",
+            "/reports": "attendance_records",
+            "/leave/approve": "leave_requests",
+            "/leave/reject": "leave_requests",
+            "/departments": "departments",
+            "/holidays": "holiday_calendar",
+            "/overtime": "overtime_records",
+            "/roles": "roles",
+            "/emergency_contacts": "employee_emergency_contacts",
+            "/hierarchy": "employee_hierarchy",
+            "/workflows": "leave_approval_workflow",
+            "/leave_balances": "leave_balances",
+            "/leave_policies": "leave_policies",
+            "/leave_requests": "leave_requests",
+            "/leave_requests/approve": "leave_requests",
+            "/overtime/approve": "overtime_records",
+        }
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True
     )
 
+# Singleton instance
+_settings_instance = None
+
 def get_settings() -> Settings:
-    """Dependency to provide Settings instance."""
-    return Settings()
+    """Return a singleton instance of Settings."""
+    global _settings_instance
+    if _settings_instance is None:
+        _settings_instance = Settings()
+    return _settings_instance
+
+# Export the singleton instance for direct import
+settings = get_settings()

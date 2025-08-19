@@ -1,18 +1,16 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+import anyio
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
-from app.core.config import get_settings
+from app.core.config import settings
 from app.models.users import Users
-from app.core.exceptions import DatabaseError
-from datetime import datetime
+from app.core.exceptions import DatabaseError, ResourceNotFoundError
 import anyio
-
-settings = get_settings()
 
 class EmailSchema(BaseModel):
     to_email: EmailStr
@@ -29,6 +27,8 @@ async def get_user_email(user_id: int, db: AsyncSession) -> Optional[str]:
         query = select(Users.email).where(Users.user_id == user_id, Users.is_active == True, Users.deleted_at == None)
         result = await db.execute(query)
         email = result.scalar_one_or_none()
+        if not email:
+            raise ResourceNotFoundError(resource="User", identifier=user_id)
         return email
     except Exception as e:
         raise DatabaseError(f"Failed to retrieve user email: {str(e)}")
@@ -58,92 +58,52 @@ async def send_email(email_data: EmailSchema) -> None:
 
     await anyio.to_thread.run_sync(_send_email_blocking)
 
-async def send_leave_notification(
-    user_id: int,
-    leave_id: int,
-    leave_type: str,
-    start_date: str,
-    end_date: str,
-    status: str,
-    db: AsyncSession
-) -> None:
-    """Send leave request notification email to user."""
-    email = await get_user_email(user_id, db)
-    if not email:
-        raise HTTPException(status_code=404, detail="User email not found")
-
-    subject = f"Leave Request {status.capitalize()} (ID: {leave_id})"
-    body = (
-        f"Dear User,\n\n"
-        f"Your leave request (ID: {leave_id}) has been {status}.\n"
-        f"Details:\n"
-        f"Leave Type: {leave_type.capitalize()}\n"
-        f"Start Date: {start_date}\n"
-        f"End Date: {end_date}\n\n"
-        f"Please contact HR for any questions.\n\n"
-        f"Best regards,\nEmployee Management System"
-    )
-
-    email_data = EmailSchema(
-        to_email=email,
-        subject=subject,
-        body=body
-    )
-    await send_email(email_data)
-
-async def send_time_correction_notification(
-    user_id: int,
-    correction_id: int,
-    status: str,
-    clock_in: Optional[datetime] = None,
-    clock_out: Optional[datetime] = None,
-    db: AsyncSession = None
-) -> None:
-    """Send time correction notification email to user."""
-    email = await get_user_email(user_id, db)
-    if not email:
-        raise HTTPException(status_code=404, detail="User email not found")
-
-    subject = f"Time Correction Request {status.capitalize()} (ID: {correction_id})"
-    body = (
-        f"Dear User,\n\n"
-        f"Your time correction request (ID: {correction_id}) has been {status}.\n"
-        f"Details:\n"
-        f"Clock In: {clock_in.strftime('%Y-%m-%d %H:%M:%S') if clock_in else 'Not modified'}\n"
-        f"Clock Out: {clock_out.strftime('%Y-%m-%d %H:%M:%S') if clock_out else 'Not modified'}\n\n"
-        f"Please contact HR for any questions.\n\n"
-        f"Best regards,\nEmployee Management System"
-    )
+async def send_email_notification(notification_type: str, context: Dict[str, Any], db: AsyncSession) -> None:
+    """Unified function to construct and send email notifications based on type."""
+    email = await get_user_email(context.get("user_id"), db)
+    
+    if notification_type == "leave_notification":
+        subject = f"Leave Request {context['status'].capitalize()} (ID: {context['leave_id']})"
+        body = (
+            f"Dear User,\n\n"
+            f"Your leave request (ID: {context['leave_id']}) has been {context['status']}.\n"
+            f"Details:\n"
+            f"Leave Type: {context['leave_type'].capitalize()}\n"
+            f"Start Date: {context['start_date']}\n"
+            f"End Date: {context['end_date']}\n\n"
+            f"Please contact HR for any questions.\n\n"
+            f"Best regards,\nEmployee Management System"
+        )
+    elif notification_type == "time_correction_notification":
+        subject = f"Time Correction Request {context['status'].capitalize()} (ID: {context['correction_id']})"
+        clock_in = context.get('clock_in')
+        clock_out = context.get('clock_out')
+        body = (
+            f"Dear User,\n\n"
+            f"Your time correction request (ID: {context['correction_id']}) has been {context['status']}.\n"
+            f"Details:\n"
+            f"Clock In: {clock_in.strftime('%Y-%m-%d %H:%M:%S') if clock_in else 'Not modified'}\n"
+            f"Clock Out: {clock_out.strftime('%Y-%m-%d %H:%M:%S') if clock_out else 'Not modified'}\n\n"
+            f"Please contact HR for any questions.\n\n"
+            f"Best regards,\nEmployee Management System"
+        )
+    elif notification_type == "password_reset":
+        subject = "Password Reset Request"
+        body = (
+            f"Dear User,\n\n"
+            f"You have requested a password reset. Use the following token to reset your password:\n\n"
+            f"Token: {context['reset_token']}\n\n"
+            f"If you did not request this, please ignore this email or contact support.\n\n"
+            f"Best regards,\nEmployee Management System"
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown notification type: {notification_type}")
 
     email_data = EmailSchema(
         to_email=email,
         subject=subject,
-        body=body
-    )
-    await send_email(email_data)
-
-async def send_password_reset_email(
-    user_id: int,
-    reset_token: str,
-    db: AsyncSession
-) -> None:
-    """Send password reset email to user."""
-    email = await get_user_email(user_id, db)
-    if not email:
-        raise HTTPException(status_code=404, detail="User email not found")
-
-    subject = "Password Reset Request"
-    body = (
-        f"Dear User,\n\n"
-        f"You have requested a password reset. Use the following token to reset your password:\n\n"
-        f"Token: {reset_token}\n\n"
-        f"If you did not request this, please ignore this email or contact support.\n\n"
-        f"Best regards,\nEmployee Management System"
-    )
-
-    email_data = EmailSchema(
-        to_email=email,
-        subject=subject,
-        body=body
+        body=body,
+        cc_emails=context.get("cc_emails"),
+        bcc_emails=context.get("bcc_emails")
     )
     await send_email(email_data)

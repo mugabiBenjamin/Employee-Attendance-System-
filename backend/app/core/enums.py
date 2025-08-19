@@ -119,6 +119,7 @@ class Permission(str, Enum):
     VIEW_OWN_OVERTIME_RECORD = "view_own_overtime_record"
     VIEW_OWN_EMERGENCY_CONTACT = "view_own_emergency_contact"
     VIEW_OWN_HIERARCHY = "view_own_hierarchy"
+    VIEW_OWN_SHIFT_ASSIGNMENT = "view_own_shift_assignment"
     
     # Manager permissions
     APPROVE_LEAVE = "approve_leave"
@@ -134,6 +135,10 @@ class Permission(str, Enum):
     UPDATE_OVERTIME_RECORD = "update_overtime_record"
     DELETE_OVERTIME_RECORD = "delete_overtime_record"
     VIEW_TEAM_PROFILES = "view_team_profiles"
+    APPROVE_OVERTIME = "approve_overtime"
+    DEFINE_WORKFLOW = "define_workflow"
+    APPROVE_LEAVE_REQUEST = "approve_leave_request"
+    APPROVE_OVERTIME_RECORD = "approve_overtime_record"
     
     # HR permissions
     MANAGE_EMPLOYEES = "manage_employees"
@@ -173,7 +178,6 @@ class Permission(str, Enum):
     VIEW_SHIFT_ASSIGNMENT = "view_shift_assignment"
     UPDATE_SHIFT_ASSIGNMENT = "update_shift_assignment"
     DELETE_SHIFT_ASSIGNMENT = "delete_shift_assignment"
-    VIEW_OWN_SHIFT_ASSIGNMENT = "view_own_shift_assignment"
     
     # Admin permissions
     VIEW_LOGS = "view_logs"
@@ -198,27 +202,19 @@ class Permission(str, Enum):
     UPDATE_ROLE = "update_role"
     DELETE_ROLE = "delete_role"
     CREATE_LOGS = "create_logs"
-    
-    # New additions
     VIEW_WORKFLOWS = "view_workflows"
-    APPROVE_OVERTIME = "approve_overtime"
-    DEFINE_WORKFLOW = "define_workflow"
-    UPDATE_DEPARTMENT = "update_department"
-    APPROVE_LEAVE_REQUEST = "approve_leave_request"
-    APPROVE_OVERTIME_RECORD = "approve_overtime_record"
     
     # Super Admin permissions
     ALL_PERMISSIONS = "all_permissions"
 
 class PermissionGroup(str, Enum):
-    """Permission groups for easier management"""
     EMPLOYEE = "employee"
     MANAGER = "manager"
     HR = "hr"
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
 
-# Define permissions hierarchically to avoid circular reference
+# Permission mappings with proper inheritance
 _EMPLOYEE_PERMISSIONS = [
     Permission.CLOCK_IN,
     Permission.CLOCK_OUT,
@@ -332,30 +328,24 @@ _ADMIN_PERMISSIONS = [
     Permission.VIEW_WORKFLOWS,
 ]
 
-# Permission mappings with proper inheritance
 PERMISSION_GROUPS = {
     PermissionGroup.EMPLOYEE: _EMPLOYEE_PERMISSIONS,
-    
     PermissionGroup.MANAGER: [
         *_EMPLOYEE_PERMISSIONS,
         *_MANAGER_PERMISSIONS,
     ],
-    
     PermissionGroup.HR: [
         *_EMPLOYEE_PERMISSIONS,
         *_MANAGER_PERMISSIONS,
         *_HR_PERMISSIONS,
     ],
-    
     PermissionGroup.ADMIN: [
         *_EMPLOYEE_PERMISSIONS,
         *_MANAGER_PERMISSIONS,
         *_HR_PERMISSIONS,
         *_ADMIN_PERMISSIONS,
     ],
-    
     PermissionGroup.SUPER_ADMIN: [
-        # Super Admin has ALL permissions via wildcard
         Permission.ALL_PERMISSIONS,
     ],
 }

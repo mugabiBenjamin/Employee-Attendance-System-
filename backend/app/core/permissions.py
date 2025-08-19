@@ -115,7 +115,6 @@ async def check_permissions(
             )
 
         return True
-
     except AuthorizationError:
         raise
     except Exception as e:
@@ -175,7 +174,6 @@ async def get_user_permissions(user_id: int, db: AsyncSession) -> List[str]:
 
         user_permission_cache[cache_key] = list(user_permissions)
         return list(user_permissions)
-
     except Exception as e:
         logger.error(f"Failed to retrieve permissions for user_id {user_id}: {str(e)}")
         raise HTTPException(
@@ -208,19 +206,19 @@ def invalidate_role_cache(role_id: int):
 
 # Convenience decorators for common permission groups
 def require_employee_permissions():
-    return require_permissions([Permission.CLOCK_IN, Permission.CLOCK_OUT])
+    return require_permissions(get_permissions_for_group(PermissionGroup.EMPLOYEE))
 
 def require_manager_permissions():
-    return require_permissions([Permission.APPROVE_LEAVE, Permission.VIEW_TEAM_ATTENDANCE])
+    return require_permissions(get_permissions_for_group(PermissionGroup.MANAGER))
 
 def require_hr_permissions():
-    return require_permissions([Permission.MANAGE_EMPLOYEES, Permission.VIEW_ALL_ATTENDANCE])
+    return require_permissions(get_permissions_for_group(PermissionGroup.HR))
 
 def require_admin_permissions():
-    return require_permissions([Permission.MANAGE_USERS, Permission.MANAGE_ROLES])
+    return require_permissions(get_permissions_for_group(PermissionGroup.ADMIN))
 
 def require_super_admin_permissions():
-    return require_permissions([Permission.ALL_PERMISSIONS])
+    return require_permissions(get_permissions_for_group(PermissionGroup.SUPER_ADMIN))
 
 # Specific permission decorators for common operations
 def require_leave_management():

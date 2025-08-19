@@ -3,10 +3,10 @@ from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
 from sqlalchemy.ext.declarative import declarative_base
-from app.core.config import get_settings
-from app.core.db_enums import (
-    attendance_status_enum, leave_request_status_enum, leave_type_enum,
-    correction_status_enum, employee_type_enum, shift_type_enum, system_action_enum
+from app.core.config import settings
+from app.core.enums import (
+    AttendanceStatus, LeaveRequestStatus, LeaveType,
+    CorrectionStatus, EmployeeType, ShiftType, SystemAction
 )
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 # Validate DATABASE_URL for async driver
-settings = get_settings()
 if not settings.DATABASE_URL.startswith("postgresql+asyncpg://"):
     logger.error("DATABASE_URL must use asyncpg driver (e.g., postgresql+asyncpg://)")
     raise ValueError("DATABASE_URL must use asyncpg driver (e.g., postgresql+asyncpg://)")
@@ -154,9 +153,14 @@ async def is_key_cached(key: str) -> bool:
         return False
 
 # Enum types list
-ENUM_TYPES = [
-    attendance_status_enum, leave_request_status_enum, leave_type_enum,
-    correction_status_enum, employee_type_enum, shift_type_enum, system_action_enum
+ENUM_CLASSES = [
+    (AttendanceStatus, "attendance_status"),
+    (LeaveRequestStatus, "leave_request_status"),
+    (LeaveType, "leave_type"),
+    (CorrectionStatus, "correction_status"),
+    (EmployeeType, "employee_type"),
+    (ShiftType, "shift_type"),
+    (SystemAction, "system_action"),
 ]
 
 # Materialized view and index creation SQL statements
@@ -199,11 +203,12 @@ MATERIALIZED_VIEW_SQLS = [
 )
 async def init_db():
     async with engine.begin() as conn:
-        # Create enums from centralized db_enums.py
-        for enum_type in ENUM_TYPES:
+        # Create enums from Python Enum classes
+        for enum_class, enum_name in ENUM_CLASSES:
+            values = [member.value for member in enum_class]
             await conn.execute(text(f"""
                 DO $$ BEGIN
-                    CREATE TYPE {enum_type.name} AS ENUM ({', '.join(f"'{v}'" for v in enum_type.enums)});
+                    CREATE TYPE {enum_name} AS ENUM ({', '.join(f"'{v}'" for v in values)});
                 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
             """))
 
