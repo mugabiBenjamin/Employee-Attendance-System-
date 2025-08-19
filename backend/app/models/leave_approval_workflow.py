@@ -1,6 +1,7 @@
-from sqlalchemy import Boolean, Column, Integer, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
+from sqlalchemy import Boolean, Column, Integer, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from app.core.database import Base, ENUM_CLASSES
+from app.core.enums import LeaveRequestStatus
 
 class LeaveApprovalWorkflow(Base):
     __tablename__ = "leave_approval_workflow"
@@ -9,7 +10,7 @@ class LeaveApprovalWorkflow(Base):
     leave_id = Column(Integer, ForeignKey('leave_requests.leave_id', ondelete='CASCADE'), nullable=False)
     approver_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     level = Column(Integer, nullable=False)
-    status = Column(ENUM_CLASSES['leave_request_status_enum'], default='under_review')
+    status = Column(ENUM_CLASSES['leave_request_status'], default=LeaveRequestStatus.UNDER_REVIEW)
     comments = Column(Text)
     action_taken_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
@@ -19,5 +20,8 @@ class LeaveApprovalWorkflow(Base):
     
     __table_args__ = (
         CheckConstraint("level >= 1 AND level <= 5", name="level_valid"),
+        CheckConstraint("deleted_at IS NULL OR is_active = FALSE", name="soft_delete_check"),
         UniqueConstraint('leave_id', 'approver_id', 'level', name='unique_leave_approver_level'),
+        Index('idx_leave_approval_workflow_leave_id', 'leave_id'),
+        Index('idx_leave_approval_workflow_approver_id', 'approver_id'),
     )

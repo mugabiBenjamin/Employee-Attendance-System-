@@ -112,7 +112,7 @@ async def get_all_attendance_summaries_endpoint(
 async def generate_attendance_summary_endpoint(
     request: Request,
     user_id: int,
-    date: date,
+    attendance_summary_date: date,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
@@ -122,7 +122,7 @@ async def generate_attendance_summary_endpoint(
     Args:
         request: The incoming HTTP request.
         user_id: The ID of the user to generate the summary for.
-        date: The date for the summary.
+        attendance_summary_date: The date for the summary.
         db: Database session dependency.
         current_user: The authenticated user.
         settings: Application settings.
@@ -132,7 +132,7 @@ async def generate_attendance_summary_endpoint(
     """
     return await generate_attendance_summary(
         user_id=user_id,
-        date=date,
+        attendance_summary_date=attendance_summary_date,
         request=request,
         current_user=current_user,
         db=db,

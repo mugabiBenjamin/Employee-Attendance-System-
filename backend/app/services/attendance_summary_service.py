@@ -11,10 +11,11 @@ from app.models.system_logs import SystemLogs
 from app.schemas.attendance_summary import AttendanceSummaryOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import DatabaseError, ResourceNotFoundError
+from app.core.exceptions import DatabaseError, ResourceNotFoundError, ValidationError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
-from app.core.database import get_db
+from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
+from app.core.validators import validate_user_exists, validate_department_exists
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,11 +33,14 @@ async def get_attendance_summary_by_user(
     """Retrieve attendance summary for a specific user with optional date range and pagination."""
     try:
         if skip < 0 or limit <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid pagination parameters"
-            )
+            raise ValidationError(detail="Invalid pagination parameters")
 
+        cache_key = f"attendance_summary:{user_id}:{start_date or 'none'}:{end_date or 'none'}:{skip}:{limit}"
+        cached_result = await get_cache(cache_key)
+        if cached_result:
+            return [AttendanceSummaryOut(**record) for record in cached_result]
+
+        await validate_user_exists(user_id, db)
         query = (
             select(AttendanceSummary)
             .join(Users, Users.user_id == AttendanceSummary.user_id)
@@ -58,6 +62,9 @@ async def get_attendance_summary_by_user(
 
         if not summaries:
             raise ResourceNotFoundError(resource="Attendance summary", identifier=f"user_id {user_id}")
+
+        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump() for summary in summaries]
+        await set_cache(cache_key, summaries_dict, ttl=300)
 
         logger.info(f"Retrieved {len(summaries)} attendance summaries for user_id: {user_id}")
         return [AttendanceSummaryOut.model_validate(summary) for summary in summaries]
@@ -86,10 +93,12 @@ async def get_all_attendance_summaries(
     """Retrieve all attendance summaries with optional date range and pagination."""
     try:
         if skip < 0 or limit <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid pagination parameters"
-            )
+            raise ValidationError(detail="Invalid pagination parameters")
+
+        cache_key = f"attendance_summary_all:{start_date or 'none'}:{end_date or 'none'}:{skip}:{limit}"
+        cached_result = await get_cache(cache_key)
+        if cached_result:
+            return [AttendanceSummaryOut(**record) for record in cached_result]
 
         query = (
             select(AttendanceSummary)
@@ -106,6 +115,9 @@ async def get_all_attendance_summaries(
         query = query.offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
         result = await db.execute(query)
         summaries = result.scalars().all()
+
+        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump() for summary in summaries]
+        await set_cache(cache_key, summaries_dict, ttl=300)
 
         logger.info(f"Retrieved {len(summaries)} attendance summaries")
         return [AttendanceSummaryOut.model_validate(summary) for summary in summaries]
@@ -131,6 +143,10 @@ async def generate_attendance_summary(
 ) -> AttendanceSummaryOut:
     """Generate an attendance summary for a specific user and date."""
     try:
+        if attendance_summary_date > date.today():
+            raise ValidationError(detail="Attendance summary date cannot be in the future.")
+
+        await validate_user_exists(user_id, db)
         query = select(Users).where(
             Users.user_id == user_id,
             Users.is_active.is_(True),
@@ -143,6 +159,7 @@ async def generate_attendance_summary(
 
         department_name = None
         if user.department_id:
+            await validate_department_exists(user.department_id, db)
             query = select(Departments).where(
                 Departments.department_id == user.department_id,
                 Departments.is_active.is_(True),
@@ -161,7 +178,7 @@ async def generate_attendance_summary(
         attendance = result.scalar_one_or_none()
         if not attendance:
             raise ResourceNotFoundError(resource="Attendance record", 
-                                     identifier=f"user_id {user_id}, date {attendance_summary_date}")
+                                      identifier=f"user_id {user_id}, date {attendance_summary_date}")
 
         query = select(AttendanceSummary).where(
             AttendanceSummary.user_id == user_id,
@@ -177,10 +194,11 @@ async def generate_attendance_summary(
             "department_name": department_name,
             "attendance_summary_date": attendance_summary_date,
             "status": attendance.status,
-            "total_hours": str(attendance.total_hours) if attendance.total_hours else None,
-            "overtime_hours": str(attendance.overtime_hours) if attendance.overtime_hours else None,
+            "total_hours": float(attendance.total_hours) if attendance.total_hours else None,
+            "overtime_hours": float(attendance.overtime_hours) if attendance.overtime_hours else None,
             "clock_in_time": attendance.clock_in_time,
             "clock_out_time": attendance.clock_out_time,
+            "is_active": True,
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc)
         }
@@ -198,18 +216,20 @@ async def generate_attendance_summary(
 
         system_log = SystemLogs(
             user_id=current_user.user_id,
-            action=SystemAction.VIEW_REPORT,
+            action=SystemAction.GENERATE_REPORT,
             table_affected="attendance_summary",
-            record_id=db_summary.id,
+            record_id=db_summary.user_id,
             old_values=None,
             new_values=db_summary.__dict__,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
         db.add(system_log)
         await db.commit()
 
+        await invalidate_cache_prefix(f"attendance_summary:{user_id}")
+        await invalidate_cache_prefix(f"attendance_summary_all")
         logger.info(f"Attendance summary generated for user_id: {user_id}, date: {attendance_summary_date}")
         return AttendanceSummaryOut.model_validate(db_summary)
 

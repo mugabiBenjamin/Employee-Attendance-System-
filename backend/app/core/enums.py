@@ -80,6 +80,13 @@ class CorrectionStatus(str, Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
 
+class OvertimeStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
+
 class EmployeeType(str, Enum):
     FULL_TIME = "full_time"
     PART_TIME = "part_time"
@@ -208,6 +215,13 @@ class Permission(str, Enum):
     ALL_PERMISSIONS = "all_permissions"
 
 class PermissionGroup(str, Enum):
+    EMPLOYEE = "employee"
+    MANAGER = "manager"
+    HR = "hr"
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
+
+class RoleName(str, Enum):
     EMPLOYEE = "employee"
     MANAGER = "manager"
     HR = "hr"

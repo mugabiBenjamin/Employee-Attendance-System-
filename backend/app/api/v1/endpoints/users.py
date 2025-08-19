@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.permissions import require_permissions
@@ -37,8 +37,7 @@ async def create_new_user_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> UserOut:
-    """
-    Create a new user.
+    """Create a new user.
 
     Args:
         user: The user data to create.
@@ -75,8 +74,7 @@ async def read_user_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> UserOut:
-    """
-    Retrieve a user by ID.
+    """Retrieve a user by ID.
 
     Args:
         user_id: The ID of the user to retrieve.
@@ -109,16 +107,15 @@ async def read_user_endpoint(
 async def read_users_endpoint(
     request: Request,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[UserOut]:
-    """
-    List all active users with pagination.
+    """List all active users with pagination.
 
     Args:
         skip: Number of records to skip for pagination (default: 0).
-        limit: Maximum number of records to return (default: 50).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
         request: The incoming HTTP request for logging client details.
         db: Database session dependency.
         settings: Application settings.
@@ -154,8 +151,7 @@ async def update_existing_user_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> UserOut:
-    """
-    Update a user's details.
+    """Update a user's details.
 
     Args:
         user_id: The ID of the user to update.
@@ -195,8 +191,7 @@ async def delete_existing_user_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> None:
-    """
-    Soft delete a user.
+    """Soft delete a user.
 
     Args:
         user_id: The ID of the user to delete.
@@ -227,13 +222,13 @@ async def delete_existing_user_endpoint(
     summary="Get current user profile",
     description="Retrieve the current authenticated user's profile."
 )
+@require_permissions([Permission.VIEW_OWN_PROFILE])
 async def get_current_user_profile_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> UserOut:
-    """
-    Retrieve the current user's profile.
+    """Retrieve the current user's profile.
 
     Args:
         current_user: The authenticated user.

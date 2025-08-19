@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, status, Request
+from fastapi import APIRouter, Depends, status, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.enums import Permission
+from app.core.exceptions import ValidationError
 from app.services.leave_policy_service import (
     create_leave_policy,
     get_leave_policy,
@@ -18,6 +19,10 @@ from app.schemas.leave_policy import LeavePolicyCreate, LeavePolicyUpdate, Leave
 import logging
 
 logger = logging.getLogger(__name__)
+
+def get_request_id(request: Request) -> Optional[str]:
+    """Extract request_id from the request state."""
+    return request.state.request_id if hasattr(request.state, "request_id") else None
 
 router = APIRouter(prefix="/leave-policies", tags=["Leave Policies"])
 
@@ -33,20 +38,22 @@ async def create_leave_policy_endpoint(
     policy: LeavePolicyCreate,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> LeavePolicyOut:
-    """Create a new leave policy.
-
-    Args:
-        policy: Leave policy creation data.
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        LeavePolicyOut: The created leave policy.
-    """
-    return await create_leave_policy(policy, request, current_user, db)
+    """Create a new leave policy."""
+    try:
+        request_id = get_request_id(request)
+        return await create_leave_policy(policy, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error creating leave policy: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error creating leave policy: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/{policy_id}",
@@ -57,20 +64,26 @@ async def create_leave_policy_endpoint(
 @require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY])
 async def get_leave_policy_endpoint(
     policy_id: int,
+    request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> LeavePolicyOut:
-    """Retrieve a leave policy by ID.
-
-    Args:
-        policy_id: The ID of the leave policy to retrieve.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        LeavePolicyOut: The retrieved leave policy.
-    """
-    return await get_leave_policy(policy_id, current_user, db)
+    """Retrieve a leave policy by ID."""
+    try:
+        if policy_id <= 0:
+            raise ValidationError(detail="Invalid policy_id")
+        request_id = get_request_id(request)
+        return await get_leave_policy(policy_id, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error retrieving leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/",
@@ -80,25 +93,28 @@ async def get_leave_policy_endpoint(
 )
 @require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY])
 async def list_leave_policies_endpoint(
+    request: Request,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[LeavePolicyOut]:
-    """List all active leave policies with pagination.
-
-    Args:
-        skip: Number of records to skip for pagination.
-        limit: Maximum number of records to return.
-        current_user: The authenticated user.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[LeavePolicyOut]: List of active leave policies.
-    """
-    return await list_leave_policies(skip, limit, current_user, db, settings)
+    """List all active leave policies with pagination."""
+    try:
+        if skip < 0 or (limit is not None and limit <= 0):
+            raise ValidationError(detail="Invalid pagination parameters")
+        request_id = get_request_id(request)
+        return await list_leave_policies(skip, limit, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error retrieving leave policies: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving leave policies: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.put(
     "/{policy_id}",
@@ -112,21 +128,24 @@ async def update_leave_policy_endpoint(
     policy_update: LeavePolicyUpdate,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> LeavePolicyOut:
-    """Update a leave policy.
-
-    Args:
-        policy_id: The ID of the leave policy to update.
-        policy_update: Leave policy update data.
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        LeavePolicyOut: The updated leave policy.
-    """
-    return await update_leave_policy(policy_id, policy_update, request, current_user, db)
+    """Update a leave policy."""
+    try:
+        if policy_id <= 0:
+            raise ValidationError(detail="Invalid policy_id")
+        request_id = get_request_id(request)
+        return await update_leave_policy(policy_id, policy_update, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error updating leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error updating leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.delete(
     "/{policy_id}",
@@ -139,14 +158,21 @@ async def delete_leave_policy_endpoint(
     policy_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> None:
-    """Soft delete a leave policy.
-
-    Args:
-        policy_id: The ID of the leave policy to delete.
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        db: Database session dependency.
-    """
-    await delete_leave_policy(policy_id, request, current_user, db)
+    """Soft delete a leave policy."""
+    try:
+        if policy_id <= 0:
+            raise ValidationError(detail="Invalid policy_id")
+        request_id = get_request_id(request)
+        await delete_leave_policy(policy_id, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error deleting leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

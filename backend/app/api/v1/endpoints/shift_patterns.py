@@ -1,18 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.enums import Permission
+from app.core.exceptions import ValidationError
 from app.services.shift_pattern_service import (
-    create_shift_pattern as service_create_shift_pattern,
-    get_shift_pattern as service_get_shift_pattern,
-    list_shift_patterns as service_list_shift_patterns,
-    update_shift_pattern as service_update_shift_pattern,
-    delete_shift_pattern as service_delete_shift_pattern
+    create_shift_pattern,
+    get_shift_pattern,
+    list_shift_patterns,
+    update_shift_pattern,
+    delete_shift_pattern
 )
 from app.schemas.shift_pattern import ShiftPatternCreate, ShiftPatternUpdate, ShiftPatternOut
 import logging
@@ -38,23 +39,10 @@ async def create_shift_pattern_endpoint(
 ) -> ShiftPatternOut:
     """
     Create a new shift pattern by delegating to shift_pattern_service.
-
-    Args:
-        shift_pattern: The shift pattern data to create.
-        request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
-        current_user: The authenticated user performing the action.
-        settings: Application settings.
-
-    Returns:
-        ShiftPatternOut: The created shift pattern.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await service_create_shift_pattern(shift_pattern, request, current_user, db, settings, request_id)
+        return await create_shift_pattern(shift_pattern, request, current_user, db, settings, request_id)
     except HTTPException as e:
         logger.error(f"Error creating shift pattern: {str(e)}", extra={"request_id": request_id})
         raise
@@ -77,22 +65,15 @@ async def get_shift_pattern_endpoint(
 ) -> ShiftPatternOut:
     """
     Retrieve a shift pattern by ID by delegating to shift_pattern_service.
-
-    Args:
-        pattern_id: The ID of the shift pattern to retrieve.
-        request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        ShiftPatternOut: The retrieved shift pattern.
-
-    Raises:
-        HTTPException: For not found (404) or server errors (500).
     """
     try:
+        if pattern_id <= 0:
+            raise ValidationError(detail="Invalid pattern_id")
         request_id = getattr(request.state, "request_id", None)
-        return await service_get_shift_pattern(pattern_id, db, settings, request_id)
+        return await get_shift_pattern(pattern_id, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error retrieving shift pattern {pattern_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -110,29 +91,16 @@ async def get_shift_pattern_endpoint(
 async def list_shift_patterns_endpoint(
     request: Request,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[ShiftPatternOut]:
     """
     List all active shift patterns by delegating to shift_pattern_service.
-
-    Args:
-        skip: Number of records to skip for pagination (default: 0).
-        limit: Maximum number of records to return (default: 50).
-        request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[ShiftPatternOut]: List of active shift patterns.
-
-    Raises:
-        HTTPException: For validation errors (422) or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await service_list_shift_patterns(skip, limit, db, settings, request_id)
+        return await list_shift_patterns(skip, limit, db, settings, request_id)
     except HTTPException as e:
         logger.error(f"Error listing shift patterns: {str(e)}", extra={"request_id": request_id})
         raise
@@ -157,24 +125,15 @@ async def update_shift_pattern_endpoint(
 ) -> ShiftPatternOut:
     """
     Update a shift pattern by delegating to shift_pattern_service.
-
-    Args:
-        pattern_id: The ID of the shift pattern to update.
-        shift_pattern_update: The updated shift pattern data.
-        request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
-        current_user: The authenticated user performing the action.
-        settings: Application settings.
-
-    Returns:
-        ShiftPatternOut: The updated shift pattern.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
     """
     try:
+        if pattern_id <= 0:
+            raise ValidationError(detail="Invalid pattern_id")
         request_id = getattr(request.state, "request_id", None)
-        return await service_update_shift_pattern(pattern_id, shift_pattern_update, request, current_user, db, settings, request_id)
+        return await update_shift_pattern(pattern_id, shift_pattern_update, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error updating shift pattern {pattern_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -198,23 +157,15 @@ async def delete_shift_pattern_endpoint(
 ) -> None:
     """
     Soft delete a shift pattern by delegating to shift_pattern_service.
-
-    Args:
-        pattern_id: The ID of the shift pattern to delete.
-        request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
-        current_user: The authenticated user performing the action.
-        settings: Application settings.
-
-    Returns:
-        None: No content returned on successful deletion.
-
-    Raises:
-        HTTPException: For not found (404) or server errors (500).
     """
     try:
+        if pattern_id <= 0:
+            raise ValidationError(detail="Invalid pattern_id")
         request_id = getattr(request.state, "request_id", None)
-        await service_delete_shift_pattern(pattern_id, request, current_user, db, settings, request_id)
+        await delete_shift_pattern(pattern_id, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error deleting shift pattern {pattern_id}: {str(e)}", extra={"request_id": request_id})
         raise

@@ -45,8 +45,8 @@ class AttendanceRecordBase(BaseModel):
 
     @field_validator('date')
     @classmethod
-    def validate_date(cls, value: datetime) -> datetime:
-        if value > datetime.now(value.tzinfo or timezone.utc):
+    def validate_date(cls, value: datetime.date) -> datetime.date:
+        if value > datetime.date.today():
             raise ValidationError(detail="Date cannot be in the future.")
         return value
 

@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Date, DECIMAL, Foreign
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import INET
 from app.core.database import Base, ENUM_CLASSES
+from app.core.enums import AttendanceStatus
 
 class AttendanceRecords(Base):
     __tablename__ = "attendance_records"
@@ -14,7 +15,7 @@ class AttendanceRecords(Base):
     total_hours = Column(DECIMAL(4, 2))
     overtime_hours = Column(DECIMAL(4, 2), default=0)
     date = Column(Date, nullable=False, server_default=func.current_date())
-    status = Column(ENUM_CLASSES['attendance_status_enum'], default='present')
+    status = Column(ENUM_CLASSES['attendance_status'], default=AttendanceStatus.PRESENT, nullable=False)
     ip_address = Column(INET)
     location = Column(String(255))
     is_active = Column(Boolean, default=True, nullable=False)

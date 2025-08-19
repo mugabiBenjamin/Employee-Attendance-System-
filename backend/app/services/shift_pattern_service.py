@@ -5,6 +5,7 @@ from sqlalchemy import select
 from datetime import datetime, timezone
 from app.models.shift_patterns import ShiftPatterns
 from app.models.users import Users
+from app.models.shift_assignments import ShiftAssignments
 from app.schemas.shift_pattern import ShiftPatternCreate, ShiftPatternUpdate, ShiftPatternOut
 from app.schemas.system_log import SystemLogCreate
 from app.core.config import Settings, get_settings
@@ -12,8 +13,10 @@ from app.core.enums import SystemAction, Permission
 from app.core.exceptions import ShiftPatternNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
-from app.core.database import get_db
+from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
+from app.core.validators import validate_shift_pattern_exists
 from app.services.system_log_service import create_system_log
+from app.core.mail import send_email
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,7 +31,7 @@ async def create_shift_pattern(
     _: bool = Depends(require_permissions([Permission.CREATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """
-    Create a new shift pattern with validation and logging."""
+    Create a new shift pattern with validation, logging, and notification."""
     try:
         # Check for existing shift pattern with same name
         query = select(ShiftPatterns).where(
@@ -39,10 +42,6 @@ async def create_shift_pattern(
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise ValidationError(detail="Shift pattern name already exists")
-
-        # Validate shift times
-        if not shift_pattern.is_overnight and shift_pattern.start_time >= shift_pattern.end_time:
-            raise ValidationError(detail="End time must be after start time for non-overnight shifts")
 
         # Create shift pattern
         db_shift_pattern = ShiftPatterns(
@@ -60,19 +59,46 @@ async def create_shift_pattern(
         await db.commit()
         await db.refresh(db_shift_pattern)
 
+        # Invalidate cache
+        await invalidate_cache_prefix("shift_patterns")
+        logger.debug(f"Cache cleared for shift_patterns")
+
         # Log action
         log = SystemLogCreate(
             user_id=current_user.user_id,
-            action=SystemAction.INSERT,
+            action=SystemAction.CREATE_SHIFT_PATTERN,
             table_affected="shift_patterns",
             record_id=db_shift_pattern.pattern_id,
             old_values=None,
             new_values=db_shift_pattern.__dict__,
-            ip_address=request.client.host if request else None,
+            ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
-        await create_system_log(log, request, current_user, db, request_id)
+        await create_system_log(log, request, current_user, db, settings, request_id)
+
+        # Notify HR or admins
+        query = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_PATTERNS))
+        result = await db.execute(query)
+        admins = result.scalars().all()
+        for admin in admins:
+            await send_email(
+                to_email=admin.email,
+                subject=f"New Shift Pattern Created (ID: {db_shift_pattern.pattern_id})",
+                body=(
+                    f"Dear {admin.first_name},\n\n"
+                    f"A new shift pattern '{db_shift_pattern.pattern_name}' (ID: {db_shift_pattern.pattern_id}) has been created.\n"
+                    f"Details:\n"
+                    f"Shift Type: {db_shift_pattern.shift_type}\n"
+                    f"Start Time: {db_shift_pattern.start_time}\n"
+                    f"End Time: {db_shift_pattern.end_time}\n"
+                    f"Break Duration: {db_shift_pattern.break_duration} minutes\n"
+                    f"Overnight: {db_shift_pattern.is_overnight}\n\n"
+                    f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
 
         logger.info(
             f"Shift pattern created, pattern_id: {db_shift_pattern.pattern_id}, name: {db_shift_pattern.pattern_name}",
@@ -98,8 +124,18 @@ async def get_shift_pattern(
     _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """
-    Retrieve a shift pattern by ID."""
+    Retrieve a shift pattern by ID with caching."""
     try:
+        if pattern_id <= 0:
+            raise ValidationError(detail="Invalid pattern_id")
+
+        cache_key = f"shift_pattern:{pattern_id}"
+        cached_pattern = await get_cache(cache_key)
+        if cached_pattern:
+            return ShiftPatternOut(**cached_pattern)
+
+        await validate_shift_pattern_exists(db, pattern_id, request_id)
+
         query = select(ShiftPatterns).where(
             ShiftPatterns.pattern_id == pattern_id,
             ShiftPatterns.is_active == True,
@@ -111,12 +147,18 @@ async def get_shift_pattern(
         if not shift_pattern:
             raise ShiftPatternNotFoundError(pattern_id=pattern_id)
 
+        pattern_dict = ShiftPatternOut.model_validate(shift_pattern).model_dump()
+        await set_cache(cache_key, pattern_dict, ttl=300)
+
         logger.info(
             f"Retrieved shift pattern, pattern_id: {pattern_id}",
             extra={"request_id": request_id}
         )
         return ShiftPatternOut.model_validate(shift_pattern)
 
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except ShiftPatternNotFoundError as e:
         logger.error(f"Shift pattern not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -136,11 +178,16 @@ async def list_shift_patterns(
     _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
 ) -> List[ShiftPatternOut]:
     """
-    Retrieve a list of active shift patterns with pagination."""
+    Retrieve a list of active shift patterns with pagination and caching."""
     try:
         limit = limit or settings.DEFAULT_PAGE_SIZE
         if skip < 0 or limit <= 0:
             raise ValidationError(detail="Invalid pagination parameters")
+
+        cache_key = f"shift_patterns_list:{skip}:{limit}"
+        cached_patterns = await get_cache(cache_key)
+        if cached_patterns:
+            return [ShiftPatternOut(**p) for p in cached_patterns]
 
         query = select(ShiftPatterns).where(
             ShiftPatterns.is_active == True,
@@ -148,6 +195,9 @@ async def list_shift_patterns(
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         shift_patterns = result.scalars().all()
+
+        patterns_dict = [ShiftPatternOut.model_validate(p).model_dump() for p in shift_patterns]
+        await set_cache(cache_key, patterns_dict, ttl=300)
 
         logger.info(
             f"Retrieved {len(shift_patterns)} shift patterns",
@@ -176,9 +226,13 @@ async def update_shift_pattern(
     _: bool = Depends(require_permissions([Permission.UPDATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """
-    Update a shift pattern with validation and logging."""
+    Update a shift pattern with validation, logging, and notification."""
     try:
-        # Retrieve shift pattern
+        if pattern_id <= 0:
+            raise ValidationError(detail="Invalid pattern_id")
+
+        await validate_shift_pattern_exists(db, pattern_id, request_id)
+
         query = select(ShiftPatterns).where(
             ShiftPatterns.pattern_id == pattern_id,
             ShiftPatterns.is_active == True,
@@ -190,7 +244,6 @@ async def update_shift_pattern(
         if not db_shift_pattern:
             raise ShiftPatternNotFoundError(pattern_id=pattern_id)
 
-        # Check for duplicate shift name if updated
         update_data = shift_pattern_update.model_dump(exclude_none=True)
         if not update_data:
             raise ValidationError(detail="No fields provided for update")
@@ -206,18 +259,7 @@ async def update_shift_pattern(
             if result.scalar_one_or_none():
                 raise ValidationError(detail="Shift pattern name already exists")
 
-        # Validate shift times if updated
-        if "start_time" in update_data or "end_time" in update_data:
-            start_time = update_data.get("start_time", db_shift_pattern.start_time)
-            end_time = update_data.get("end_time", db_shift_pattern.end_time)
-            is_overnight = update_data.get("is_overnight", db_shift_pattern.is_overnight)
-            if not is_overnight and start_time >= end_time:
-                raise ValidationError(detail="End time must be after start time for non-overnight shifts")
-
-        # Store old values for logging
         old_values = db_shift_pattern.__dict__.copy()
-
-        # Apply updates
         for key, value in update_data.items():
             setattr(db_shift_pattern, key, value)
 
@@ -226,19 +268,46 @@ async def update_shift_pattern(
         await db.commit()
         await db.refresh(db_shift_pattern)
 
+        # Invalidate cache
+        await invalidate_cache_prefix("shift_patterns")
+        logger.debug(f"Cache cleared for shift_patterns")
+
         # Log action
         log = SystemLogCreate(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE,
+            action=SystemAction.UPDATE_SHIFT_PATTERN,
             table_affected="shift_patterns",
             record_id=pattern_id,
             old_values=old_values,
             new_values=db_shift_pattern.__dict__,
-            ip_address=request.client.host if request else None,
+            ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
-        await create_system_log(log, request, current_user, db, request_id)
+        await create_system_log(log, request, current_user, db, settings, request_id)
+
+        # Notify HR or admins
+        query = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_PATTERNS))
+        result = await db.execute(query)
+        admins = result.scalars().all()
+        for admin in admins:
+            await send_email(
+                to_email=admin.email,
+                subject=f"Shift Pattern Updated (ID: {db_shift_pattern.pattern_id})",
+                body=(
+                    f"Dear {admin.first_name},\n\n"
+                    f"The shift pattern '{db_shift_pattern.pattern_name}' (ID: {db_shift_pattern.pattern_id}) has been updated.\n"
+                    f"Details:\n"
+                    f"Shift Type: {db_shift_pattern.shift_type}\n"
+                    f"Start Time: {db_shift_pattern.start_time}\n"
+                    f"End Time: {db_shift_pattern.end_time}\n"
+                    f"Break Duration: {db_shift_pattern.break_duration} minutes\n"
+                    f"Overnight: {db_shift_pattern.is_overnight}\n\n"
+                    f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
 
         logger.info(
             f"Shift pattern updated, pattern_id: {pattern_id}",
@@ -246,12 +315,12 @@ async def update_shift_pattern(
         )
         return ShiftPatternOut.model_validate(db_shift_pattern)
 
-    except ShiftPatternNotFoundError as e:
-        logger.error(f"Shift pattern not found: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValidationError as e:
         logger.error(f"Validation error updating shift pattern {pattern_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except ShiftPatternNotFoundError as e:
+        logger.error(f"Shift pattern not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
         logger.error(f"Database error updating shift pattern {pattern_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
@@ -269,8 +338,13 @@ async def delete_shift_pattern(
     _: bool = Depends(require_permissions([Permission.DELETE_SHIFT_PATTERN]))
 ) -> None:
     """
-    Soft delete a shift pattern with logging."""
+    Soft delete a shift pattern with logging and notification."""
     try:
+        if pattern_id <= 0:
+            raise ValidationError(detail="Invalid pattern_id")
+
+        await validate_shift_pattern_exists(db, pattern_id, request_id)
+
         query = select(ShiftPatterns).where(
             ShiftPatterns.pattern_id == pattern_id,
             ShiftPatterns.is_active == True,
@@ -282,30 +356,65 @@ async def delete_shift_pattern(
         if not db_shift_pattern:
             raise ShiftPatternNotFoundError(pattern_id=pattern_id)
 
+        # Check for dependent employee shift assignments
+        query = select(ShiftAssignments).where(
+            ShiftAssignments.pattern_id == pattern_id,
+            ShiftAssignments.is_active == True,
+            ShiftAssignments.deleted_at == None
+        )
+        result = await db.execute(query)
+        if result.scalars().first():
+            raise ValidationError(detail="Cannot delete shift pattern with active employee assignments")
+
         db_shift_pattern.is_active = False
         db_shift_pattern.deleted_at = datetime.now(timezone.utc)
+        db_shift_pattern.updated_at = datetime.now(timezone.utc)
         db.add(db_shift_pattern)
         await db.commit()
+
+        # Invalidate cache
+        await invalidate_cache_prefix("shift_patterns")
+        logger.debug(f"Cache cleared for shift_patterns")
 
         # Log action
         log = SystemLogCreate(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE,
+            action=SystemAction.DELETE_SHIFT_PATTERN,
             table_affected="shift_patterns",
             record_id=pattern_id,
             old_values=db_shift_pattern.__dict__,
             new_values=None,
-            ip_address=request.client.host if request else None,
+            ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
-        await create_system_log(log, request, current_user, db, request_id)
+        await create_system_log(log, request, current_user, db, settings, request_id)
+
+        # Notify HR or admins
+        query = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_PATTERNS))
+        result = await db.execute(query)
+        admins = result.scalars().all()
+        for admin in admins:
+            await send_email(
+                to_email=admin.email,
+                subject=f"Shift Pattern Deleted (ID: {db_shift_pattern.pattern_id})",
+                body=(
+                    f"Dear {admin.first_name},\n\n"
+                    f"The shift pattern '{db_shift_pattern.pattern_name}' (ID: {db_shift_pattern.pattern_id}) has been deleted.\n"
+                    f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
 
         logger.info(
             f"Shift pattern soft deleted, pattern_id: {pattern_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
 
+    except ValidationError as e:
+        logger.error(f"Validation error deleting shift pattern {pattern_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except ShiftPatternNotFoundError as e:
         logger.error(f"Shift pattern not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

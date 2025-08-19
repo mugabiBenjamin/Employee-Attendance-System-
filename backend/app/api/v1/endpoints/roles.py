@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.permissions import require_permissions
@@ -46,7 +46,15 @@ async def create_role_endpoint(
     Returns:
         RoleOut: The created role.
     """
-    return await create_role(role, request, current_user, db)
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await create_role(role, request, current_user, db)
+    except HTTPException as e:
+        logger.error(f"Error creating role: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error creating role: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/{role_id}",
@@ -57,6 +65,7 @@ async def create_role_endpoint(
 @require_permissions([Permission.VIEW_ROLE])
 async def get_role_endpoint(
     role_id: int,
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> RoleOut:
@@ -64,13 +73,22 @@ async def get_role_endpoint(
 
     Args:
         role_id: The ID of the role to retrieve.
+        request: The incoming HTTP request.
         current_user: The authenticated user.
         db: Database session dependency.
 
     Returns:
         RoleOut: The retrieved role.
     """
-    return await get_role(role_id, current_user, db)
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await get_role(role_id, current_user, db)
+    except HTTPException as e:
+        logger.error(f"Error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/",
@@ -80,8 +98,9 @@ async def get_role_endpoint(
 )
 @require_permissions([Permission.VIEW_ROLE])
 async def list_roles_endpoint(
+    request: Request,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
@@ -90,7 +109,8 @@ async def list_roles_endpoint(
 
     Args:
         skip: Number of records to skip for pagination.
-        limit: Maximum number of records to return.
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request.
         current_user: The authenticated user.
         db: Database session dependency.
         settings: Application settings.
@@ -98,7 +118,15 @@ async def list_roles_endpoint(
     Returns:
         List[RoleOut]: List of active roles.
     """
-    return await list_roles(skip, limit, current_user, db, settings)
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await list_roles(skip, limit, current_user, db, settings)
+    except HTTPException as e:
+        logger.error(f"Error listing roles: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error listing roles: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.put(
     "/{role_id}",
@@ -126,7 +154,15 @@ async def update_role_endpoint(
     Returns:
         RoleOut: The updated role.
     """
-    return await update_role(role_id, role_update, request, current_user, db)
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await update_role(role_id, role_update, request, current_user, db)
+    except HTTPException as e:
+        logger.error(f"Error updating role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error updating role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.delete(
     "/{role_id}",
@@ -149,4 +185,12 @@ async def delete_role_endpoint(
         current_user: The authenticated user.
         db: Database session dependency.
     """
-    await delete_role(role_id, request, current_user, db)
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        await delete_role(role_id, request, current_user, db)
+    except HTTPException as e:
+        logger.error(f"Error deleting role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

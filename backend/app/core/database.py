@@ -3,10 +3,12 @@ from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from app.core.config import settings
 from app.core.enums import (
     AttendanceStatus, LeaveRequestStatus, LeaveType,
-    CorrectionStatus, EmployeeType, ShiftType, SystemAction
+    CorrectionStatus, OvertimeStatus, EmployeeType, ShiftType, SystemAction,
+    RoleName
 )
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -152,16 +154,24 @@ async def is_key_cached(key: str) -> bool:
         logger.error(f"Error checking cache existence for key {key}: {str(e)}")
         return False
 
-# Enum types list
-ENUM_CLASSES = [
+# Enum types list (for creating DB types)
+ENUM_CLASS_LIST = [
     (AttendanceStatus, "attendance_status"),
     (LeaveRequestStatus, "leave_request_status"),
     (LeaveType, "leave_type"),
     (CorrectionStatus, "correction_status"),
+    (OvertimeStatus, "overtime_status"),
     (EmployeeType, "employee_type"),
     (ShiftType, "shift_type"),
     (SystemAction, "system_action"),
+    (RoleName, "role_name"),
 ]
+
+# Enum SQLAlchemy type mapping (for model columns)
+ENUM_CLASSES = {
+    name: PG_ENUM(enum_class, name=name, create_type=False)
+    for (enum_class, name) in ENUM_CLASS_LIST
+}
 
 # Materialized view and index creation SQL statements
 MATERIALIZED_VIEW_SQLS = [
@@ -204,7 +214,7 @@ MATERIALIZED_VIEW_SQLS = [
 async def init_db():
     async with engine.begin() as conn:
         # Create enums from Python Enum classes
-        for enum_class, enum_name in ENUM_CLASSES:
+        for enum_class, enum_name in ENUM_CLASS_LIST:
             values = [member.value for member in enum_class]
             await conn.execute(text(f"""
                 DO $$ BEGIN

@@ -77,6 +77,67 @@ class ResourceNotFoundError(BaseCustomException):
             error_code=f"{resource.upper()}_NOT_FOUND"
         )
 
+# Specific NotFound errors for common resources
+class UserNotFoundError(ResourceNotFoundError):
+    def __init__(self, user_id: Optional[int] = None):
+        super().__init__("User", user_id)
+
+class DepartmentNotFoundError(ResourceNotFoundError):
+    def __init__(self, dept_id: Optional[int] = None):
+        super().__init__("Department", dept_id)
+
+class RoleNotFoundError(ResourceNotFoundError):
+    def __init__(self, role_id: Optional[int] = None):
+        super().__init__("Role", role_id)
+
+class UserDepartmentNotFoundError(ResourceNotFoundError):
+    def __init__(self, user_department_id: Optional[int] = None):
+        super().__init__("UserDepartment", user_department_id)
+
+class UserRoleNotFoundError(ResourceNotFoundError):
+    def __init__(self, user_role_id: Optional[int] = None):
+        super().__init__("UserRole", user_role_id)
+
+class LeavePolicyNotFoundError(ResourceNotFoundError):
+    def __init__(self, policy_id: Optional[int] = None):
+        super().__init__("LeavePolicy", policy_id)
+
+class ShiftPatternNotFoundError(ResourceNotFoundError):
+    def __init__(self, pattern_id: Optional[int] = None):
+        super().__init__("ShiftPattern", pattern_id)
+
+class OvertimeRecordNotFoundError(ResourceNotFoundError):
+    def __init__(self, record_id: Optional[int] = None):
+        super().__init__("OvertimeRecord", record_id)
+
+class LeaveBalanceNotFoundError(ResourceNotFoundError):
+    def __init__(self, balance_id: Optional[int] = None):
+        super().__init__("LeaveBalance", balance_id)
+
+class HolidayNotFoundError(ResourceNotFoundError):
+    def __init__(self, holiday_id: Optional[int] = None):
+        super().__init__("Holiday", holiday_id)
+
+class LeaveRequestNotFoundError(ResourceNotFoundError):
+    def __init__(self, request_id: Optional[int] = None):
+        super().__init__("LeaveRequest", request_id)
+
+class TimeCorrectionNotFoundError(ResourceNotFoundError):
+    def __init__(self, correction_id: Optional[int] = None):
+        super().__init__("TimeCorrection", correction_id)
+
+class AttendanceRecordNotFoundError(ResourceNotFoundError):
+    def __init__(self, record_id: Optional[int] = None):
+        super().__init__("AttendanceRecord", record_id)
+
+class SystemLogNotFoundError(ResourceNotFoundError):
+    def __init__(self, log_id: Optional[int] = None):
+        super().__init__("SystemLog", log_id)
+
+class EmployeeEmergencyContactNotFoundError(ResourceNotFoundError):
+    def __init__(self, contact_id: Optional[int] = None):
+        super().__init__("EmployeeEmergencyContact", contact_id)
+
 class ResourceConflictError(BaseCustomException):
     """Resource conflict errors (duplicates, constraints)."""
     def __init__(self, detail: str = "Resource conflict", resource_type: Optional[str] = None, conflict_details: Optional[Dict[str, Any]] = None):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status, Request
+from fastapi import APIRouter, Depends, status, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import date
@@ -8,14 +8,17 @@ from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.enums import Permission
+from app.core.exceptions import ValidationError
 from app.services.overtime_record_service import (
     create_overtime_record,
     get_overtime_record,
     get_user_overtime_records,
     get_team_overtime_records,
-    approve_overtime_record
+    update_overtime_record,
+    approve_overtime_record,
+    delete_overtime_record
 )
-from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordOut, OvertimeRecordApproval
+from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordUpdate, OvertimeRecordOut, OvertimeRecordApproval
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,20 +37,19 @@ async def create_overtime_record_endpoint(
     overtime: OvertimeRecordCreate,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> OvertimeRecordOut:
-    """Create a new overtime record.
-
-    Args:
-        overtime: Overtime record creation data.
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        OvertimeRecordOut: The created overtime record.
-    """
-    return await create_overtime_record(overtime, request, current_user, db)
+    """Create a new overtime record."""
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await create_overtime_record(overtime, request, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error creating overtime record: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error creating overtime record: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/{overtime_id}",
@@ -58,20 +60,25 @@ async def create_overtime_record_endpoint(
 @require_permissions([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD])
 async def get_overtime_record_endpoint(
     overtime_id: int,
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> OvertimeRecordOut:
-    """Retrieve an overtime record by ID.
-
-    Args:
-        overtime_id: The ID of the overtime record to retrieve.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        OvertimeRecordOut: The retrieved overtime record.
-    """
-    return await get_overtime_record(overtime_id, current_user, db)
+    """Retrieve an overtime record by ID."""
+    try:
+        if overtime_id <= 0:
+            raise ValidationError(detail="Invalid overtime ID")
+        request_id = getattr(request.state, "request_id", None)
+        return await get_overtime_record(overtime_id, current_user, db, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error retrieving overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/user/{user_id}",
@@ -85,27 +92,22 @@ async def get_user_overtime_records_endpoint(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
+    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[OvertimeRecordOut]:
-    """List overtime records for a specific user.
-
-    Args:
-        user_id: The ID of the user to retrieve records for.
-        start_date: Optional start date filter.
-        end_date: Optional end date filter.
-        skip: Number of records to skip for pagination.
-        limit: Maximum number of records to return.
-        current_user: The authenticated user.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[OvertimeRecordOut]: List of overtime records.
-    """
-    return await get_user_overtime_records(user_id, start_date, end_date, skip, limit, current_user, db, settings)
+    """List overtime records for a specific user."""
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await get_user_overtime_records(user_id, start_date, end_date, skip, limit, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error listing user overtime records: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error listing user overtime records: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/team",
@@ -118,26 +120,53 @@ async def get_team_overtime_records_endpoint(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
+    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[OvertimeRecordOut]:
-    """List overtime records for a manager's team.
+    """List overtime records for a manager's team."""
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await get_team_overtime_records(start_date, end_date, skip, limit, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error listing team overtime records: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error listing team overtime records: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-    Args:
-        start_date: Optional start date filter.
-        end_date: Optional end date filter.
-        skip: Number of records to skip for pagination.
-        limit: Maximum number of records to return.
-        current_user: The authenticated user (manager).
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[OvertimeRecordOut]: List of team overtime records.
-    """
-    return await get_team_overtime_records(start_date, end_date, skip, limit, current_user, db, settings)
+@router.put(
+    "/{overtime_id}",
+    response_model=OvertimeRecordOut,
+    summary="Update an overtime record",
+    description="Update an existing overtime record."
+)
+@require_permissions([Permission.UPDATE_OVERTIME])
+async def update_overtime_record_endpoint(
+    overtime_id: int,
+    overtime_update: OvertimeRecordUpdate,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
+) -> OvertimeRecordOut:
+    """Update an overtime record."""
+    try:
+        if overtime_id <= 0:
+            raise ValidationError(detail="Invalid overtime ID")
+        request_id = getattr(request.state, "request_id", None)
+        return await update_overtime_record(overtime_id, overtime_update, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error updating overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error updating overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.put(
     "/{record_id}/approve",
@@ -151,18 +180,51 @@ async def approve_overtime_record_endpoint(
     approval: OvertimeRecordApproval,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> OvertimeRecordOut:
-    """Approve or reject an overtime record.
+    """Approve or reject an overtime record."""
+    try:
+        if record_id <= 0:
+            raise ValidationError(detail="Invalid overtime ID")
+        request_id = getattr(request.state, "request_id", None)
+        return await approve_overtime_record(record_id, approval, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error approving overtime record {record_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error approving overtime record {record_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-    Args:
-        record_id: The ID of the overtime record to approve/reject.
-        approval: Approval data containing status and comments.
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        OvertimeRecordOut: The updated overtime record.
-    """
-    return await approve_overtime_record(record_id, approval, request, current_user, db)
+@router.delete(
+    "/{overtime_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an overtime record",
+    description="Soft delete an overtime record."
+)
+@require_permissions([Permission.DELETE_OVERTIME])
+async def delete_overtime_record_endpoint(
+    overtime_id: int,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
+) -> None:
+    """Soft delete an overtime record."""
+    try:
+        if overtime_id <= 0:
+            raise ValidationError(detail="Invalid overtime ID")
+        request_id = getattr(request.state, "request_id", None)
+        await delete_overtime_record(overtime_id, request, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Error deleting overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

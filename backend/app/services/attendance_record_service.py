@@ -42,7 +42,7 @@ async def clock_in(
             **AttendanceRecordCreate(
                 user_id=user.user_id,
                 clock_in_time=datetime.now(timezone.utc),
-                ip_address=request.client.host,
+                ip_address=str(request.client.host),
                 location=location
             ).model_dump(),
             date=current_date,
@@ -60,7 +60,7 @@ async def clock_in(
             record_id=db_record.attendance_id,
             old_values=None,
             new_values=db_record.__dict__,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
@@ -105,7 +105,7 @@ async def clock_out(
             raise ResourceNotFoundError(resource="Attendance record", identifier="active clock-in for today")
 
         db_record.clock_out_time = datetime.now(timezone.utc)
-        db_record.ip_address = request.client.host
+        db_record.ip_address = str(request.client.host)
         total_hours = calculate_total_hours(
             clock_in=db_record.clock_in_time,
             clock_out=db_record.clock_out_time,
@@ -127,7 +127,7 @@ async def clock_out(
             record_id=db_record.attendance_id,
             old_values=None,
             new_values=db_record.__dict__,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )

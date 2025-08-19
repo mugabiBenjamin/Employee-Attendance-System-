@@ -9,16 +9,14 @@ from app.models.system_logs import SystemLogs
 from app.schemas.role import RoleCreate, RoleUpdate, RoleOut
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import RoleNotFoundError, ValidationError
+from app.core.exceptions import RoleNotFoundError, ValidationError, BusinessLogicError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
-from app.core.database import get_db
-from cachetools import TTLCache
+from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
+from app.core.validators import validate_role_not_assigned
 import logging
 
 logger = logging.getLogger(__name__)
-
-externals = {"permission_cache": TTLCache(maxsize=1000, ttl=300), "role_permission_cache": TTLCache(maxsize=100, ttl=300)}
 
 async def create_role(
     role: RoleCreate,
@@ -29,10 +27,6 @@ async def create_role(
 ) -> RoleOut:
     """Create a new role with validation, logging, and cache clearing."""
     try:
-        valid_roles = {'Employee', 'Manager', 'HR', 'Admin', 'Super_Admin'}
-        if role.role_name not in valid_roles:
-            raise ValidationError(detail=f"Invalid role name. Must be one of: {', '.join(sorted(valid_roles))}")
-
         query = select(Roles).where(
             Roles.role_name == role.role_name,
             Roles.is_active.is_(True),
@@ -41,10 +35,6 @@ async def create_role(
         result = await db.execute(query)
         if result.scalar_one_or_none():
             raise ValidationError(detail="Role name already exists")
-
-        invalid_permissions = [p for p in role.permissions.keys() if p not in {perm.value for perm in Permission}]
-        if invalid_permissions:
-            raise ValidationError(detail=f"Invalid permissions: {', '.join(invalid_permissions)}")
 
         db_role = Roles(
             role_name=role.role_name,
@@ -57,8 +47,8 @@ async def create_role(
         await db.commit()
         await db.refresh(db_role)
 
-        externals["role_permission_cache"].clear()
-        logger.debug(f"Role permission cache cleared after role creation: {db_role.role_name}")
+        await invalidate_cache_prefix("role")
+        logger.debug(f"Role cache cleared after role creation: {db_role.role_name}")
 
         system_log = SystemLogs(
             user_id=current_user.user_id,
@@ -67,7 +57,7 @@ async def create_role(
             record_id=db_role.role_id,
             old_values=None,
             new_values=db_role.__dict__,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
@@ -94,6 +84,11 @@ async def get_role(
 ) -> RoleOut:
     """Retrieve a role by ID."""
     try:
+        cache_key = f"role:{role_id}"
+        cached_role = await get_cache(cache_key)
+        if cached_role:
+            return RoleOut(**cached_role)
+
         query = select(Roles).where(
             Roles.role_id == role_id,
             Roles.is_active.is_(True),
@@ -104,6 +99,9 @@ async def get_role(
 
         if not role:
             raise RoleNotFoundError(role_id=role_id)
+
+        role_dict = RoleOut.model_validate(role).model_dump()
+        await set_cache(cache_key, role_dict, ttl=300)
 
         logger.info(f"Retrieved role, role_id: {role_id}, user_id: {current_user.user_id}")
         return RoleOut.model_validate(role)
@@ -119,7 +117,7 @@ async def get_role(
 
 async def list_roles(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 0,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -127,16 +125,30 @@ async def list_roles(
 ) -> List[RoleOut]:
     """Retrieve a list of active roles with pagination."""
     try:
+        if skip < 0 or limit < 0:
+            raise ValidationError(detail="Invalid pagination parameters")
+
+        limit = limit or settings.DEFAULT_PAGE_SIZE
+        cache_key = f"roles:{skip}:{limit}"
+        cached_roles = await get_cache(cache_key)
+        if cached_roles:
+            return [RoleOut(**role) for role in cached_roles]
+
         query = select(Roles).where(
             Roles.is_active.is_(True),
             Roles.deleted_at.is_(None)
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
+        ).offset(skip).limit(limit)
         result = await db.execute(query)
         roles = result.scalars().all()
+
+        roles_dict = [RoleOut.model_validate(role).model_dump() for role in roles]
+        await set_cache(cache_key, roles_dict, ttl=300)
 
         logger.info(f"Retrieved {len(roles)} roles for user_id: {current_user.user_id}")
         return [RoleOut.model_validate(role) for role in roles]
 
+    except ValidationError:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving roles: {str(e)}")
         raise HTTPException(
@@ -166,10 +178,10 @@ async def update_role(
             raise RoleNotFoundError(role_id=role_id)
 
         update_data = role_update.model_dump(exclude_none=True)
+        if not update_data:
+            raise ValidationError(detail="No fields provided for update")
+
         if "role_name" in update_data:
-            valid_roles = {'Employee', 'Manager', 'HR', 'Admin', 'Super_Admin'}
-            if update_data["role_name"] not in valid_roles:
-                raise ValidationError(detail=f"Invalid role name. Must be one of: {', '.join(sorted(valid_roles))}")
             query = select(Roles).where(
                 Roles.role_name == update_data["role_name"],
                 Roles.role_id != role_id,
@@ -180,11 +192,6 @@ async def update_role(
             if result.scalar_one_or_none():
                 raise ValidationError(detail="Role name already exists")
 
-        if "permissions" in update_data:
-            invalid_permissions = [p for p in update_data["permissions"].keys() if p not in {perm.value for perm in Permission}]
-            if invalid_permissions:
-                raise ValidationError(detail=f"Invalid permissions: {', '.join(invalid_permissions)}")
-
         old_values = db_role.__dict__.copy()
         for key, value in update_data.items():
             setattr(db_role, key, value)
@@ -193,8 +200,8 @@ async def update_role(
         await db.commit()
         await db.refresh(db_role)
 
-        externals["role_permission_cache"].clear()
-        logger.debug(f"Role permission cache cleared after role update: {db_role.role_name}")
+        await invalidate_cache_prefix("role")
+        logger.debug(f"Role cache cleared after role update: {db_role.role_name}")
 
         system_log = SystemLogs(
             user_id=current_user.user_id,
@@ -203,7 +210,7 @@ async def update_role(
             record_id=role_id,
             old_values=old_values,
             new_values=db_role.__dict__,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
@@ -229,7 +236,7 @@ async def delete_role(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_permissions([Permission.DELETE_ROLE]))
 ) -> None:
-    """Soft delete a role with logging and cache clearing."""
+    """Soft delete a role with validation, logging, and cache clearing."""
     try:
         query = select(Roles).where(
             Roles.role_id == role_id,
@@ -242,12 +249,14 @@ async def delete_role(
         if not db_role:
             raise RoleNotFoundError(role_id=role_id)
 
+        await validate_role_not_assigned(role_id, db)
+
         db_role.is_active = False
         db_role.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
-        externals["role_permission_cache"].clear()
-        logger.debug(f"Role permission cache cleared after role deletion: {db_role.role_name}")
+        await invalidate_cache_prefix("role")
+        logger.debug(f"Role cache cleared after role deletion: {db_role.role_name}")
 
         system_log = SystemLogs(
             user_id=current_user.user_id,
@@ -256,7 +265,7 @@ async def delete_role(
             record_id=role_id,
             old_values=db_role.__dict__,
             new_values=None,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             timestamp=datetime.now(timezone.utc)
         )
@@ -265,7 +274,7 @@ async def delete_role(
 
         logger.info(f"Role soft deleted, role_id: {role_id}, role_name: {db_role.role_name}")
 
-    except RoleNotFoundError:
+    except (RoleNotFoundError, BusinessLogicError):
         raise
     except Exception as e:
         logger.error(f"Error deleting role {role_id}: {str(e)}")

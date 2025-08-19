@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.models.users import Users
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.security import get_password_hash
-from app.core.enums import SystemAction, Permission, EmployeeType
+from app.core.enums import SystemAction, Permission
 from app.core.exceptions import ValidationError, DatabaseError, UserNotFoundError, ResourceConflictError, BusinessLogicError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions
@@ -14,7 +14,7 @@ from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists
 from app.core.config import Settings, get_settings
-from app.core.database import get_db
+from app.core.database import get_db, get_cache, set_cache
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,18 +27,13 @@ async def create_user(
     request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.CREATE_USER]))
 ) -> UserOut:
-    """
-    Create a new user with validation and logging."""
+    """Create a new user with validation and logging."""
     try:
-        # Validate employee_type
-        if user.employee_type not in [e.value for e in EmployeeType]:
-            raise ValidationError(detail=f"Invalid employee_type. Must be one of: {[e.value for e in EmployeeType]}")
-
         # Check for existing email
         query = select(Users).where(
             Users.email == user.email,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         if result.scalar_one_or_none():
@@ -46,7 +41,7 @@ async def create_user(
 
         # Validate manager_id if provided
         if user.manager_id:
-            await validate_user_exists(db, user.manager_id, request_id)
+            await validate_user_exists(user.manager_id, db)
 
         # Validate required fields
         if not user.email or not user.password:
@@ -65,7 +60,6 @@ async def create_user(
             salary=user.salary,
             manager_id=user.manager_id,
             is_active=user.is_active,
-            employee_id=f"EMP{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",  # Generate employee_id
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )
@@ -81,7 +75,7 @@ async def create_user(
             record_id=db_user.user_id,
             old_values=None,
             new_values=db_user.__dict__,
-            ip_address=request.client.host if request else None,
+            ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
@@ -115,22 +109,29 @@ async def read_user(
     request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> UserOut:
-    """
-    Retrieve a user by ID."""
+    """Retrieve a user by ID."""
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user ID")
 
+        cache_key = f"user:{user_id}"
+        cached_user = await get_cache(cache_key)
+        if cached_user:
+            return UserOut(**cached_user)
+
         query = select(Users).where(
             Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         user = result.scalar_one_or_none()
 
         if not user:
             raise UserNotFoundError(user_id=user_id)
+
+        user_dict = UserOut.model_validate(user).model_dump()
+        await set_cache(cache_key, user_dict, ttl=300)
 
         logger.info(
             f"Retrieved user, user_id: {user_id}",
@@ -159,19 +160,26 @@ async def read_users(
     request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> List[UserOut]:
-    """
-    Retrieve a list of active users with pagination."""
+    """Retrieve a list of active users with pagination."""
     try:
         if skip < 0 or (limit is not None and limit <= 0):
             raise ValidationError(detail="Invalid pagination parameters")
 
         limit = limit or settings.DEFAULT_PAGE_SIZE
+        cache_key = f"users:{skip}:{limit}"
+        cached_users = await get_cache(cache_key)
+        if cached_users:
+            return [UserOut(**user) for user in cached_users]
+
         query = select(Users).where(
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         ).offset(skip).limit(limit)
         result = await db.execute(query)
         users = result.scalars().all()
+
+        users_dict = [UserOut.model_validate(user).model_dump() for user in users]
+        await set_cache(cache_key, users_dict, ttl=300)
 
         logger.info(
             f"Retrieved {len(users)} users",
@@ -198,16 +206,15 @@ async def update_user(
     request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.UPDATE_USER]))
 ) -> UserOut:
-    """
-    Update a user with validation and logging."""
+    """Update a user with validation and logging."""
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user ID")
 
         query = select(Users).where(
             Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_user = result.scalar_one_or_none()
@@ -223,19 +230,15 @@ async def update_user(
             query = select(Users).where(
                 Users.email == update_data["email"],
                 Users.user_id != user_id,
-                Users.is_active == True,
-                Users.deleted_at == None
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
             )
             result = await db.execute(query)
             if result.scalar_one_or_none():
                 raise ResourceConflictError(detail="Email already registered")
 
         if "manager_id" in update_data and update_data["manager_id"] is not None:
-            await validate_user_exists(db, update_data["manager_id"], request_id)
-
-        if "employee_type" in update_data and update_data["employee_type"] is not None:
-            if update_data["employee_type"] not in [e.value for e in EmployeeType]:
-                raise ValidationError(detail=f"Invalid employee_type. Must be one of: {[e.value for e in EmployeeType]}")
+            await validate_user_exists(update_data["manager_id"], db)
 
         old_values = db_user.__dict__.copy()
 
@@ -258,7 +261,7 @@ async def update_user(
             record_id=user_id,
             old_values=old_values,
             new_values=db_user.__dict__,
-            ip_address=request.client.host if request else None,
+            ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
@@ -294,16 +297,15 @@ async def delete_user(
     request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.DELETE_USER]))
 ) -> None:
-    """
-    Soft delete a user with validation and logging."""
+    """Soft delete a user with validation and logging."""
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user ID")
 
         query = select(Users).where(
             Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         db_user = result.scalar_one_or_none()
@@ -313,8 +315,8 @@ async def delete_user(
 
         query = select(Users).where(
             Users.manager_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         if result.scalars().all():
@@ -332,7 +334,7 @@ async def delete_user(
             record_id=user_id,
             old_values=db_user.__dict__,
             new_values=None,
-            ip_address=request.client.host if request else None,
+            ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
@@ -363,15 +365,14 @@ async def get_current_user_profile(
     current_user: Users,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([]))  # No specific permission required
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
 ) -> UserOut:
-    """
-    Retrieve the current authenticated user's profile."""
+    """Retrieve the current authenticated user's profile."""
     try:
         query = select(Users).where(
             Users.user_id == current_user.user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
         )
         result = await db.execute(query)
         user = result.scalar_one_or_none()
