@@ -1,14 +1,13 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, CheckConstraint, Time
 from sqlalchemy.sql import func
-from app.core.database import Base
-from app.core.db_enums import shift_type_enum
+from app.core.database import Base, ENUM_CLASSES
 
 class ShiftPatterns(Base):
     __tablename__ = "shift_patterns"
     
     pattern_id = Column(Integer, primary_key=True)
     pattern_name = Column(String(100), nullable=False)
-    shift_type = Column(shift_type_enum, nullable=False)
+    shift_type = Column(ENUM_CLASSES['shift_type_enum'], nullable=False)
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
     break_duration = Column(Integer, default=0)  # minutes

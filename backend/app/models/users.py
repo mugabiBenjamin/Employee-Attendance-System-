@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func, text
-from app.core.database import Base
-from app.core.db_enums import employee_type_enum
+from app.core.database import Base, ENUM_CLASSES
 
 class Users(Base):
     __tablename__ = "users"
@@ -20,7 +19,7 @@ class Users(Base):
     phone = Column(String(20), nullable=True)
     job_title = Column(String(100), nullable=True)
     hire_date = Column(Date, nullable=False)
-    employee_type = Column(employee_type_enum, nullable=False, default="full_time")
+    employee_type = Column(ENUM_CLASSES['employee_type_enum'], nullable=False, default="full_time")
     salary = Column(DECIMAL(12, 2), nullable=True)
     manager_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     department_id = Column(Integer, ForeignKey("departments.department_id", ondelete="SET NULL"), nullable=True)

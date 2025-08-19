@@ -1,7 +1,6 @@
 from sqlalchemy import Boolean, Column, Integer, DateTime, Text, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
-from app.core.database import Base
-from app.core.db_enums import leave_request_status_enum
+from app.core.database import Base, ENUM_CLASSES
 
 class LeaveApprovalWorkflow(Base):
     __tablename__ = "leave_approval_workflow"
@@ -10,7 +9,7 @@ class LeaveApprovalWorkflow(Base):
     leave_id = Column(Integer, ForeignKey('leave_requests.leave_id', ondelete='CASCADE'), nullable=False)
     approver_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     level = Column(Integer, nullable=False)
-    status = Column(leave_request_status_enum, default='under_review')
+    status = Column(ENUM_CLASSES['leave_request_status_enum'], default='under_review')
     comments = Column(Text)
     action_taken_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())

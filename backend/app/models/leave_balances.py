@@ -1,14 +1,13 @@
 from sqlalchemy import Boolean, Column, Integer, DateTime, ForeignKey, CheckConstraint, UniqueConstraint
 from sqlalchemy.sql import func
-from app.core.database import Base
-from app.core.db_enums import leave_type_enum
+from app.core.database import Base, ENUM_CLASSES
 
 class LeaveBalances(Base):
     __tablename__ = "leave_balances"
     
     balance_id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
-    leave_type = Column(leave_type_enum, nullable=False)
+    leave_type = Column(ENUM_CLASSES['leave_type_enum'], nullable=False)
     allocated_days = Column(Integer, nullable=False, default=0)
     used_days = Column(Integer, nullable=False, default=0)
     carried_forward = Column(Integer, nullable=False, default=0)

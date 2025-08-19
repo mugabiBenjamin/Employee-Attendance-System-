@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, DateTime, Text, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
-from app.core.database import Base
-from app.core.db_enums import correction_status_enum
+from app.core.database import Base, ENUM_CLASSES
 
 class TimeCorrections(Base):
     __tablename__ = "time_corrections"
@@ -14,7 +13,7 @@ class TimeCorrections(Base):
     corrected_clock_in = Column(DateTime(timezone=True))
     corrected_clock_out = Column(DateTime(timezone=True))
     reason = Column(Text, nullable=False)
-    status = Column(correction_status_enum, default='draft')
+    status = Column(ENUM_CLASSES['correction_status_enum'], default='draft')
     approved_by = Column(Integer, ForeignKey('users.user_id', ondelete='SET NULL'))
     approved_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
