@@ -93,6 +93,7 @@ class EmployeeType(str, Enum):
     CONTRACT = "contract"
     INTERN = "intern"
     TEMPORARY = "temporary"
+    ALL = "all"
 
 class ShiftType(str, Enum):
     MORNING = "morning"
@@ -169,6 +170,7 @@ class Permission(str, Enum):
     VIEW_SHIFT_PATTERN = "view_shift_pattern"
     UPDATE_SHIFT_PATTERN = "update_shift_pattern"
     DELETE_SHIFT_PATTERN = "delete_shift_pattern"
+    MANAGE_SHIFT_PATTERNS = "manage_shift_patterns"
     VIEW_ALL_OVERTIME_RECORDS = "view_all_overtime_records"
     MANAGE_HOLIDAYS = "manage_holidays"
     MANAGE_LEAVE = "manage_leave"
@@ -185,6 +187,7 @@ class Permission(str, Enum):
     VIEW_SHIFT_ASSIGNMENT = "view_shift_assignment"
     UPDATE_SHIFT_ASSIGNMENT = "update_shift_assignment"
     DELETE_SHIFT_ASSIGNMENT = "delete_shift_assignment"
+    MANAGE_SHIFT_ASSIGNMENTS = "manage_shift_assignments"
     
     # Admin permissions
     VIEW_LOGS = "view_logs"

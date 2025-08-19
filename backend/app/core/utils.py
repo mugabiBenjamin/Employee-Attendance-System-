@@ -2,11 +2,19 @@ from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
-from fastapi import UploadFile
+from fastapi import UploadFile, Request
 from app.core.config import settings
 from app.core.exceptions import FileUploadError
 import os
 from zoneinfo import ZoneInfo
+import logging
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+from app.models.users import Users
+from app.models.user_roles import UserRoles
+from app.models.roles import Roles
+
+logger = logging.getLogger(__name__)
 
 class TimeCalculation(BaseModel):
     clock_in: Optional[datetime] = None
@@ -69,3 +77,37 @@ def format_datetime(dt: Optional[datetime]) -> Optional[str]:
 def get_current_date() -> datetime:
     """Return current date in the configured timezone."""
     return datetime.now(ZoneInfo(settings.DEFAULT_TIMEZONE)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+def get_request_id(request: Request) -> Optional[str]:
+    """Safely extract request_id from request state."""
+    try:
+        if hasattr(request, 'state') and hasattr(request.state, 'request_id'):
+            return request.state.request_id
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to extract request_id: {str(e)}")
+        return None
+
+async def get_users_with_permission(permission: str, db: AsyncSession) -> List[Users]:
+    """Get all users who have a specific permission through their roles."""
+    try:
+        query = select(Users).join(
+            UserRoles, UserRoles.user_id == Users.user_id
+        ).join(
+            Roles, Roles.role_id == UserRoles.role_id
+        ).where(
+            and_(
+                Users.is_active == True,
+                Users.deleted_at == None,
+                UserRoles.is_active == True,
+                UserRoles.deleted_at == None,
+                Roles.is_active == True,
+                Roles.deleted_at == None,
+                Roles.permissions.contains({permission: True})
+            )
+        )
+        result = await db.execute(query)
+        return result.scalars().all()
+    except Exception as e:
+        logger.error(f"Error getting users with permission {permission}: {str(e)}")
+        return []

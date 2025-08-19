@@ -494,10 +494,10 @@ async def approve_overtime_record(
         if employee:
             await send_email(
                 to_email=employee.email,
-                subject=f"Overtime Record {approval.status.value.capitalize()} (ID: {overtime.overtime_id})",
+                subject=f"Overtime Record {approval.status.value.capitalize() if hasattr(approval.status, 'value') else str(approval.status).capitalize()} (ID: {overtime.overtime_id})",
                 body=(
                     f"Dear {employee.first_name},\n\n"
-                    f"Your overtime record (ID: {overtime.overtime_id}) has been {approval.status.value.lower()}.\n"
+                    f"Your overtime record (ID: {overtime.overtime_id}) has been {approval.status.value.lower() if hasattr(approval.status, 'value') else str(approval.status).lower()}.\n"
                     f"Details:\n"
                     f"Date: {overtime.date}\n"
                     f"Hours: {overtime.overtime_hours}\n"

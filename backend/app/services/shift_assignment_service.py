@@ -18,6 +18,7 @@ from app.core.validators import validate_shift_assignment_exists
 from app.services.system_log_service import create_system_log
 from app.core.mail import send_email
 import logging
+from app.core.utils import get_users_with_permission
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +129,7 @@ async def create_shift_assignment(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         # Notify user and admins
-        query = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_ASSIGNMENTS))
-        result = await db.execute(query)
-        admins = result.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_SHIFT_ASSIGNMENTS, db)
         recipients = [(user.email, user.first_name)] + [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:
             await send_email(
@@ -371,21 +370,32 @@ async def update_shift_assignment(
         query_user = select(Users).where(Users.user_id == db_assignment.user_id)
         result_user = await db.execute(query_user)
         user = result_user.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_ASSIGNMENTS))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
-        recipients = [(user.email, user.first_name)] + [(admin.email, admin.first_name) for admin in admins]
-        for email, first_name in recipients:
+        if user:
             await send_email(
-                to_email=email,
+                to_email=user.email,
                 subject=f"Shift Assignment Updated (ID: {db_assignment.assignment_id})",
                 body=(
-                    f"Dear {first_name},\n\n"
+                    f"Dear {user.first_name},\n\n"
+                    f"Your shift assignment (ID: {db_assignment.assignment_id}) has been updated.\n"
+                    f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
+        
+        # Notify admins
+        admins = await get_users_with_permission(Permission.MANAGE_SHIFT_ASSIGNMENTS, db)
+        for admin in admins:
+            await send_email(
+                to_email=admin.email,
+                subject=f"Shift Assignment Updated (ID: {db_assignment.assignment_id})",
+                body=(
+                    f"Dear {admin.first_name},\n\n"
                     f"The shift assignment (ID: {db_assignment.assignment_id}) for user ID {db_assignment.user_id} has been updated.\n"
                     f"Details:\n"
-                    f"Shift Pattern ID: {db_assignment.pattern_id}\n"
-                    f"Effective From: {db_assignment.effective_from}\n"
-                    f"Effective To: {db_assignment.effective_to or 'Ongoing'}\n\n"
+                    f"Pattern ID: {db_assignment.pattern_id}\n"
+                    f"Start Date: {db_assignment.effective_from}\n"
+                    f"End Date: {db_assignment.effective_to}\n\n"
                     f"Please review in the Employee Management System.\n\n"
                     f"Best regards,\nEmployee Management System"
                 ),
@@ -467,18 +477,30 @@ async def delete_shift_assignment(
         query_user = select(Users).where(Users.user_id == db_assignment.user_id)
         result_user = await db.execute(query_user)
         user = result_user.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_ASSIGNMENTS))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
-        recipients = [(user.email, user.first_name)] + [(admin.email, admin.first_name) for admin in admins]
-        for email, first_name in recipients:
+        # Notify admins
+        admins = await get_users_with_permission(Permission.MANAGE_SHIFT_ASSIGNMENTS, db)
+        for admin in admins:
             await send_email(
-                to_email=email,
+                to_email=admin.email,
                 subject=f"Shift Assignment Deleted (ID: {db_assignment.assignment_id})",
                 body=(
-                    f"Dear {first_name},\n\n"
+                    f"Dear {admin.first_name},\n\n"
                     f"The shift assignment (ID: {db_assignment.assignment_id}) for user ID {db_assignment.user_id} has been deleted.\n"
                     f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
+
+        # Notify user and admins
+        if user:
+            await send_email(
+                to_email=user.email,
+                subject=f"Shift Assignment Deleted (ID: {db_assignment.assignment_id})",
+                body=(
+                    f"Dear {user.first_name},\n\n"
+                    f"Your shift assignment (ID: {db_assignment.assignment_id}) has been deleted.\n"
+                    f"Please contact HR for any questions.\n\n"
                     f"Best regards,\nEmployee Management System"
                 ),
                 request_id=request_id

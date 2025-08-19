@@ -178,7 +178,7 @@ async def generate_attendance_summary(
         attendance = result.scalar_one_or_none()
         if not attendance:
             raise ResourceNotFoundError(resource="Attendance record", 
-                                      identifier=f"user_id {user_id}, date {attendance_summary_date}")
+                                        identifier=f"user_id {user_id}, date {attendance_summary_date}")
 
         query = select(AttendanceSummary).where(
             AttendanceSummary.user_id == user_id,

@@ -17,14 +17,11 @@ from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_leave_policy_exists
+from app.core.utils import get_request_id, get_users_with_permission
 from app.services.system_log_service import create_system_log
 import logging
 
 logger = logging.getLogger(__name__)
-
-def get_request_id(request: Request) -> Optional[str]:
-    """Extract request_id from the request state."""
-    return request.state.request_id if hasattr(request.state, "request_id") else None
 
 async def get_leave_balances_by_user_and_type(
     user_id: int,
@@ -83,7 +80,7 @@ async def get_leave_balances_by_user_and_type(
             balance_data.policy_details = LeavePolicyDetails.model_validate(policy) if policy else LeavePolicyDetails()
             balance_out.append(balance_data)
 
-        balances_dict = [balance.model_dump() for balance in balance_out]
+        balances_dict = [balance.model_dump() if hasattr(balance, 'model_dump') else balance.dict() for balance in balance_out]
         await set_cache(cache_key, balances_dict, ttl=300)
 
         logger.info(
@@ -155,7 +152,7 @@ async def update_leave_balance(
         result = await db.execute(query)
         pending_requests = result.scalars().all()
         if pending_requests and balance_change < 0:
-            total_pending_days = sum((req.end_date - req.start_date).days + 1 for req in pending_requests)
+            total_pending_days = sum((req.end_date - req.start_date).days + 1 for req in pending_requests if req.start_date and req.end_date)
             if db_balance.allocated_days + db_balance.carried_forward - db_balance.used_days - total_pending_days + balance_change < 0:
                 raise ValidationError(detail="Balance change would result in negative balance due to pending requests")
 
@@ -191,9 +188,7 @@ async def update_leave_balance(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         # Notify admins
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         for admin in admins:
             await send_email(
                 to_email=admin.email,

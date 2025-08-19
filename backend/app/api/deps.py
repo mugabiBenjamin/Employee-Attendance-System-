@@ -14,6 +14,7 @@ from app.core.security import decode_access_token, is_token_blacklisted
 from app.core.mail import send_email
 from app.core.exceptions import ValidationError
 import logging
+from app.core.utils import get_request_id as get_request_id_util, get_users_with_permission
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{get_settings().API_V1_STR}/auth
 
 def get_request_id(request: Request) -> Optional[str]:
     """Extract request_id from the request state."""
-    return request.state.request_id if hasattr(request.state, "request_id") else None
+    return get_request_id_util(request)
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -111,9 +112,7 @@ async def get_current_user(
 
 async def notify_admins(token: str, db: AsyncSession, settings: Settings, request_id: Optional[str], error_message: str) -> None:
     """Notify admins of authentication failures."""
-    query = select(Users).where(Users.has_role(Permission.MANAGE_USERS))
-    result = await db.execute(query)
-    admins = result.scalars().all()
+    admins = await get_users_with_permission(Permission.MANAGE_USERS, db)
     for admin in admins:
         await send_email(
             to_email=admin.email,

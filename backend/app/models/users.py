@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, Index, UniqueConstraint
 from sqlalchemy.sql import func, text
+from sqlalchemy.orm import relationship
 from app.core.database import Base, ENUM_CLASSES
 from app.core.enums import EmployeeType
 
@@ -34,6 +35,10 @@ class Users(Base):
         server_default=func.current_timestamp(),
         onupdate=func.current_timestamp()
     )
+
+    # Relationships
+    user_roles = relationship("UserRoles", back_populates="user", lazy="selectin")
+    roles = relationship("Roles", secondary="user_roles", lazy="selectin")
 
     __table_args__ = (
         CheckConstraint("email ~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'", name="email_format"),

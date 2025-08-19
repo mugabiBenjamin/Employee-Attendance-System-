@@ -467,7 +467,7 @@ async def approve_time_correction(
         await create_system_log(log, request, current_user, db, request_id)
 
         logger.info(
-            f"Time correction {approval_data.status.value}: correction_id={correction_id}",
+            f"Time correction {getattr(approval_data.status, 'value', approval_data.status)}: correction_id={correction_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return TimeCorrectionOut.model_validate(db_correction)
@@ -633,7 +633,7 @@ async def _notify_managers_of_correction(
                         f"Employee: {user.first_name} {user.last_name} ({user.email})\n"
                         f"Attendance ID: {correction.attendance_id}\n"
                         f"Reason: {correction.reason}\n"
-                        f"Status: {correction.status.value}\n\n"
+                        f"Status: {getattr(correction.status, 'value', correction.status)}\n\n"
                         f"Please review and take appropriate action."
                     )
                 )
@@ -657,8 +657,10 @@ async def _notify_user_of_status_change(
     """Send notification to user when correction status changes."""
     try:
         user_email = await get_user_email(correction.user_id, db)
+        # Handle both Enum and string statuses robustly
+        status_value = getattr(correction.status, "value", correction.status)
         if user_email:
-            status_text = correction.status.value.replace('_', ' ').title()
+            status_text = str(status_value).replace('_', ' ').title()
             email_data = EmailSchema(
                 to_email=user_email,
                 subject=f"Time Correction {status_text} (ID: {correction_id})",
@@ -674,7 +676,7 @@ async def _notify_user_of_status_change(
             )
             await send_email(email_data)
         logger.debug(
-            f"Sent user notification for correction_id={correction_id}, status={correction.status.value}",
+            f"Sent user notification for correction_id={correction_id}, status={status_value}",
             extra={"request_id": request_id}
         )
     except Exception as e:

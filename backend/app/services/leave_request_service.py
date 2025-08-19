@@ -17,6 +17,7 @@ from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_request_exists
+from app.core.utils import get_users_with_permission
 from app.services.system_log_service import create_system_log
 import logging
 
@@ -131,9 +132,7 @@ async def create_leave_request(
         )
         result = await db.execute(query)
         manager = result.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients = [(manager.email, manager.first_name)] if manager else []
         recipients += [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:
@@ -144,7 +143,7 @@ async def create_leave_request(
                     f"Dear {first_name},\n\n"
                     f"Employee {current_user.first_name} {current_user.last_name} submitted a leave request.\n"
                     f"Details:\n"
-                    f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                    f"Leave Type: {leave_request.leave_type.value.capitalize() if hasattr(leave_request.leave_type, 'value') else str(leave_request.leave_type).capitalize()}\n"
                     f"Start Date: {leave_request.start_date}\n"
                     f"End Date: {leave_request.end_date}\n"
                     f"Reason: {leave_request.reason or 'None'}\n\n"
@@ -342,21 +341,24 @@ async def update_leave_request(
             leave_type = update_data.get("leave_type", db_leave_request.leave_type)
             start_date = update_data.get("start_date", db_leave_request.start_date)
             end_date = update_data.get("end_date", db_leave_request.end_date)
-            days_requested = (end_date - start_date).days + 1
-            query = select(LeaveBalances).where(
-                LeaveBalances.user_id == db_leave_request.user_id,
-                LeaveBalances.leave_type == leave_type,
-                LeaveBalances.is_active.is_(True),
-                LeaveBalances.deleted_at.is_(None)
-            )
-            result = await db.execute(query)
-            leave_balance = result.scalar_one_or_none()
-            if not leave_balance:
-                raise LeaveBalanceNotFoundError(user_id=db_leave_request.user_id, leave_type=leave_type)
-            available_days = leave_balance.allocated_days - leave_balance.used_days + leave_balance.carried_forward
-            if days_requested > available_days:
-                raise ValidationError(detail="Insufficient leave balance")
-            update_data["days_requested"] = days_requested
+            
+            # Ensure we have valid dates
+            if start_date and end_date:
+                days_requested = (end_date - start_date).days + 1
+                query = select(LeaveBalances).where(
+                    LeaveBalances.user_id == db_leave_request.user_id,
+                    LeaveBalances.leave_type == leave_type,
+                    LeaveBalances.is_active.is_(True),
+                    LeaveBalances.deleted_at.is_(None)
+                )
+                result = await db.execute(query)
+                leave_balance = result.scalar_one_or_none()
+                if not leave_balance:
+                    raise LeaveBalanceNotFoundError(user_id=db_leave_request.user_id, leave_type=leave_type)
+                available_days = leave_balance.allocated_days - leave_balance.used_days + leave_balance.carried_forward
+                if days_requested > available_days:
+                    raise ValidationError(detail="Insufficient leave balance")
+                update_data["days_requested"] = days_requested
 
         # Validate overlapping leave requests if dates are updated
         if "start_date" in update_data or "end_date" in update_data:
@@ -396,9 +398,7 @@ async def update_leave_request(
         query_user = select(Users).where(Users.user_id == db_leave_request.user_id)
         result_user = await db.execute(query_user)
         employee = result_user.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients = [(employee.email, employee.first_name)] + [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:
             await send_email(
@@ -408,7 +408,7 @@ async def update_leave_request(
                     f"Dear {first_name},\n\n"
                     f"The leave request (ID: {db_leave_request.leave_id}) has been updated.\n"
                     f"Details:\n"
-                    f"Leave Type: {db_leave_request.leave_type.value.capitalize()}\n"
+                    f"Leave Type: {db_leave_request.leave_type.value.capitalize() if hasattr(db_leave_request.leave_type, 'value') else str(db_leave_request.leave_type).capitalize()}\n"
                     f"Start Date: {db_leave_request.start_date}\n"
                     f"End Date: {db_leave_request.end_date}\n"
                     f"Reason: {db_leave_request.reason or 'None'}\n\n"
@@ -525,19 +525,17 @@ async def approve_reject_leave_request(
         query_user = select(Users).where(Users.user_id == leave_request.user_id)
         result_user = await db.execute(query_user)
         employee = result_user.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients = [(employee.email, employee.first_name)] + [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:
             await send_email(
                 to_email=email,
-                subject=f"Leave Request {approval.status.value.capitalize()} (ID: {leave_request.leave_id})",
+                subject=f"Leave Request {approval.status.value.capitalize() if hasattr(approval.status, 'value') else str(approval.status).capitalize()} (ID: {leave_request.leave_id})",
                 body=(
                     f"Dear {first_name},\n\n"
-                    f"The leave request (ID: {leave_request.leave_id}) has been {approval.status.value.lower()}.\n"
+                    f"The leave request (ID: {leave_request.leave_id}) has been {approval.status.value.lower() if hasattr(approval.status, 'value') else str(approval.status).lower()}.\n"
                     f"Details:\n"
-                    f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                    f"Leave Type: {leave_request.leave_type.value.capitalize() if hasattr(leave_request.leave_type, 'value') else str(leave_request.leave_type).capitalize()}\n"
                     f"Start Date: {leave_request.start_date}\n"
                     f"End Date: {leave_request.end_date}\n"
                     f"Comments: {approval.comments or 'None'}\n\n"
@@ -620,9 +618,7 @@ async def delete_leave_request(
         query_user = select(Users).where(Users.user_id == db_leave_request.user_id)
         result_user = await db.execute(query_user)
         employee = result_user.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients = [(employee.email, employee.first_name)] + [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:
             await send_email(
@@ -632,7 +628,7 @@ async def delete_leave_request(
                     f"Dear {first_name},\n\n"
                     f"The leave request (ID: {db_leave_request.leave_id}) has been deleted.\n"
                     f"Details:\n"
-                    f"Leave Type: {db_leave_request.leave_type.value.capitalize()}\n"
+                    f"Leave Type: {db_leave_request.leave_type.value.capitalize() if hasattr(db_leave_request.leave_type, 'value') else str(db_leave_request.leave_type).capitalize()}\n"
                     f"Start Date: {db_leave_request.start_date}\n"
                     f"End Date: {db_leave_request.end_date}\n\n"
                     f"Please contact HR for any questions.\n\n"

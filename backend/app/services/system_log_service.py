@@ -289,14 +289,14 @@ async def get_log_actions_summary(
         result = await db.execute(query)
         summaries = result.all()
 
-        summaries_dict = [SystemLogActionSummary(action=row.action, count=row.count).model_dump() for row in summaries]
+        summaries_dict = [SystemLogActionSummary(action=row[0], count=row[1]).model_dump() for row in summaries]
         await set_cache(cache_key, summaries_dict, ttl=300)
 
         logger.info(
             f"Retrieved action summary with {len(summaries)} actions",
             extra={"request_id": request_id}
         )
-        return [SystemLogActionSummary(action=row.action, count=row.count) for row in summaries]
+        return [SystemLogActionSummary(action=row[0], count=row[1]) for row in summaries]
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})

@@ -1,3 +1,4 @@
+import ipaddress
 from typing import List, Optional
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,15 +25,12 @@ from app.core.security import get_current_user
 from app.core.permissions import require_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_request_exists
+from app.core.utils import get_request_id, get_users_with_permission
 from app.services.user_role_service import get_user_permissions
 from app.services.system_log_service import create_system_log
 import logging
 
 logger = logging.getLogger(__name__)
-
-def get_request_id(request: Request) -> Optional[str]:
-    """Extract request_id from the request state."""
-    return request.state.request_id if hasattr(request.state, "request_id") else None
 
 async def validate_leave_approval_exists(db: AsyncSession, workflow_id: int, request_id: Optional[str] = None) -> None:
     query = select(LeaveApprovalWorkflow).where(
@@ -189,18 +187,16 @@ async def approve_or_reject_leave(
         query_user = select(Users).where(Users.user_id == leave_request.user_id)
         result_user = await db.execute(query_user)
         employee = result_user.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients = [(employee.email, employee.first_name)] + [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:
             await send_email(
                 to_email=email,
-                subject=f"Leave Request {approval.status.value.capitalize()} (ID: {approval.leave_id})",
+                subject=f"Leave Request {approval.status.value.capitalize() if hasattr(approval.status, 'value') else str(approval.status).capitalize()} (ID: {approval.leave_id})",
                 body=(
                     f"Dear {first_name},\n\n"
                     f"The leave request (ID: {approval.leave_id}) from {leave_request.start_date} to {leave_request.end_date} "
-                    f"has been {approval.status.value.lower()}.\n"
+                    f"has been {approval.status.value.lower() if hasattr(approval.status, 'value') else str(approval.status).lower()}.\n"
                     f"Comments: {approval.comments or 'None'}\n\n"
                     f"Please contact HR for any questions.\n\n"
                     f"Best regards,\nEmployee Management System"
@@ -508,9 +504,7 @@ async def update_leave_approval(
             query_user = select(Users).where(Users.user_id == leave_request.user_id)
             result_user = await db.execute(query_user)
             employee = result_user.scalar_one_or_none()
-            query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-            result_admins = await db.execute(query_admins)
-            admins = result_admins.scalars().all()
+            admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
             recipients = [(employee.email, employee.first_name)] + [(admin.email, admin.first_name) for admin in admins]
             for email, first_name in recipients:
                 await send_email(
@@ -519,7 +513,7 @@ async def update_leave_approval(
                     body=(
                         f"Dear {first_name},\n\n"
                         f"The leave approval (ID: {workflow_id}) for leave request (ID: {approval.leave_id}) "
-                        f"has been updated to {update_dict['status'].value.lower()}.\n"
+                        f"has been updated to {update_dict['status'].value.lower() if hasattr(update_dict['status'], 'value') else str(update_dict['status']).lower()}.\n"
                         f"Comments: {update_dict.get('comments', 'None')}\n\n"
                         f"Please contact HR for any questions.\n\n"
                         f"Best regards,\nEmployee Management System"
@@ -625,9 +619,7 @@ async def delete_leave_approval(
         query_user = select(Users).where(Users.user_id == leave_request.user_id)
         result_user = await db.execute(query_user)
         employee = result_user.scalar_one_or_none()
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients = [(employee.email, employee.first_name)] + [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:
             await send_email(
@@ -748,17 +740,15 @@ async def define_workflow_steps(
             table_affected="leave_approval_workflow",
             record_id=None,
             old_values=None,
-            new_values={step.workflow_id: step.__dict__ for step in created_steps},
-            ip_address=str(request.client.host) if request else None,
+            new_values={f"step_{i}": step.__dict__ for i, step in enumerate(created_steps)},
+            ip_address=ipaddress.ip_address(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         # Notify approvers and admins
-        query_admins = select(Users).where(Users.has_role(Permission.MANAGE_LEAVE))
-        result_admins = await db.execute(query_admins)
-        admins = result_admins.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients = [(users[step.approver_id].email, users[step.approver_id].first_name) for step in workflow_steps]
         recipients += [(admin.email, admin.first_name) for admin in admins]
         for email, first_name in recipients:

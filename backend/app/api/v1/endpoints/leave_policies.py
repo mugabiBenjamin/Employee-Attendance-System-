@@ -8,6 +8,7 @@ from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.enums import Permission
 from app.core.exceptions import ValidationError
+from app.core.utils import get_request_id
 from app.services.leave_policy_service import (
     create_leave_policy,
     get_leave_policy,
@@ -19,10 +20,6 @@ from app.schemas.leave_policy import LeavePolicyCreate, LeavePolicyUpdate, Leave
 import logging
 
 logger = logging.getLogger(__name__)
-
-def get_request_id(request: Request) -> Optional[str]:
-    """Extract request_id from the request state."""
-    return request.state.request_id if hasattr(request.state, "request_id") else None
 
 router = APIRouter(prefix="/leave-policies", tags=["Leave Policies"])
 

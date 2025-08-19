@@ -18,6 +18,7 @@ from app.core.validators import validate_shift_pattern_exists
 from app.services.system_log_service import create_system_log
 from app.core.mail import send_email
 import logging
+from app.core.utils import get_users_with_permission
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +79,7 @@ async def create_shift_pattern(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         # Notify HR or admins
-        query = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_PATTERNS))
-        result = await db.execute(query)
-        admins = result.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_SHIFT_PATTERNS, db)
         for admin in admins:
             await send_email(
                 to_email=admin.email,
@@ -287,9 +286,7 @@ async def update_shift_pattern(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         # Notify HR or admins
-        query = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_PATTERNS))
-        result = await db.execute(query)
-        admins = result.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_SHIFT_PATTERNS, db)
         for admin in admins:
             await send_email(
                 to_email=admin.email,
@@ -391,9 +388,7 @@ async def delete_shift_pattern(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         # Notify HR or admins
-        query = select(Users).where(Users.has_role(Permission.MANAGE_SHIFT_PATTERNS))
-        result = await db.execute(query)
-        admins = result.scalars().all()
+        admins = await get_users_with_permission(Permission.MANAGE_SHIFT_PATTERNS, db)
         for admin in admins:
             await send_email(
                 to_email=admin.email,
