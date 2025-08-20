@@ -13,8 +13,8 @@ from app.core.enums import (
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from sqlalchemy.exc import OperationalError, DatabaseError
-import aioredis
-from aioredis.exceptions import ConnectionError, RedisError
+from redis import asyncio as aioredis
+from redis.exceptions import ConnectionError, RedisError
 import json
 
 logger = logging.getLogger(__name__)
