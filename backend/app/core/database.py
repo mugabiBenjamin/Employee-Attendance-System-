@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.core.enums import (
     AttendanceStatus, LeaveRequestStatus, LeaveType,
     CorrectionStatus, OvertimeStatus, EmployeeType, ShiftType, SystemAction,
-    RoleName
+    RoleName, Permission, PermissionGroup
 )
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -154,7 +154,7 @@ async def is_key_cached(key: str) -> bool:
         logger.error(f"Error checking cache existence for key {key}: {str(e)}")
         return False
 
-# Enum types list (for creating DB types)
+# Complete enum types list (including all enums from the enums file)
 ENUM_CLASS_LIST = [
     (AttendanceStatus, "attendance_status"),
     (LeaveRequestStatus, "leave_request_status"),
@@ -165,7 +165,11 @@ ENUM_CLASS_LIST = [
     (ShiftType, "shift_type"),
     (SystemAction, "system_action"),
     (RoleName, "role_name"),
+    (PermissionGroup, "permission_group"),
 ]
+
+# Note: Permission enum is not included as a PostgreSQL enum because it has too many values (80+)
+# and is better stored as JSONB in the roles.permissions column
 
 # Enum SQLAlchemy type mapping (for model columns)
 ENUM_CLASSES = {
@@ -182,7 +186,7 @@ MATERIALIZED_VIEW_SQLS = [
         CONCAT(u.first_name, ' ', u.last_name) AS full_name,
         d.department_name,
         ar.date,
-        ar.status,
+        ar.status::attendance_status,
         ar.total_hours,
         ar.overtime_hours,
         ar.clock_in_time,
@@ -195,10 +199,44 @@ MATERIALIZED_VIEW_SQLS = [
     WITH DATA;
     """,
     """
-    CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, date)
+    CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, date);
     """,
     """
-    CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name)
+    CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_attendance_summary_status ON attendance_summary(status);
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS leave_request_summary AS
+    SELECT lr.leave_request_id,
+        u.user_id,
+        u.employee_id,
+        CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
+        d.department_name,
+        lr.leave_type::leave_type,
+        lr.status::leave_request_status,
+        lr.start_date,
+        lr.end_date,
+        lr.total_days,
+        lr.reason,
+        lr.created_at,
+        lr.updated_at
+    FROM leave_requests lr
+        JOIN users u ON lr.user_id = u.user_id
+        JOIN user_departments ud ON u.user_id = ud.user_id AND ud.is_primary = TRUE
+        JOIN departments d ON ud.department_id = d.department_id
+    WHERE lr.deleted_at IS NULL
+    WITH DATA;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_leave_request_summary_user ON leave_request_summary(user_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_leave_request_summary_status ON leave_request_summary(status);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_leave_request_summary_dates ON leave_request_summary(start_date, end_date);
     """
 ]
 
@@ -213,38 +251,93 @@ MATERIALIZED_VIEW_SQLS = [
 )
 async def init_db():
     async with engine.begin() as conn:
-        # Create enums from Python Enum classes
+        # Create enums from Python Enum classes with better error handling
         for enum_class, enum_name in ENUM_CLASS_LIST:
-            values = [member.value for member in enum_class]
+            try:
+                values = [member.value for member in enum_class]
+                # Check if enum exists before creating
+                enum_exists = await conn.execute(text(f"""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_type WHERE typname = '{enum_name}'
+                    );
+                """))
+                
+                if not enum_exists.scalar():
+                    await conn.execute(text(f"""
+                        CREATE TYPE {enum_name} AS ENUM ({', '.join(f"'{v}'" for v in values)});
+                    """))
+                    logger.info(f"Created enum type: {enum_name}")
+                else:
+                    # Verify existing enum has all required values
+                    existing_values = await conn.execute(text(f"""
+                        SELECT unnest(enum_range(NULL::{enum_name}))::text as enum_value;
+                    """))
+                    existing_set = set(row[0] for row in existing_values)
+                    required_set = set(values)
+                    
+                    missing_values = required_set - existing_set
+                    if missing_values:
+                        logger.warning(f"Enum {enum_name} is missing values: {missing_values}")
+                        # Add missing enum values
+                        for value in missing_values:
+                            await conn.execute(text(f"""
+                                ALTER TYPE {enum_name} ADD VALUE '{value}';
+                            """))
+                            logger.info(f"Added value '{value}' to enum {enum_name}")
+                    
+            except Exception as e:
+                logger.error(f"Error creating/updating enum {enum_name}: {str(e)}")
+                raise
+
+        # Ensure required columns exist
+        table_column_updates = [
+            ("users", "job_title", "VARCHAR(100)"),
+            ("roles", "permissions", "JSONB DEFAULT '{}'::jsonb"),
+            ("users", "employee_type", f"{ENUM_CLASSES['employee_type'].name} DEFAULT 'full_time'")
+        ]
+        
+        for table_name, column_name, column_definition in table_column_updates:
             await conn.execute(text(f"""
                 DO $$ BEGIN
-                    CREATE TYPE {enum_name} AS ENUM ({', '.join(f"'{v}'" for v in values)});
-                EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = '{table_name}' AND column_name = '{column_name}'
+                    ) THEN
+                        ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition};
+                    END IF;
+                END $$;
             """))
-
-        # Ensure job_title column exists
-        await conn.execute(text("""
-            DO $$ BEGIN
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_name = 'users' AND column_name = 'job_title'
-                ) THEN
-                    ALTER TABLE users ADD COLUMN job_title VARCHAR(100);
-                END IF;
-            END $$;
-        """))
 
         # Create all tables for registered models
         await conn.run_sync(Base.metadata.create_all)
 
         # Create materialized views and indexes
         for view_sql in MATERIALIZED_VIEW_SQLS:
-            await conn.execute(text(view_sql))
+            try:
+                await conn.execute(text(view_sql))
+            except Exception as e:
+                logger.warning(f"Error creating materialized view/index: {str(e)}")
+                # Continue with other views even if one fails
 
-        logger.info("Database initialized with enums, tables, and materialized views")
+        # Create indexes for better performance
+        performance_indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active) WHERE deleted_at IS NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_user_roles_active ON user_roles(user_id, is_active);",
+            "CREATE INDEX IF NOT EXISTS idx_roles_active ON roles(is_active) WHERE deleted_at IS NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_attendance_records_date ON attendance_records(date, user_id);",
+            "CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status, user_id);",
+        ]
+        
+        for index_sql in performance_indexes:
+            try:
+                await conn.execute(text(index_sql))
+            except Exception as e:
+                logger.warning(f"Error creating index: {str(e)}")
 
-# Background task for refreshing materialized view
+        logger.info("Database initialized with enums, tables, materialized views, and indexes")
+
+# Background task for refreshing materialized views
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -253,17 +346,41 @@ async def init_db():
         f"Materialized view refresh attempt {retry_state.attempt_number} failed, retrying..."
     )
 )
-async def background_refresh_materialized_view():
+async def background_refresh_materialized_views():
+    """Refresh all materialized views."""
+    materialized_views = ["attendance_summary", "leave_request_summary"]
+    
     async with AsyncSessionLocal() as session:
         try:
-            await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY attendance_summary"))
+            for view_name in materialized_views:
+                try:
+                    await session.execute(text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view_name}"))
+                    logger.info(f"Materialized view '{view_name}' refreshed successfully")
+                except Exception as e:
+                    logger.error(f"Error refreshing materialized view {view_name}: {str(e)}")
+            
             await session.commit()
-            logger.info("Materialized view 'attendance_summary' refreshed successfully")
         except Exception as e:
-            logger.error(f"Error refreshing materialized view: {str(e)}")
+            logger.error(f"Error in materialized view refresh task: {str(e)}")
             await session.rollback()
             raise
 
 async def start_background_refresh():
+    """Start background task for refreshing materialized views."""
     logger.info("Starting materialized view refresh task")
-    asyncio.create_task(background_refresh_materialized_view())
+    asyncio.create_task(background_refresh_materialized_views())
+
+# Utility functions for enum validation
+async def validate_enum_value(enum_class, value: str) -> bool:
+    """Validate that a value exists in the given enum class."""
+    try:
+        return value in [member.value for member in enum_class]
+    except Exception:
+        return False
+
+async def get_enum_values(enum_class) -> list[str]:
+    """Get all values from an enum class."""
+    try:
+        return [member.value for member in enum_class]
+    except Exception:
+        return []

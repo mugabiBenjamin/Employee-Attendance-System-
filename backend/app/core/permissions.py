@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict
 from app.core.database import get_db
-from app.core.enums import Permission, PermissionGroup, PERMISSION_GROUPS
+from app.core.enums import Permission, PermissionGroup, PERMISSION_GROUPS, validate_permissions_list
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
@@ -48,7 +48,12 @@ async def get_role_permissions(role_id: int, db: AsyncSession) -> List[str]:
             if permissions.get(Permission.ALL_PERMISSIONS.value, False):
                 role_permissions = [perm.value for perm in Permission]
             else:
-                role_permissions = [key for key, value in permissions.items() if value is True]
+                # Validate permissions exist in enum before adding
+                valid_permissions = [key for key, value in permissions.items() if value is True]
+                is_valid, invalid_perms = validate_permissions_list(valid_permissions)
+                if not is_valid:
+                    logger.warning(f"Role {role_id} has invalid permissions: {invalid_perms}")
+                role_permissions = [p for p in valid_permissions if p not in (invalid_perms or [])]
 
         role_permission_cache[cache_key] = role_permissions
         return role_permissions
@@ -190,9 +195,26 @@ async def has_permission(user_id: int, permission: Permission, db: AsyncSession)
     except Exception:
         return False
 
-def get_permissions_for_group(group: PermissionGroup) -> Set[Permission]:
+def get_permissions_for_group(group: PermissionGroup) -> List[Permission]:
     """Get all permissions for a permission group."""
-    return set(PERMISSION_GROUPS.get(group, []))
+    return PERMISSION_GROUPS.get(group, [])
+
+async def has_role_level_access(user_id: int, required_level: PermissionGroup, db: AsyncSession) -> bool:
+    """Check if user has access level equivalent to or higher than required role level."""
+    try:
+        user_permissions = await get_user_permissions(user_id, db)
+        
+        # Super admin has all access
+        if Permission.ALL_PERMISSIONS.value in user_permissions:
+            return True
+        
+        # Check if user has permissions equivalent to required level
+        required_permissions = get_permissions_for_group(required_level)
+        required_perms_str = [p.value for p in required_permissions]
+        
+        return all(perm in user_permissions for perm in required_perms_str)
+    except Exception:
+        return False
 
 def invalidate_user_cache(user_id: int):
     """Invalidate cached permissions for a user."""
@@ -204,21 +226,56 @@ def invalidate_role_cache(role_id: int):
     cache_key = f"role_{role_id}_permissions"
     role_permission_cache.pop(cache_key, None)
 
-# Convenience decorators for common permission groups
-def require_employee_permissions():
-    return require_permissions(get_permissions_for_group(PermissionGroup.EMPLOYEE))
+# Fixed role-based decorators
+def require_employee_access():
+    """Check if user has employee-level access."""
+    def decorator(func):
+        async def wrapper(*args, current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db), **kwargs):
+            if not await has_role_level_access(current_user.user_id, PermissionGroup.EMPLOYEE, db):
+                raise AuthorizationError(detail="Employee access required")
+            return await func(*args, current_user=current_user, db=db, **kwargs)
+        return wrapper
+    return decorator
 
-def require_manager_permissions():
-    return require_permissions(get_permissions_for_group(PermissionGroup.MANAGER))
+def require_manager_access():
+    """Check if user has manager-level access."""
+    def decorator(func):
+        async def wrapper(*args, current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db), **kwargs):
+            if not await has_role_level_access(current_user.user_id, PermissionGroup.MANAGER, db):
+                raise AuthorizationError(detail="Manager access required")
+            return await func(*args, current_user=current_user, db=db, **kwargs)
+        return wrapper
+    return decorator
 
-def require_hr_permissions():
-    return require_permissions(get_permissions_for_group(PermissionGroup.HR))
+def require_hr_access():
+    """Check if user has HR-level access."""
+    def decorator(func):
+        async def wrapper(*args, current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db), **kwargs):
+            if not await has_role_level_access(current_user.user_id, PermissionGroup.HR, db):
+                raise AuthorizationError(detail="HR access required")
+            return await func(*args, current_user=current_user, db=db, **kwargs)
+        return wrapper
+    return decorator
 
-def require_admin_permissions():
-    return require_permissions(get_permissions_for_group(PermissionGroup.ADMIN))
+def require_admin_access():
+    """Check if user has admin-level access."""
+    def decorator(func):
+        async def wrapper(*args, current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db), **kwargs):
+            if not await has_role_level_access(current_user.user_id, PermissionGroup.ADMIN, db):
+                raise AuthorizationError(detail="Admin access required")
+            return await func(*args, current_user=current_user, db=db, **kwargs)
+        return wrapper
+    return decorator
 
-def require_super_admin_permissions():
-    return require_permissions(get_permissions_for_group(PermissionGroup.SUPER_ADMIN))
+def require_super_admin_access():
+    """Check if user has super admin access."""
+    def decorator(func):
+        async def wrapper(*args, current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db), **kwargs):
+            if not await has_role_level_access(current_user.user_id, PermissionGroup.SUPER_ADMIN, db):
+                raise AuthorizationError(detail="Super admin access required")
+            return await func(*args, current_user=current_user, db=db, **kwargs)
+        return wrapper
+    return decorator
 
 # Specific permission decorators for common operations
 def require_leave_management():
@@ -264,3 +321,70 @@ def require_overtime_management():
         Permission.APPROVE_OVERTIME_RECORD,
         Permission.MANAGE_OVERTIME
     ])
+
+def require_shift_management():
+    return require_any_permissions([
+        Permission.MANAGE_SHIFT_PATTERNS,
+        Permission.MANAGE_SHIFT_ASSIGNMENTS,
+        Permission.CREATE_SHIFT_PATTERN,
+        Permission.UPDATE_SHIFT_PATTERN
+    ])
+
+def require_emergency_contact_access():
+    return require_any_permissions([
+        Permission.VIEW_OWN_EMERGENCY_CONTACT,
+        Permission.VIEW_EMERGENCY_CONTACT,
+        Permission.UPDATE_EMERGENCY_CONTACT
+    ])
+
+def require_hierarchy_access():
+    return require_any_permissions([
+        Permission.VIEW_OWN_HIERARCHY,
+        Permission.VIEW_HIERARCHY,
+        Permission.UPDATE_HIERARCHY
+    ])
+
+# Utility functions for permission management
+async def validate_role_permissions(role_permissions: dict, db: AsyncSession) -> tuple[bool, list[str]]:
+    """Validate that all permissions in a role exist in the Permission enum."""
+    if not isinstance(role_permissions, dict):
+        return False, ["Role permissions must be a dictionary"]
+    
+    permission_keys = [key for key, value in role_permissions.items() if value is True]
+    is_valid, invalid_perms = validate_permissions_list(permission_keys)
+    
+    return is_valid, invalid_perms
+
+async def get_effective_permissions(user_id: int, db: AsyncSession) -> dict:
+    """Get user's effective permissions with role hierarchy information."""
+    try:
+        user_permissions = await get_user_permissions(user_id, db)
+        
+        # Determine effective role level
+        role_level = PermissionGroup.EMPLOYEE
+        if Permission.ALL_PERMISSIONS.value in user_permissions:
+            role_level = PermissionGroup.SUPER_ADMIN
+        elif await has_role_level_access(user_id, PermissionGroup.ADMIN, db):
+            role_level = PermissionGroup.ADMIN
+        elif await has_role_level_access(user_id, PermissionGroup.HR, db):
+            role_level = PermissionGroup.HR
+        elif await has_role_level_access(user_id, PermissionGroup.MANAGER, db):
+            role_level = PermissionGroup.MANAGER
+        
+        return {
+            "user_id": user_id,
+            "permissions": user_permissions,
+            "effective_role_level": role_level.value,
+            "total_permissions": len(user_permissions),
+            "has_all_permissions": Permission.ALL_PERMISSIONS.value in user_permissions
+        }
+    except Exception as e:
+        logger.error(f"Error getting effective permissions for user {user_id}: {str(e)}")
+        return {
+            "user_id": user_id,
+            "permissions": [],
+            "effective_role_level": "none",
+            "total_permissions": 0,
+            "has_all_permissions": False,
+            "error": str(e)
+        }
