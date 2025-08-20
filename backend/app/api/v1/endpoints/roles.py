@@ -3,10 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import Permission
 from app.services.role_service import (
     create_role,
     get_role,
@@ -28,7 +26,6 @@ router = APIRouter(prefix="/roles", tags=["Roles"])
     summary="Create a new role",
     description="Create a new role with specified permissions."
 )
-@require_permissions([Permission.CREATE_ROLE])
 async def create_role_endpoint(
     role: RoleCreate,
     request: Request,
@@ -45,10 +42,13 @@ async def create_role_endpoint(
 
     Returns:
         RoleOut: The created role.
+
+    Raises:
+        HTTPException: For validation errors (422), conflict (409), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await create_role(role, request, current_user, db)
+        return await create_role(role, request, current_user, db, request_id)
     except HTTPException as e:
         logger.error(f"Error creating role: {str(e)}", extra={"request_id": request_id})
         raise
@@ -62,7 +62,6 @@ async def create_role_endpoint(
     summary="Get role by ID",
     description="Retrieve a specific role by its ID."
 )
-@require_permissions([Permission.VIEW_ROLE])
 async def get_role_endpoint(
     role_id: int,
     request: Request,
@@ -79,10 +78,13 @@ async def get_role_endpoint(
 
     Returns:
         RoleOut: The retrieved role.
+
+    Raises:
+        HTTPException: For not found (404) or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await get_role(role_id, current_user, db)
+        return await get_role(role_id, current_user, db, request_id)
     except HTTPException as e:
         logger.error(f"Error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -96,7 +98,6 @@ async def get_role_endpoint(
     summary="List all roles",
     description="List all active roles with pagination."
 )
-@require_permissions([Permission.VIEW_ROLE])
 async def list_roles_endpoint(
     request: Request,
     skip: int = 0,
@@ -117,10 +118,13 @@ async def list_roles_endpoint(
 
     Returns:
         List[RoleOut]: List of active roles.
+
+    Raises:
+        HTTPException: For validation errors (422) or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await list_roles(skip, limit, current_user, db, settings)
+        return await list_roles(skip, limit, current_user, db, settings, request_id)
     except HTTPException as e:
         logger.error(f"Error listing roles: {str(e)}", extra={"request_id": request_id})
         raise
@@ -134,7 +138,6 @@ async def list_roles_endpoint(
     summary="Update a role",
     description="Update an existing role with specified permissions."
 )
-@require_permissions([Permission.UPDATE_ROLE])
 async def update_role_endpoint(
     role_id: int,
     role_update: RoleUpdate,
@@ -153,10 +156,13 @@ async def update_role_endpoint(
 
     Returns:
         RoleOut: The updated role.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await update_role(role_id, role_update, request, current_user, db)
+        return await update_role(role_id, role_update, request, current_user, db, request_id)
     except HTTPException as e:
         logger.error(f"Error updating role {role_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -170,7 +176,6 @@ async def update_role_endpoint(
     summary="Delete a role",
     description="Soft delete a role."
 )
-@require_permissions([Permission.DELETE_ROLE])
 async def delete_role_endpoint(
     role_id: int,
     request: Request,
@@ -184,10 +189,16 @@ async def delete_role_endpoint(
         request: The incoming HTTP request.
         current_user: The authenticated user.
         db: Database session dependency.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), business logic errors (422), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        await delete_role(role_id, request, current_user, db)
+        await delete_role(role_id, request, current_user, db, request_id)
     except HTTPException as e:
         logger.error(f"Error deleting role {role_id}: {str(e)}", extra={"request_id": request_id})
         raise

@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from app.models.leave_policies import LeavePolicies
 from app.models.users import Users
 from app.models.leave_balances import LeaveBalances
@@ -13,7 +13,7 @@ from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.mail import send_email
 from app.core.exceptions import LeavePolicyNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions, invalidate_user_cache
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_policy_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -33,6 +33,14 @@ async def create_leave_policy(
 ) -> LeavePolicyOut:
     """Create a new leave policy with validation, version tracking, and logging."""
     try:
+        # Validate inputs
+        if policy.effective_from < date.today():
+            raise ValidationError(detail="Effective date cannot be in the past")
+        if policy.annual_allocation < 0 or policy.carry_forward_limit < 0:
+            raise ValidationError(detail="Annual allocation and carry forward limit must be non-negative")
+        if policy.employee_type not in EmployeeType:
+            raise ValidationError(detail=f"Invalid employee type: {policy.employee_type}")
+
         # Validate unique constraint
         query = select(LeavePolicies).where(
             LeavePolicies.employee_type == policy.employee_type,
@@ -50,7 +58,7 @@ async def create_leave_policy(
             **policy.model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
-            version=policy.version
+            version=policy.version or 1
         )
         db.add(db_policy)
         await db.commit()
@@ -91,12 +99,13 @@ async def create_leave_policy(
                     updated_at=datetime.now(timezone.utc)
                 )
             db.add(leave_balance)
+            invalidate_user_cache(user.user_id)
         await db.commit()
 
-        # Invalidate cache
+        # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        logger.debug(f"Cache cleared for leave_policies and leave_balances")
+        logger.info(f"Cache invalidated for leave_policies, leave_balances, and {len(users)} users", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -110,7 +119,7 @@ async def create_leave_policy(
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
-        await create_system_log(log, request, current_user, db, settings, request_id)
+        await create_system_log(log, request, current_user, db, request_id)
 
         # Notify admins
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
@@ -120,8 +129,8 @@ async def create_leave_policy(
                 subject=f"New Leave Policy Created (ID: {db_policy.policy_id})",
                 body=(
                     f"Dear {admin.first_name},\n\n"
-                    f"A new leave policy for {policy.employee_type} and {policy.leave_type} has been created.\n"
-                    f"Details: {policy.annual_allocation} days, effective from {policy.effective_from}.\n"
+                    f"A new leave policy for {db_policy.employee_type} and {db_policy.leave_type} has been created.\n"
+                    f"Details: {db_policy.annual_allocation} days, effective from {db_policy.effective_from}.\n"
                     f"Please review in the Employee Management System.\n\n"
                     f"Best regards,\nEmployee Management System"
                 ),
@@ -129,7 +138,7 @@ async def create_leave_policy(
             )
 
         logger.info(
-            f"Leave policy created, policy_id: {db_policy.policy_id}, leave_type: {db_policy.leave_type}",
+            f"Leave policy created, policy_id: {db_policy.policy_id}, leave_type: {db_policy.leave_type}, employee_type: {db_policy.employee_type}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return LeavePolicyOut.model_validate(db_policy)
@@ -138,7 +147,7 @@ async def create_leave_policy(
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        logger.error(f"Error creating leave policy: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error creating leave policy: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating leave policy")
 
 async def get_leave_policy(
@@ -157,6 +166,7 @@ async def get_leave_policy(
         cache_key = f"leave_policy:{policy_id}"
         cached_policy = await get_cache(cache_key)
         if cached_policy:
+            logger.info(f"Cache hit for policy_id: {policy_id}", extra={"request_id": request_id})
             return LeavePolicyOut(**cached_policy)
 
         await validate_leave_policy_exists(db, policy_id, request_id)
@@ -172,8 +182,7 @@ async def get_leave_policy(
             raise LeavePolicyNotFoundError(leave_type=f"ID {policy_id}")
 
         # Authorization check
-        user_permissions = current_user.permissions  # Assumes permissions are preloaded in Users model
-        if not any(p in user_permissions for p in [Permission.VIEW_LEAVE_POLICY, Permission.MANAGE_LEAVE]) and policy.employee_type != EmployeeType.ALL and policy.employee_type != current_user.employee_type:
+        if not any(p == Permission.VIEW_LEAVE_POLICY or p == Permission.MANAGE_LEAVE for p in current_user.permissions) and policy.employee_type != EmployeeType.ALL and policy.employee_type != current_user.employee_type:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to view this leave policy"
@@ -181,9 +190,10 @@ async def get_leave_policy(
 
         policy_dict = LeavePolicyOut.model_validate(policy).model_dump()
         await set_cache(cache_key, policy_dict, ttl=300)
+        logger.info(f"Cache set for policy_id: {policy_id}", extra={"request_id": request_id})
 
         logger.info(
-            f"Retrieved leave policy, policy_id: {policy_id}",
+            f"Retrieved leave policy, policy_id: {policy_id}, leave_type: {policy.leave_type}, employee_type: {policy.employee_type}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return LeavePolicyOut.model_validate(policy)
@@ -198,10 +208,12 @@ async def get_leave_policy(
         logger.error(f"Forbidden access to leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error retrieving leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave policy")
 
 async def list_leave_policies(
+    employee_type: Optional[EmployeeType] = None,
+    leave_type: Optional[str] = None,
     skip: int = 0,
     limit: Optional[int] = None,
     current_user: Users = Depends(get_current_user),
@@ -210,37 +222,44 @@ async def list_leave_policies(
     request_id: Optional[str] = Depends(get_request_id),
     _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
 ) -> List[LeavePolicyOut]:
-    """Retrieve a list of active leave policies with pagination and caching."""
+    """Retrieve a list of active leave policies with pagination and filtering."""
     try:
         if skip < 0 or (limit is not None and limit <= 0):
             raise ValidationError(detail="Invalid pagination parameters")
+        if employee_type and employee_type not in EmployeeType:
+            raise ValidationError(detail=f"Invalid employee type: {employee_type}")
 
-        cache_key = f"leave_policies:{skip}:{limit or settings.DEFAULT_PAGE_SIZE}"
+        cache_key = f"leave_policies:{employee_type or 'all'}:{leave_type or 'all'}:{skip}:{limit or settings.DEFAULT_PAGE_SIZE}"
         cached_policies = await get_cache(cache_key)
         if cached_policies:
+            logger.info(f"Cache hit for leave_policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}", extra={"request_id": request_id})
             return [LeavePolicyOut(**policy) for policy in cached_policies]
 
         query = select(LeavePolicies).where(
             LeavePolicies.is_active.is_(True),
             LeavePolicies.deleted_at.is_(None)
         )
-        user_permissions = current_user.permissions
-        if not any(p in user_permissions for p in [Permission.VIEW_LEAVE_POLICY, Permission.MANAGE_LEAVE]):
+        if not any(p == Permission.VIEW_LEAVE_POLICY or p == Permission.MANAGE_LEAVE for p in current_user.permissions):
             query = query.where(
                 (LeavePolicies.employee_type == EmployeeType.ALL) |
                 (LeavePolicies.employee_type == current_user.employee_type)
             )
+        if employee_type:
+            query = query.where(LeavePolicies.employee_type == employee_type)
+        if leave_type:
+            query = query.where(LeavePolicies.leave_type == leave_type)
 
         limit = limit or settings.DEFAULT_PAGE_SIZE
-        query = query.offset(skip).limit(limit)
+        query = query.order_by(LeavePolicies.effective_from.asc()).offset(skip).limit(limit)
         result = await db.execute(query)
         policies = result.scalars().all()
 
         policies_dict = [LeavePolicyOut.model_validate(policy).model_dump() for policy in policies]
         await set_cache(cache_key, policies_dict, ttl=300)
+        logger.info(f"Cache set for leave_policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}", extra={"request_id": request_id})
 
         logger.info(
-            f"Retrieved {len(policies)} leave policies",
+            f"Retrieved {len(policies)} leave policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return [LeavePolicyOut.model_validate(policy) for policy in policies]
@@ -249,7 +268,7 @@ async def list_leave_policies(
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        logger.error(f"Error retrieving leave policies: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error retrieving leave policies: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave policies")
 
 async def update_leave_policy(
@@ -266,6 +285,12 @@ async def update_leave_policy(
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")
+        if policy_update.annual_allocation is not None and policy_update.annual_allocation < 0:
+            raise ValidationError(detail="Annual allocation must be non-negative")
+        if policy_update.carry_forward_limit is not None and policy_update.carry_forward_limit < 0:
+            raise ValidationError(detail="Carry forward limit must be non-negative")
+        if policy_update.employee_type and policy_update.employee_type not in EmployeeType:
+            raise ValidationError(detail=f"Invalid employee type: {policy_update.employee_type}")
 
         await validate_leave_policy_exists(db, policy_id, request_id)
 
@@ -339,12 +364,13 @@ async def update_leave_policy(
                     leave_balance.carried_forward = min(leave_balance.carried_forward, db_policy.carry_forward_limit)
                 leave_balance.updated_at = datetime.now(timezone.utc)
                 db.add(leave_balance)
+                invalidate_user_cache(user.user_id)
         await db.commit()
 
-        # Invalidate cache
+        # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        logger.debug(f"Cache cleared for leave_policies and leave_balances")
+        logger.info(f"Cache invalidated for leave_policies, leave_balances, and {len(users)} users", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -358,7 +384,7 @@ async def update_leave_policy(
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
-        await create_system_log(log, request, current_user, db, settings, request_id)
+        await create_system_log(log, request, current_user, db, request_id)
 
         # Notify admins
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
@@ -377,7 +403,7 @@ async def update_leave_policy(
             )
 
         logger.info(
-            f"Leave policy updated, policy_id: {policy_id}, version: {db_policy.version}",
+            f"Leave policy updated, policy_id: {policy_id}, leave_type: {db_policy.leave_type}, version: {db_policy.version}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return LeavePolicyOut.model_validate(db_policy)
@@ -389,7 +415,7 @@ async def update_leave_policy(
         logger.error(f"Leave policy not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        logger.error(f"Error updating leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error updating leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating leave policy")
 
 async def delete_leave_policy(
@@ -401,7 +427,7 @@ async def delete_leave_policy(
     request_id: Optional[str] = Depends(get_request_id),
     _: bool = Depends(require_permissions([Permission.DELETE_LEAVE_POLICY]))
 ) -> None:
-    """Soft delete a leave policy with logging and notification."""
+    """Soft delete a leave policy with validation, logging, and notification."""
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")
@@ -418,16 +444,41 @@ async def delete_leave_policy(
         if not db_policy:
             raise LeavePolicyNotFoundError(leave_type=f"ID {policy_id}")
 
+        # Check if this is the only active policy for the leave_type and employee_type
+        query_check = select(LeavePolicies).where(
+            LeavePolicies.leave_type == db_policy.leave_type,
+            LeavePolicies.employee_type == db_policy.employee_type,
+            LeavePolicies.policy_id != policy_id,
+            LeavePolicies.is_active.is_(True),
+            LeavePolicies.deleted_at.is_(None)
+        )
+        result_check = await db.execute(query_check)
+        if not result_check.scalars().all():
+            raise ValidationError(detail=f"Cannot delete the only active policy for {db_policy.employee_type} and {db_policy.leave_type}")
+
         db_policy.is_active = False
         db_policy.deleted_at = datetime.now(timezone.utc)
         db_policy.updated_at = datetime.now(timezone.utc)
         db.add(db_policy)
         await db.commit()
 
-        # Invalidate cache
+        # Invalidate caches for affected users
+        query_users = select(Users).where(
+            and_(
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None),
+                or_(Users.employee_type == db_policy.employee_type, db_policy.employee_type == EmployeeType.ALL)
+            )
+        )
+        result_users = await db.execute(query_users)
+        users = result_users.scalars().all()
+        for user in users:
+            invalidate_user_cache(user.user_id)
+
+        # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        logger.debug(f"Cache cleared for leave_policies and leave_balances")
+        logger.info(f"Cache invalidated for leave_policies, leave_balances, and {len(users)} users", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -441,7 +492,7 @@ async def delete_leave_policy(
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
-        await create_system_log(log, request, current_user, db, settings, request_id)
+        await create_system_log(log, request, current_user, db, request_id)
 
         # Notify admins
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
@@ -460,7 +511,7 @@ async def delete_leave_policy(
             )
 
         logger.info(
-            f"Leave policy soft deleted, policy_id: {policy_id}",
+            f"Leave policy soft deleted, policy_id: {policy_id}, leave_type: {db_policy.leave_type}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
 
@@ -471,5 +522,5 @@ async def delete_leave_policy(
         logger.error(f"Leave policy not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error deleting leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting leave policy")

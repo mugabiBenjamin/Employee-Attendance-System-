@@ -3,10 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import Permission
 from app.core.exceptions import ValidationError
 from app.services.holiday_calendar_service import (
     create_holiday,
@@ -33,7 +31,6 @@ router = APIRouter(prefix="/holiday-calendar", tags=["Holiday Calendar"])
     summary="Create a new holiday",
     description="Create a new holiday with date and department uniqueness check."
 )
-@require_permissions([Permission.CREATE_HOLIDAY])
 async def create_holiday_endpoint(
     holiday: HolidayCalendarCreate,
     request: Request,
@@ -41,7 +38,21 @@ async def create_holiday_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> HolidayCalendarOut:
-    """Create a new holiday."""
+    """Create a new holiday.
+
+    Args:
+        holiday: The holiday data to create.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        HolidayCalendarOut: The created holiday.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await create_holiday(holiday, request, current_user, db, settings, request_id)
@@ -58,13 +69,24 @@ async def create_holiday_endpoint(
     summary="Get holiday by ID",
     description="Retrieve a holiday by its ID."
 )
-@require_permissions([Permission.VIEW_HOLIDAY])
 async def get_holiday_endpoint(
     holiday_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> HolidayCalendarOut:
-    """Retrieve a holiday by ID."""
+    """Retrieve a holiday by ID.
+
+    Args:
+        holiday_id: The ID of the holiday to retrieve.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+
+    Returns:
+        HolidayCalendarOut: The retrieved holiday.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         if holiday_id <= 0:
             raise ValidationError(detail="Invalid holiday ID")
@@ -84,9 +106,8 @@ async def get_holiday_endpoint(
     "/",
     response_model=List[HolidayCalendarOut],
     summary="List all holidays",
-    description="Retrieve a list of active holidays, optionally filtered by department or year."
+    description="Retrieve a list of active holidays, optionally filtered by department or year with pagination."
 )
-@require_permissions([Permission.VIEW_HOLIDAY])
 async def list_holidays_endpoint(
     department_id: Optional[int] = None,
     year: Optional[int] = None,
@@ -97,7 +118,24 @@ async def list_holidays_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[HolidayCalendarOut]:
-    """List all active holidays with pagination."""
+    """List all active holidays with optional filters and pagination.
+
+    Args:
+        department_id: Optional department ID to filter holidays.
+        year: Optional year to filter holidays.
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[HolidayCalendarOut]: List of holidays.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await list_holidays(department_id, year, skip, limit, current_user, db, settings, request_id)
@@ -114,7 +152,6 @@ async def list_holidays_endpoint(
     summary="Update a holiday",
     description="Update an existing holiday with date and department uniqueness check."
 )
-@require_permissions([Permission.UPDATE_HOLIDAY])
 async def update_holiday_endpoint(
     holiday_id: int,
     holiday_update: HolidayCalendarUpdate,
@@ -123,7 +160,22 @@ async def update_holiday_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> HolidayCalendarOut:
-    """Update a holiday."""
+    """Update a holiday.
+
+    Args:
+        holiday_id: The ID of the holiday to update.
+        holiday_update: The updated holiday data.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        HolidayCalendarOut: The updated holiday.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         if holiday_id <= 0:
             raise ValidationError(detail="Invalid holiday ID")
@@ -145,7 +197,6 @@ async def update_holiday_endpoint(
     summary="Delete a holiday",
     description="Soft delete a holiday."
 )
-@require_permissions([Permission.DELETE_HOLIDAY])
 async def delete_holiday_endpoint(
     holiday_id: int,
     request: Request,
@@ -153,7 +204,21 @@ async def delete_holiday_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> None:
-    """Soft delete a holiday."""
+    """Soft delete a holiday.
+
+    Args:
+        holiday_id: The ID of the holiday to delete.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         if holiday_id <= 0:
             raise ValidationError(detail="Invalid holiday ID")

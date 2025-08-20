@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Initialize in-memory caches with TTL of 5 minutes
 user_permission_cache = cachetools.TTLCache(maxsize=1000, ttl=300)
 role_permission_cache = cachetools.TTLCache(maxsize=100, ttl=300)
+department_permission_cache = cachetools.TTLCache(maxsize=100, ttl=300)
 
 class PermissionCheck(BaseModel):
     user_id: int
@@ -48,7 +49,6 @@ async def get_role_permissions(role_id: int, db: AsyncSession) -> List[str]:
             if permissions.get(Permission.ALL_PERMISSIONS.value, False):
                 role_permissions = [perm.value for perm in Permission]
             else:
-                # Validate permissions exist in enum before adding
                 valid_permissions = [key for key, value in permissions.items() if value is True]
                 is_valid, invalid_perms = validate_permissions_list(valid_permissions)
                 if not is_valid:
@@ -72,8 +72,6 @@ async def check_permissions(
             raise AuthorizationError(detail="User account is inactive")
 
         required_perms_str = [perm.value for perm in required_permissions]
-
-        # Check user permission cache
         cache_key = f"user_{current_user.user_id}_permissions"
         cached_permissions = user_permission_cache.get(cache_key)
         if cached_permissions is not None:
@@ -88,7 +86,6 @@ async def check_permissions(
                 )
             return True
 
-        # Query user roles
         query = select(UserRoles.role_id).where(
             UserRoles.user_id == current_user.user_id,
             UserRoles.is_active == True
@@ -99,19 +96,15 @@ async def check_permissions(
         if not role_ids:
             raise AuthorizationError(detail="No active roles assigned to user")
 
-        # Aggregate permissions from all roles
         user_permissions = set()
         for role_id in role_ids:
             role_permissions = await get_role_permissions(role_id, db)
             user_permissions.update(role_permissions)
 
         user_permission_cache[cache_key] = list(user_permissions)
-
-        # Check for ALL_PERMISSIONS wildcard
         if Permission.ALL_PERMISSIONS.value in user_permissions:
             return True
 
-        # Check if all required permissions are present
         missing_permissions = [perm for perm in required_perms_str if perm not in user_permissions]
         if missing_permissions:
             raise AuthorizationError(
@@ -204,11 +197,9 @@ async def has_role_level_access(user_id: int, required_level: PermissionGroup, d
     try:
         user_permissions = await get_user_permissions(user_id, db)
         
-        # Super admin has all access
         if Permission.ALL_PERMISSIONS.value in user_permissions:
             return True
         
-        # Check if user has permissions equivalent to required level
         required_permissions = get_permissions_for_group(required_level)
         required_perms_str = [p.value for p in required_permissions]
         
@@ -226,7 +217,12 @@ def invalidate_role_cache(role_id: int):
     cache_key = f"role_{role_id}_permissions"
     role_permission_cache.pop(cache_key, None)
 
-# Fixed role-based decorators
+def invalidate_department_cache(department_id: int):
+    """Invalidate cached permissions for a department."""
+    cache_key = f"department_{department_id}_permissions"
+    department_permission_cache.pop(cache_key, None)
+
+# Role-based decorators
 def require_employee_access():
     """Check if user has employee-level access."""
     def decorator(func):
@@ -277,7 +273,7 @@ def require_super_admin_access():
         return wrapper
     return decorator
 
-# Specific permission decorators for common operations
+# Specific permission decorators
 def require_leave_management():
     return require_any_permissions([
         Permission.VIEW_LEAVE_REQUEST,
@@ -302,7 +298,6 @@ def require_user_management():
         Permission.MANAGE_USERS
     ])
 
-# New permission decorators for added permissions
 def require_workflow_management():
     return require_permissions([Permission.DEFINE_WORKFLOW, Permission.VIEW_WORKFLOWS])
 
@@ -344,7 +339,6 @@ def require_hierarchy_access():
         Permission.UPDATE_HIERARCHY
     ])
 
-# Utility functions for permission management
 async def validate_role_permissions(role_permissions: dict, db: AsyncSession) -> tuple[bool, list[str]]:
     """Validate that all permissions in a role exist in the Permission enum."""
     if not isinstance(role_permissions, dict):
@@ -360,7 +354,6 @@ async def get_effective_permissions(user_id: int, db: AsyncSession) -> dict:
     try:
         user_permissions = await get_user_permissions(user_id, db)
         
-        # Determine effective role level
         role_level = PermissionGroup.EMPLOYEE
         if Permission.ALL_PERMISSIONS.value in user_permissions:
             role_level = PermissionGroup.SUPER_ADMIN

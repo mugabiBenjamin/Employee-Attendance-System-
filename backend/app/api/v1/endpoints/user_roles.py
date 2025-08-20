@@ -3,10 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import Permission
 from app.services.user_role_service import (
     create_user_role as service_create_user_role,
     read_user_role as service_read_user_role,
@@ -30,7 +28,6 @@ router = APIRouter(prefix="/user-roles", tags=["User Roles"])
     summary="Create user role assignment",
     description="Create a new user role assignment."
 )
-@require_permissions([Permission.CREATE_USER_ROLE])
 async def create_user_role_endpoint(
     user_role: UserRoleCreate,
     request: Request,
@@ -38,7 +35,21 @@ async def create_user_role_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> UserRoleOut:
-    """Create a user role assignment."""
+    """Create a user role assignment.
+
+    Args:
+        user_role: The user role data to create.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        current_user: The authenticated user performing the action.
+        settings: Application settings.
+
+    Returns:
+        UserRoleOut: The created user role assignment.
+
+    Raises:
+        HTTPException: For validation errors (422), conflict (409), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await service_create_user_role(user_role, request, current_user, db, request_id)
@@ -55,13 +66,24 @@ async def create_user_role_endpoint(
     summary="Get user role assignment by ID",
     description="Retrieve a user role assignment by its ID."
 )
-@require_permissions([Permission.VIEW_USER_ROLE])
 async def read_user_role_endpoint(
     user_role_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> UserRoleOut:
-    """Retrieve a user role assignment by ID."""
+    """Retrieve a user role assignment by ID.
+
+    Args:
+        user_role_id: The ID of the user role assignment to retrieve.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+
+    Returns:
+        UserRoleOut: The retrieved user role assignment.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await service_read_user_role(user_role_id, db, request_id)
@@ -76,9 +98,8 @@ async def read_user_role_endpoint(
     "/",
     response_model=List[UserRoleOut],
     summary="List user role assignments",
-    description="List user role assignments with optional filters."
+    description="List user role assignments with optional filters and pagination."
 )
-@require_permissions([Permission.VIEW_USER_ROLE])
 async def read_user_roles_endpoint(
     request: Request,
     user_id: Optional[int] = None,
@@ -88,7 +109,23 @@ async def read_user_roles_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[UserRoleOut]:
-    """List user role assignments with optional filters."""
+    """List user role assignments with optional filters and pagination.
+
+    Args:
+        user_id: Optional user ID to filter assignments.
+        role_id: Optional role ID to filter assignments.
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[UserRoleOut]: List of user role assignments.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await service_read_user_roles(user_id, role_id, skip, limit, db, settings, request_id)
@@ -105,7 +142,6 @@ async def read_user_roles_endpoint(
     summary="Update user role assignment",
     description="Update an existing user role assignment."
 )
-@require_permissions([Permission.UPDATE_USER_ROLE])
 async def update_user_role_endpoint(
     user_role_id: int,
     user_role_update: UserRoleUpdate,
@@ -114,7 +150,22 @@ async def update_user_role_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> UserRoleOut:
-    """Update a user role assignment."""
+    """Update a user role assignment.
+
+    Args:
+        user_role_id: The ID of the user role assignment to update.
+        user_role_update: The updated user role data.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        current_user: The authenticated user performing the action.
+        settings: Application settings.
+
+    Returns:
+        UserRoleOut: The updated user role assignment.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), conflict (409), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await service_update_user_role(user_role_id, user_role_update, request, current_user, db, request_id)
@@ -131,7 +182,6 @@ async def update_user_role_endpoint(
     summary="Delete user role assignment",
     description="Soft delete a user role assignment."
 )
-@require_permissions([Permission.DELETE_USER_ROLE])
 async def delete_user_role_endpoint(
     user_role_id: int,
     request: Request,
@@ -139,7 +189,21 @@ async def delete_user_role_endpoint(
     current_user: Users = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ) -> None:
-    """Soft delete a user role assignment."""
+    """Soft delete a user role assignment.
+
+    Args:
+        user_role_id: The ID of the user role assignment to delete.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        current_user: The authenticated user performing the action.
+        settings: Application settings.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         await service_delete_user_role(user_role_id, request, current_user, db, request_id)
@@ -154,9 +218,8 @@ async def delete_user_role_endpoint(
     "/user/{user_id}/roles",
     response_model=List[UserRoleOut],
     summary="Get all roles for a user",
-    description="Retrieve all active roles for a specific user."
+    description="Retrieve all active roles for a specific user with pagination."
 )
-@require_permissions([Permission.VIEW_USER_ROLE])
 async def get_user_roles_endpoint(
     request: Request,
     user_id: int,
@@ -165,7 +228,22 @@ async def get_user_roles_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[UserRoleOut]:
-    """Retrieve all roles for a specific user."""
+    """Retrieve all roles for a specific user with pagination.
+
+    Args:
+        user_id: The ID of the user to retrieve roles for.
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[UserRoleOut]: List of user role assignments.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await service_get_user_roles(user_id, skip, limit, db, settings, request_id)
@@ -182,13 +260,24 @@ async def get_user_roles_endpoint(
     summary="Get all permissions for a user",
     description="Retrieve all permissions assigned to a specific user based on their roles."
 )
-@require_permissions([Permission.VIEW_USER_ROLE])
 async def get_user_permissions_endpoint(
     request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db)
 ) -> dict:
-    """Retrieve all permissions for a specific user."""
+    """Retrieve all permissions for a specific user.
+
+    Args:
+        user_id: The ID of the user to retrieve permissions for.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+
+    Returns:
+        dict: Dictionary of permissions assigned to the user.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await service_get_user_permissions(user_id, db, request_id)

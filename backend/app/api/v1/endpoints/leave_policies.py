@@ -3,10 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import Permission
+from app.core.enums import EmployeeType
 from app.core.exceptions import ValidationError
 from app.core.utils import get_request_id
 from app.services.leave_policy_service import (
@@ -28,9 +27,8 @@ router = APIRouter(prefix="/leave-policies", tags=["Leave Policies"])
     response_model=LeavePolicyOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new leave policy",
-    description="Create a new leave policy with role/department applicability."
+    description="Create a new leave policy with employee type and leave type applicability."
 )
-@require_permissions([Permission.CREATE_LEAVE_POLICY])
 async def create_leave_policy_endpoint(
     policy: LeavePolicyCreate,
     request: Request,
@@ -38,13 +36,24 @@ async def create_leave_policy_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> LeavePolicyOut:
-    """Create a new leave policy."""
+    """Create a new leave policy.
+
+    Args:
+        policy: The leave policy data to create.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        LeavePolicyOut: The created leave policy.
+
+    Raises:
+        HTTPException: For validation errors (422) or server errors (500).
+    """
     try:
         request_id = get_request_id(request)
         return await create_leave_policy(policy, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error creating leave policy: {str(e)}", extra={"request_id": request_id})
         raise
@@ -58,7 +67,6 @@ async def create_leave_policy_endpoint(
     summary="Get leave policy by ID",
     description="Retrieve a specific leave policy by its ID."
 )
-@require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY])
 async def get_leave_policy_endpoint(
     policy_id: int,
     request: Request,
@@ -66,7 +74,21 @@ async def get_leave_policy_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> LeavePolicyOut:
-    """Retrieve a leave policy by ID."""
+    """Retrieve a leave policy by ID.
+
+    Args:
+        policy_id: The ID of the leave policy to retrieve.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        LeavePolicyOut: The retrieved leave policy.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
+    """
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")
@@ -86,26 +108,39 @@ async def get_leave_policy_endpoint(
     "/",
     response_model=List[LeavePolicyOut],
     summary="List all leave policies",
-    description="List all active leave policies with pagination."
+    description="List all active leave policies with optional filtering by employee type and leave type, and pagination."
 )
-@require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY])
 async def list_leave_policies_endpoint(
-    request: Request,
+    employee_type: Optional[EmployeeType] = None,
+    leave_type: Optional[str] = None,
     skip: int = 0,
     limit: Optional[int] = None,
+    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[LeavePolicyOut]:
-    """List all active leave policies with pagination."""
+    """List all active leave policies with optional filters and pagination.
+
+    Args:
+        employee_type: Optional employee type to filter policies.
+        leave_type: Optional leave type to filter policies.
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[LeavePolicyOut]: List of leave policies.
+
+    Raises:
+        HTTPException: For validation errors (422) or server errors (500).
+    """
     try:
-        if skip < 0 or (limit is not None and limit <= 0):
-            raise ValidationError(detail="Invalid pagination parameters")
         request_id = get_request_id(request)
-        return await list_leave_policies(skip, limit, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        return await list_leave_policies(employee_type, leave_type, skip, limit, current_user, db, settings, request_id)
     except HTTPException as e:
         logger.error(f"Error retrieving leave policies: {str(e)}", extra={"request_id": request_id})
         raise
@@ -117,9 +152,8 @@ async def list_leave_policies_endpoint(
     "/{policy_id}",
     response_model=LeavePolicyOut,
     summary="Update a leave policy",
-    description="Update an existing leave policy with role/department applicability."
+    description="Update an existing leave policy with employee type and leave type applicability."
 )
-@require_permissions([Permission.UPDATE_LEAVE_POLICY])
 async def update_leave_policy_endpoint(
     policy_id: int,
     policy_update: LeavePolicyUpdate,
@@ -128,7 +162,22 @@ async def update_leave_policy_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> LeavePolicyOut:
-    """Update a leave policy."""
+    """Update a leave policy.
+
+    Args:
+        policy_id: The ID of the leave policy to update.
+        policy_update: The updated leave policy data.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        LeavePolicyOut: The updated leave policy.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")
@@ -150,7 +199,6 @@ async def update_leave_policy_endpoint(
     summary="Delete a leave policy",
     description="Soft delete a leave policy."
 )
-@require_permissions([Permission.DELETE_LEAVE_POLICY])
 async def delete_leave_policy_endpoint(
     policy_id: int,
     request: Request,
@@ -158,7 +206,21 @@ async def delete_leave_policy_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> None:
-    """Soft delete a leave policy."""
+    """Soft delete a leave policy.
+
+    Args:
+        policy_id: The ID of the leave policy to delete.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), business logic errors (422), or server errors (500).
+    """
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")

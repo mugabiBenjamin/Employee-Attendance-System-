@@ -3,10 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import Permission
 from app.core.exceptions import ValidationError
 from app.services.employee_hierarchy_service import (
     create_employee_hierarchy,
@@ -33,7 +31,6 @@ router = APIRouter(prefix="/employee-hierarchy", tags=["Employee Hierarchy"])
     summary="Create employee hierarchy",
     description="Create a new employee-manager relationship."
 )
-@require_permissions([Permission.CREATE_HIERARCHY])
 async def create_employee_hierarchy_endpoint(
     hierarchy: EmployeeHierarchyCreate,
     request: Request,
@@ -41,7 +38,21 @@ async def create_employee_hierarchy_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> EmployeeHierarchyOut:
-    """Create an employee hierarchy."""
+    """Create a new employee-manager relationship.
+
+    Args:
+        hierarchy: The employee hierarchy data to create.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        EmployeeHierarchyOut: The created employee hierarchy.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await create_employee_hierarchy(hierarchy, request, current_user, db, settings, request_id)
@@ -56,16 +67,28 @@ async def create_employee_hierarchy_endpoint(
     "/{hierarchy_id}",
     response_model=EmployeeHierarchyOut,
     summary="Get employee hierarchy by ID",
-    description="Retrieve an employee hierarchy by ID."
+    description="Retrieve an employee hierarchy by its ID."
 )
-@require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY])
 async def get_employee_hierarchy_endpoint(
     hierarchy_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> EmployeeHierarchyOut:
-    """Retrieve an employee hierarchy by ID."""
+    """Retrieve an employee hierarchy by ID.
+
+    Args:
+        hierarchy_id: The ID of the employee hierarchy to retrieve.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+
+    Returns:
+        EmployeeHierarchyOut: The retrieved employee hierarchy.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
+    """
     try:
         if hierarchy_id <= 0:
             raise ValidationError(detail="Invalid hierarchy ID")
@@ -85,9 +108,8 @@ async def get_employee_hierarchy_endpoint(
     "/",
     response_model=List[EmployeeHierarchyOut],
     summary="List employee hierarchies",
-    description="Retrieve a list of employee hierarchies, optionally filtered by employee_id, department_id, or manager_id."
+    description="Retrieve a list of employee hierarchies, optionally filtered by employee_id, department_id, or manager_id with pagination."
 )
-@require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY])
 async def list_employee_hierarchies_endpoint(
     employee_id: Optional[int] = None,
     department_id: Optional[int] = None,
@@ -99,7 +121,25 @@ async def list_employee_hierarchies_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[EmployeeHierarchyOut]:
-    """List employee hierarchies with pagination."""
+    """List employee hierarchies with optional filters and pagination.
+
+    Args:
+        employee_id: Optional employee ID to filter hierarchies.
+        department_id: Optional department ID to filter hierarchies.
+        manager_id: Optional manager ID to filter hierarchies.
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[EmployeeHierarchyOut]: List of employee hierarchies.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         request_id = getattr(request.state, "request_id", None)
         return await list_employee_hierarchies(employee_id, department_id, manager_id, skip, limit, current_user, db, settings, request_id)
@@ -116,7 +156,6 @@ async def list_employee_hierarchies_endpoint(
     summary="Update employee hierarchy",
     description="Update an existing employee hierarchy."
 )
-@require_permissions([Permission.UPDATE_HIERARCHY])
 async def update_employee_hierarchy_endpoint(
     hierarchy_id: int,
     hierarchy_update: EmployeeHierarchyUpdate,
@@ -125,7 +164,22 @@ async def update_employee_hierarchy_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> EmployeeHierarchyOut:
-    """Update an employee hierarchy."""
+    """Update an employee hierarchy.
+
+    Args:
+        hierarchy_id: The ID of the employee hierarchy to update.
+        hierarchy_update: The updated employee hierarchy data.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        EmployeeHierarchyOut: The updated employee hierarchy.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
         if hierarchy_id <= 0:
             raise ValidationError(detail="Invalid hierarchy ID")
@@ -147,7 +201,6 @@ async def update_employee_hierarchy_endpoint(
     summary="Delete employee hierarchy",
     description="Soft delete an employee hierarchy."
 )
-@require_permissions([Permission.DELETE_HIERARCHY])
 async def delete_employee_hierarchy_endpoint(
     hierarchy_id: int,
     request: Request,
@@ -155,7 +208,21 @@ async def delete_employee_hierarchy_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> None:
-    """Soft delete an employee hierarchy."""
+    """Soft delete an employee hierarchy.
+
+    Args:
+        hierarchy_id: The ID of the employee hierarchy to delete.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), business logic errors (422), or server errors (500).
+    """
     try:
         if hierarchy_id <= 0:
             raise ValidationError(detail="Invalid hierarchy ID")

@@ -3,10 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import Permission
 from app.services.user_service import (
     create_user as service_create_user,
     read_user as service_read_user,
@@ -29,7 +27,6 @@ router = APIRouter(prefix="/users", tags=["Users"])
     summary="Create new user",
     description="Create a new user."
 )
-@require_permissions([Permission.CREATE_USER])
 async def create_new_user_endpoint(
     user: UserCreate,
     request: Request,
@@ -68,7 +65,6 @@ async def create_new_user_endpoint(
     summary="Get user by ID",
     description="Retrieve a user by their ID."
 )
-@require_permissions([Permission.VIEW_USER])
 async def read_user_endpoint(
     user_id: int,
     request: Request,
@@ -103,7 +99,6 @@ async def read_user_endpoint(
     summary="List all users",
     description="List all active users with pagination."
 )
-@require_permissions([Permission.VIEW_USER])
 async def read_users_endpoint(
     request: Request,
     skip: int = 0,
@@ -142,7 +137,6 @@ async def read_users_endpoint(
     summary="Update user",
     description="Update a user's details."
 )
-@require_permissions([Permission.UPDATE_USER])
 async def update_existing_user_endpoint(
     user_id: int,
     user_update: UserUpdate,
@@ -183,7 +177,6 @@ async def update_existing_user_endpoint(
     summary="Delete user",
     description="Soft delete a user."
 )
-@require_permissions([Permission.DELETE_USER])
 async def delete_existing_user_endpoint(
     user_id: int,
     request: Request,
@@ -222,7 +215,6 @@ async def delete_existing_user_endpoint(
     summary="Get current user profile",
     description="Retrieve the current authenticated user's profile."
 )
-@require_permissions([Permission.VIEW_OWN_PROFILE])
 async def get_current_user_profile_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),

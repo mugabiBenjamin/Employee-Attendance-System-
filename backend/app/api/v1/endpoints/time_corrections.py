@@ -3,10 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
-from app.core.enums import Permission, CorrectionStatus
+from app.core.enums import CorrectionStatus
 from app.core.config import Settings, get_settings
+from app.core.utils import get_request_id
 from app.services.time_correction_service import (
     create_time_correction as service_create_time_correction,
     get_time_correction as service_get_time_correction,
@@ -17,6 +17,7 @@ from app.services.time_correction_service import (
     delete_time_correction as service_delete_time_correction
 )
 from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionUpdate, TimeCorrectionOut, TimeCorrectionApproval
+from app.core.exceptions import ValidationError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,23 +31,36 @@ router = APIRouter(prefix="/time-corrections", tags=["Time Corrections"])
     summary="Request a time correction",
     description="Submit a time correction request for an attendance record."
 )
-@require_permissions([Permission.CREATE_TIME_CORRECTION])
 async def request_time_correction(
     correction: TimeCorrectionCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> TimeCorrectionOut:
-    """Submit a time correction request for an attendance record."""
+    """Submit a time correction request for an attendance record.
+
+    Args:
+        correction: The time correction request data.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        TimeCorrectionOut: The created time correction record.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
+    """
     try:
-        request_id = getattr(request.state, "request_id", None)
+        request_id = get_request_id(request)
         return await service_create_time_correction(correction, request, current_user, db, settings, request_id)
     except HTTPException as e:
-        logger.error(f"Error requesting time correction for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Error requesting time correction for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error requesting time correction for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error requesting time correction for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
@@ -55,60 +69,90 @@ async def request_time_correction(
     summary="Get time correction by ID",
     description="Retrieve a specific time correction request."
 )
-@require_permissions([Permission.VIEW_TIME_CORRECTION])
 async def get_time_correction(
     correction_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> TimeCorrectionOut:
-    """Retrieve a specific time correction request."""
+    """Retrieve a specific time correction request.
+
+    Args:
+        correction_id: The ID of the time correction to retrieve.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+
+    Returns:
+        TimeCorrectionOut: The requested time correction record.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
+    """
     try:
-        request_id = getattr(request.state, "request_id", None)
-        correction = await service_get_time_correction(correction_id, db, request_id)
-        if correction.user_id != current_user.user_id:
-            await require_permissions([Permission.VIEW_TIME_CORRECTION])(current_user, db)
-        return correction
+        request_id = get_request_id(request)
+        return await service_get_time_correction(correction_id, current_user, db, request_id)
     except HTTPException as e:
-        logger.error(f"Error retrieving time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Error retrieving time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error retrieving time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error retrieving time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.get(
     "/",
     response_model=List[TimeCorrectionOut],
     summary="List time correction requests",
-    description="Retrieve time correction requests for current user or specified user/department (if authorized)."
+    description="Retrieve time correction requests for current user, specified user, or department (if authorized)."
 )
-@require_permissions([Permission.VIEW_TIME_CORRECTION])
 async def list_time_corrections(
     request: Request,
     user_id: Optional[int] = None,
     department_id: Optional[int] = None,
+    status: Optional[CorrectionStatus] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[TimeCorrectionOut]:
-    """Retrieve time correction requests for current user or specified user/department."""
+    """Retrieve time correction requests for current user, specified user, or department.
+
+    Args:
+        request: The incoming HTTP request for logging client details.
+        user_id: Optional user ID to filter corrections (requires authorization).
+        department_id: Optional department ID to filter corrections (requires authorization).
+        status: Optional status filter (e.g., UNDER_REVIEW, APPROVED).
+        skip: Number of records to skip for pagination.
+        limit: Maximum number of records to return (default from settings).
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[TimeCorrectionOut]: List of time correction records.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
+    """
     try:
-        request_id = getattr(request.state, "request_id", None)
+        request_id = get_request_id(request)
+        if user_id and department_id:
+            raise ValidationError(detail="Cannot specify both user_id and department_id")
+        
         if department_id:
-            if not current_user.has_role("HR"):
-                await require_permissions([Permission.VIEW_TIME_CORRECTION])(current_user, db)
-            return await service_get_department_time_corrections(department_id, skip, limit, db, settings, request_id)
+            return await service_get_department_time_corrections(department_id, skip, limit, status, current_user, db, settings, request_id)
+        
         target_user_id = user_id if user_id else current_user.user_id
-        if target_user_id != current_user.user_id:
-            await require_permissions([Permission.VIEW_TIME_CORRECTION])(current_user, db)
-        return await service_get_user_time_corrections(target_user_id, skip, limit, db, settings, request_id)
+        return await service_get_user_time_corrections(target_user_id, skip, limit, status, current_user, db, settings, request_id)
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
-        logger.error(f"Error retrieving time corrections for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Error retrieving time corrections for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error retrieving time corrections for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error retrieving time corrections for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.put(
@@ -117,24 +161,38 @@ async def list_time_corrections(
     summary="Update a time correction",
     description="Update an existing time correction request."
 )
-@require_permissions([Permission.UPDATE_TIME_CORRECTION])
 async def update_time_correction(
     correction_id: int,
     time_correction_update: TimeCorrectionUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> TimeCorrectionOut:
-    """Update an existing time correction request."""
+    """Update an existing time correction request.
+
+    Args:
+        correction_id: The ID of the time correction to update.
+        time_correction_update: The updated time correction data.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        TimeCorrectionOut: The updated time correction record.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), conflicts (409), or server errors (500).
+    """
     try:
-        request_id = getattr(request.state, "request_id", None)
+        request_id = get_request_id(request)
         return await service_update_time_correction(correction_id, time_correction_update, request, current_user, db, settings, request_id)
     except HTTPException as e:
-        logger.error(f"Error updating time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Error updating time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error updating time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error updating time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.put(
@@ -143,24 +201,38 @@ async def update_time_correction(
     summary="Approve or reject a time correction",
     description="Approve or reject a time correction request."
 )
-@require_permissions([Permission.UPDATE_TIME_CORRECTION])
 async def approve_reject_time_correction(
     correction_id: int,
     approval_data: TimeCorrectionApproval,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> TimeCorrectionOut:
-    """Approve or reject a time correction request."""
+    """Approve or reject a time correction request.
+
+    Args:
+        correction_id: The ID of the time correction to approve/reject.
+        approval_data: The approval data containing the new status.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        TimeCorrectionOut: The updated time correction record.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), conflicts (409), or server errors (500).
+    """
     try:
-        request_id = getattr(request.state, "request_id", None)
+        request_id = get_request_id(request)
         return await service_approve_time_correction(correction_id, approval_data, request, current_user, db, settings, request_id)
     except HTTPException as e:
-        logger.error(f"Error processing time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Error processing time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error processing time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error processing time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 @router.delete(
@@ -169,21 +241,31 @@ async def approve_reject_time_correction(
     summary="Delete a time correction",
     description="Soft delete a time correction request (HR/admin only)."
 )
-@require_permissions([Permission.DELETE_TIME_CORRECTION])
 async def remove_time_correction(
     correction_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> None:
-    """Soft delete a time correction request (HR/admin only)."""
+    """Soft delete a time correction request (HR/admin only).
+
+    Args:
+        correction_id: The ID of the time correction to delete.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
+    """
     try:
-        request_id = getattr(request.state, "request_id", None)
+        request_id = get_request_id(request)
         await service_delete_time_correction(correction_id, request, current_user, db, settings, request_id)
     except HTTPException as e:
-        logger.error(f"Error deleting time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Error deleting time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error deleting time correction {correction_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error deleting time correction {correction_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

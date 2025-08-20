@@ -1,12 +1,14 @@
 from typing import List, Optional
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, and_
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from app.models.leave_balances import LeaveBalances
 from app.models.leave_policies import LeavePolicies
 from app.models.users import Users
 from app.models.leave_requests import LeaveRequests
+from app.models.employee_hierarchy import EmployeeHierarchy
 from app.schemas.leave_balance import LeaveBalanceOut, LeavePolicyDetails
 from app.schemas.system_log import SystemLogCreate
 from app.core.config import Settings, get_settings
@@ -14,7 +16,7 @@ from app.core.enums import LeaveType, SystemAction, Permission, LeaveRequestStat
 from app.core.mail import send_email
 from app.core.exceptions import LeaveBalanceNotFoundError, UserNotFoundError, LeavePolicyNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_leave_policy_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -39,16 +41,25 @@ async def get_leave_balances_by_user_and_type(
 
         await validate_user_exists(db, user_id, request_id)
 
-        user_permissions = current_user.permissions
-        if not any(p in user_permissions for p in [Permission.VIEW_LEAVE_BALANCE, Permission.MANAGE_LEAVE]) and user_id != current_user.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to view leave balances for this user"
+        user_permissions = await get_user_permissions(current_user.user_id, db)
+        if not any(p == Permission.VIEW_LEAVE_BALANCE.value or p == Permission.MANAGE_LEAVE.value for p in user_permissions) and user_id != current_user.user_id:
+            query_hierarchy = select(EmployeeHierarchy).where(
+                EmployeeHierarchy.employee_id == user_id,
+                EmployeeHierarchy.supervisor_id == current_user.user_id,
+                EmployeeHierarchy.is_active.is_(True),
+                EmployeeHierarchy.deleted_at.is_(None)
             )
+            result_hierarchy = await db.execute(query_hierarchy)
+            if not result_hierarchy.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to view leave balances for this user"
+                )
 
         cache_key = f"leave_balances:{user_id}:{leave_type or 'all'}"
         cached_balances = await get_cache(cache_key)
         if cached_balances:
+            logger.info(f"Cache hit for leave_balances:{user_id}:{leave_type or 'all'}", extra={"request_id": request_id})
             return [LeaveBalanceOut(**balance) for balance in cached_balances]
 
         query = select(LeaveBalances).where(
@@ -58,7 +69,7 @@ async def get_leave_balances_by_user_and_type(
         )
         if leave_type:
             query = query.where(LeaveBalances.leave_type == leave_type)
-
+        query = query.order_by(LeaveBalances.leave_type.asc())
         result = await db.execute(query)
         balances = result.scalars().all()
 
@@ -67,24 +78,38 @@ async def get_leave_balances_by_user_and_type(
 
         balance_out = []
         for balance in balances:
-            query = select(LeavePolicies).where(
+            query_policy = select(LeavePolicies).where(
                 LeavePolicies.leave_type == balance.leave_type,
                 LeavePolicies.is_active.is_(True),
                 LeavePolicies.deleted_at.is_(None),
                 LeavePolicies.effective_from <= datetime.now(timezone.utc).date(),
                 or_(LeavePolicies.effective_to.is_(None), LeavePolicies.effective_to >= datetime.now(timezone.utc).date())
             )
-            result = await db.execute(query)
-            policy = result.scalar_one_or_none()
+            result_policy = await db.execute(query_policy)
+            policy = result_policy.scalar_one_or_none()
+            
+            query_requests = select(LeaveRequests).where(
+                LeaveRequests.user_id == user_id,
+                LeaveRequests.leave_type == balance.leave_type,
+                LeaveRequests.status.in_([LeaveRequestStatus.UNDER_REVIEW, LeaveRequestStatus.APPROVED]),
+                LeaveRequests.is_active.is_(True),
+                LeaveRequests.deleted_at.is_(None)
+            )
+            result_requests = await db.execute(query_requests)
+            pending_requests = result_requests.scalars().all()
+            pending_days = sum((req.end_date - req.start_date).days + 1 for req in pending_requests if req.start_date and req.end_date)
+            
             balance_data = LeaveBalanceOut.model_validate(balance)
             balance_data.policy_details = LeavePolicyDetails.model_validate(policy) if policy else LeavePolicyDetails()
+            balance_data.pending_days = pending_days
             balance_out.append(balance_data)
 
-        balances_dict = [balance.model_dump() if hasattr(balance, 'model_dump') else balance.dict() for balance in balance_out]
+        balances_dict = [balance.model_dump() for balance in balance_out]
         await set_cache(cache_key, balances_dict, ttl=300)
+        logger.info(f"Cache set for leave_balances:{user_id}:{leave_type or 'all'}", extra={"request_id": request_id})
 
         logger.info(
-            f"Retrieved {len(balance_out)} leave balances for user_id: {user_id}",
+            f"Retrieved {len(balance_out)} leave balances for user_id: {user_id}, leave_type: {leave_type or 'all'}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return balance_out
@@ -93,13 +118,13 @@ async def get_leave_balances_by_user_and_type(
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except (UserNotFoundError, LeaveBalanceNotFoundError) as e:
-        logger.error(f"Error: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except HTTPException as e:
         logger.error(f"Forbidden access to leave balances for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving leave balances for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error retrieving leave balances for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave balances")
 
 async def update_leave_balance(
@@ -120,8 +145,10 @@ async def update_leave_balance(
             raise ValidationError(detail="Invalid user_id")
         if version <= 0:
             raise ValidationError(detail="Invalid version")
-        if abs(balance_change) > 365:
-            raise ValidationError(detail="Balance change must be reasonable (within 365 days)")
+        if leave_type not in LeaveType:
+            raise ValidationError(detail=f"Invalid leave type: {leave_type}")
+        if abs(balance_change) > settings.MAX_BALANCE_CHANGE:
+            raise ValidationError(detail=f"Balance change must be within {settings.MAX_BALANCE_CHANGE} days")
 
         await validate_user_exists(db, user_id, request_id)
         await validate_leave_policy_exists(db, leave_type, request_id)
@@ -139,28 +166,51 @@ async def update_leave_balance(
             raise LeaveBalanceNotFoundError(user_id=user_id, leave_type=leave_type)
 
         if db_balance.version != version:
-            raise ValidationError(detail="Version mismatch, balance has been updated by another user")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Version mismatch, balance has been updated by another user")
 
-        # Check for pending leave requests
-        query = select(LeaveRequests).where(
+        # Validate against leave policy
+        query_policy = select(LeavePolicies).where(
+            LeavePolicies.leave_type == leave_type,
+            LeavePolicies.is_active.is_(True),
+            LeavePolicies.deleted_at.is_(None),
+            LeavePolicies.effective_from <= datetime.now(timezone.utc).date(),
+            or_(LeavePolicies.effective_to.is_(None), LeavePolicies.effective_to >= datetime.now(timezone.utc).date())
+        )
+        result_policy = await db.execute(query_policy)
+        policy = result_policy.scalar_one_or_none()
+        if not policy:
+            raise LeavePolicyNotFoundError(leave_type=leave_type)
+        if balance_change > 0:
+            total_allocated = float(db_balance.allocated_days) + float(db_balance.carried_forward)
+            if total_allocated + balance_change > policy.max_days:
+                raise ValidationError(detail=f"Balance change would exceed policy limit of {policy.max_days} days for {leave_type.value}")
+
+        # Check for pending and approved leave requests
+        query_requests = select(LeaveRequests).where(
             LeaveRequests.user_id == user_id,
             LeaveRequests.leave_type == leave_type,
             LeaveRequests.status.in_([LeaveRequestStatus.UNDER_REVIEW, LeaveRequestStatus.APPROVED]),
             LeaveRequests.is_active.is_(True),
             LeaveRequests.deleted_at.is_(None)
         )
-        result = await db.execute(query)
-        pending_requests = result.scalars().all()
+        result_requests = await db.execute(query_requests)
+        pending_requests = result_requests.scalars().all()
         if pending_requests and balance_change < 0:
             total_pending_days = sum((req.end_date - req.start_date).days + 1 for req in pending_requests if req.start_date and req.end_date)
-            if db_balance.allocated_days + db_balance.carried_forward - db_balance.used_days - total_pending_days + balance_change < 0:
-                raise ValidationError(detail="Balance change would result in negative balance due to pending requests")
+            available_balance = float(db_balance.allocated_days) + float(db_balance.carried_forward) - float(db_balance.used_days)
+            if available_balance - total_pending_days + balance_change < 0:
+                raise ValidationError(detail="Balance change would result in negative balance due to pending or approved requests")
+
+        # Validate no negative allocation if configured
+        if settings.PREVENT_NEGATIVE_ALLOCATION:
+            if float(db_balance.allocated_days) + balance_change < 0 or float(db_balance.carried_forward) + balance_change < 0:
+                raise ValidationError(detail="Balance change would result in negative allocated or carried forward days")
 
         old_values = db_balance.__dict__.copy()
         new_used_days = max(0.0, float(db_balance.used_days) - balance_change)
         available_balance = float(db_balance.allocated_days) + float(db_balance.carried_forward) - new_used_days
         if available_balance < 0:
-            raise ValidationError(detail="Balance change would result in negative balance")
+            raise ValidationError(detail=f"Balance change would result in negative available balance: {available_balance}")
 
         db_balance.used_days = new_used_days
         db_balance.version += 1
@@ -170,8 +220,9 @@ async def update_leave_balance(
         await db.refresh(db_balance)
 
         # Invalidate cache
+        invalidate_user_cache(user_id)
         await invalidate_cache_prefix(f"leave_balances:{user_id}")
-        logger.debug(f"Cache cleared for leave_balances:{user_id}")
+        logger.info(f"Cache invalidated for leave_balances:{user_id} and user_id: {user_id}", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -187,38 +238,61 @@ async def update_leave_balance(
         )
         await create_system_log(log, request, current_user, db, settings, request_id)
 
-        # Notify admins
+        # Notify employee, supervisor, and admins
+        eat_tz = ZoneInfo("Africa/Nairobi")
+        current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
+        recipients = []
+        query_user = select(Users).where(
+            Users.user_id == user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_user = await db.execute(query_user)
+        employee = result_user.scalar_one_or_none()
+        if employee:
+            recipients.append((employee.email, employee.first_name))
+        query_supervisor = select(Users).join(
+            EmployeeHierarchy,
+            and_(
+                EmployeeHierarchy.supervisor_id == Users.user_id,
+                EmployeeHierarchy.is_active.is_(True),
+                EmployeeHierarchy.deleted_at.is_(None)
+            )
+        ).where(
+            EmployeeHierarchy.employee_id == user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_supervisor = await db.execute(query_supervisor)
+        supervisor = result_supervisor.scalar_one_or_none()
+        if supervisor:
+            recipients.append((supervisor.email, supervisor.first_name))
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
-        for admin in admins:
+        recipients.extend([(admin.email, admin.first_name) for admin in admins])
+        for email, first_name in recipients:
             await send_email(
-                to_email=admin.email,
+                to_email=email,
                 subject=f"Leave Balance Updated (ID: {db_balance.balance_id})",
                 body=(
-                    f"Dear {admin.first_name},\n\n"
-                    f"The leave balance (ID: {db_balance.balance_id}) for user ID {user_id} and {leave_type} "
+                    f"Dear {first_name},\n\n"
+                    f"The leave balance (ID: {db_balance.balance_id}) for user ID {user_id} and {leave_type.value.capitalize()} "
                     f"has been updated to version {db_balance.version}.\n"
-                    f"New used days: {db_balance.used_days}.\n"
+                    f"Change: {'Added' if balance_change > 0 else 'Deducted'} {abs(balance_change)} days\n"
+                    f"New Used Days: {db_balance.used_days}\n"
+                    f"Available Balance: {float(db_balance.allocated_days) + float(db_balance.carried_forward) - float(db_balance.used_days)} days\n"
+                    f"Updated At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
                     f"Please review in the Employee Management System.\n\n"
-                    f"Best regards,\nEmployee Management System"
+                    f"Best regards,\nRueEmployee Management System"
                 ),
                 request_id=request_id
             )
 
-        # Fetch policy details
-        query = select(LeavePolicies).where(
-            LeavePolicies.leave_type == db_balance.leave_type,
-            LeavePolicies.is_active.is_(True),
-            LeavePolicies.deleted_at.is_(None),
-            LeavePolicies.effective_from <= datetime.now(timezone.utc).date(),
-            or_(LeavePolicies.effective_to.is_(None), LeavePolicies.effective_to >= datetime.now(timezone.utc).date())
-        )
-        result = await db.execute(query)
-        policy = result.scalar_one_or_none()
         balance_out = LeaveBalanceOut.model_validate(db_balance)
         balance_out.policy_details = LeavePolicyDetails.model_validate(policy) if policy else LeavePolicyDetails()
+        balance_out.pending_days = total_pending_days if pending_requests else 0
 
         logger.info(
-            f"Leave balance updated, balance_id: {db_balance.balance_id}, user_id: {user_id}, leave_type: {leave_type}",
+            f"Leave balance updated, balance_id: {db_balance.balance_id}, user_id: {user_id}, leave_type: {leave_type}, change: {balance_change}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return balance_out
@@ -227,8 +301,11 @@ async def update_leave_balance(
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except (UserNotFoundError, LeavePolicyNotFoundError, LeaveBalanceNotFoundError) as e:
-        logger.error(f"Error: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Conflict error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}", extra={"request_id": request_id})
+        raise
     except Exception as e:
-        logger.error(f"Error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating leave balance")

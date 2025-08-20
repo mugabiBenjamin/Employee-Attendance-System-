@@ -6,15 +6,15 @@ from datetime import datetime, timezone
 from app.models.users import Users
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.core.security import get_password_hash
-from app.core.enums import SystemAction, Permission
+from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.exceptions import ValidationError, DatabaseError, UserNotFoundError, ResourceConflictError, BusinessLogicError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions, invalidate_user_cache
 from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists
 from app.core.config import Settings, get_settings
-from app.core.database import get_db, get_cache, set_cache
+from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix, validate_enum_value
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,10 @@ async def create_user(
 ) -> UserOut:
     """Create a new user with validation and logging."""
     try:
+        # Validate employee_type
+        if user.employee_type and not await validate_enum_value(EmployeeType, user.employee_type):
+            raise ValidationError(detail=f"Invalid employee type: {user.employee_type}")
+
         # Check for existing email
         query = select(Users).where(
             Users.email == user.email,
@@ -66,6 +70,11 @@ async def create_user(
         db.add(db_user)
         await db.commit()
         await db.refresh(db_user)
+
+        # Invalidate cache for users list
+        await invalidate_cache_prefix("users")
+        invalidate_user_cache(db_user.user_id)
+        logger.info(f"Cache invalidated for user_id: {db_user.user_id} and users list")
 
         # Log action
         log = SystemLogCreate(
@@ -117,6 +126,7 @@ async def read_user(
         cache_key = f"user:{user_id}"
         cached_user = await get_cache(cache_key)
         if cached_user:
+            logger.info(f"Cache hit for user_id: {user_id}", extra={"request_id": request_id})
             return UserOut(**cached_user)
 
         query = select(Users).where(
@@ -132,6 +142,7 @@ async def read_user(
 
         user_dict = UserOut.model_validate(user).model_dump()
         await set_cache(cache_key, user_dict, ttl=300)
+        logger.info(f"Cache set for user_id: {user_id}", extra={"request_id": request_id})
 
         logger.info(
             f"Retrieved user, user_id: {user_id}",
@@ -169,6 +180,7 @@ async def read_users(
         cache_key = f"users:{skip}:{limit}"
         cached_users = await get_cache(cache_key)
         if cached_users:
+            logger.info(f"Cache hit for users list, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
             return [UserOut(**user) for user in cached_users]
 
         query = select(Users).where(
@@ -180,6 +192,7 @@ async def read_users(
 
         users_dict = [UserOut.model_validate(user).model_dump() for user in users]
         await set_cache(cache_key, users_dict, ttl=300)
+        logger.info(f"Cache set for users list, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
 
         logger.info(
             f"Retrieved {len(users)} users",
@@ -240,6 +253,10 @@ async def update_user(
         if "manager_id" in update_data and update_data["manager_id"] is not None:
             await validate_user_exists(update_data["manager_id"], db)
 
+        if "employee_type" in update_data and update_data["employee_type"]:
+            if not await validate_enum_value(EmployeeType, update_data["employee_type"]):
+                raise ValidationError(detail=f"Invalid employee type: {update_data['employee_type']}")
+
         old_values = db_user.__dict__.copy()
 
         for key, value in update_data.items():
@@ -254,6 +271,12 @@ async def update_user(
         await db.commit()
         await db.refresh(db_user)
 
+        # Invalidate cache for user and users list
+        await invalidate_cache_prefix("users")
+        invalidate_user_cache(user_id)
+        logger.info(f"Cache invalidated for user_id: {user_id} and users list")
+
+        # Log action
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE,
@@ -327,6 +350,12 @@ async def delete_user(
         db.add(db_user)
         await db.commit()
 
+        # Invalidate cache for user and users list
+        await invalidate_cache_prefix("users")
+        invalidate_user_cache(user_id)
+        logger.info(f"Cache invalidated for user_id: {user_id} and users list")
+
+        # Log action
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE,
