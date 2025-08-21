@@ -34,17 +34,12 @@ formatter = jsonlogger.JsonFormatter(
 )
 log_handler.setFormatter(formatter)
 logger.handlers = [log_handler]
-try:
-    logger.setLevel(getattr(logging, settings.LOG_LEVEL))
-except AttributeError:
-    logger.error(f"Invalid LOG_LEVEL: {settings.LOG_LEVEL}, defaulting to INFO")
-    logger.setLevel(logging.INFO)
+logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
 
 # -----------------------
 # Rate Limiter Setup
 # -----------------------
 def get_client_ip(request: FastAPI.Request) -> str:
-    """Get client IP, preferring X-Forwarded-For for proxy environments."""
     x_forwarded_for = request.headers.get("X-Forwarded-For")
     if x_forwarded_for:
         return x_forwarded_for.split(",")[0].strip()
@@ -58,18 +53,24 @@ limiter = Limiter(key_func=get_client_ip)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(
-        f"Application startup: initializing database, Redis, and views... Version: {settings.APP_VERSION}, Environment: {settings.ENVIRONMENT}",
+        f"Application startup: initializing database, Redis, and views... "
+        f"Version: {settings.APP_VERSION}, Environment: {settings.ENVIRONMENT}",
         extra={"request_id": None}
     )
     try:
-        await initialize_engine_and_session()  # Initialize DB engine, session factory, and Redis
-        await init_db()                       # Create enums, tables, and materialized views
-        await start_background_refresh()      # Start background refresh for materialized views
+        await initialize_engine_and_session()
+        await init_db()
+        await start_background_refresh()
+
         try:
-            celery_app.setup_periodic_tasks()  # Configure Celery periodic tasks
+            celery_app.setup_periodic_tasks()
         except Exception as e:
-            logger.error(f"Failed to setup Celery periodic tasks: {str(e)}", extra={"request_id": None})
+            logger.error(
+                f"Failed to setup Celery periodic tasks: {str(e)}",
+                extra={"request_id": None}
+            )
             raise
+
         logger.info("Startup complete.", extra={"request_id": None})
         yield
     except Exception as e:
@@ -77,10 +78,11 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         logger.info(
-            f"Application shutdown... Version: {settings.APP_VERSION}, Environment: {settings.ENVIRONMENT}",
+            f"Application shutdown... Version: {settings.APP_VERSION}, "
+            f"Environment: {settings.ENVIRONMENT}",
             extra={"request_id": None}
         )
-        await shutdown()  # Close DB engine and Redis connections
+        await shutdown()
         logger.info("Shutdown complete.", extra={"request_id": None})
 
 # -----------------------
@@ -96,12 +98,10 @@ app = FastAPI(
 # -----------------------
 # Middleware Configuration
 # -----------------------
-# Rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -110,7 +110,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# System action logging
 setup_middleware(app)
 
 # -----------------------
@@ -130,15 +129,16 @@ async def root():
 # -----------------------
 @app.get("/health", status_code=status.HTTP_200_OK)
 async def health_check(db: AsyncSession = Depends(get_db)) -> dict:
-    """Check the health of the application and database connectivity."""
     try:
-        await db.execute(select(1))  # Simple query to test DB connection
+        await db.execute(select(1))
         return {
             "status": "healthy",
             "app_name": settings.APP_NAME,
             "version": settings.APP_VERSION,
             "environment": settings.ENVIRONMENT
         }
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}", extra={"request_id": None})
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database connection failed")
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failed"
+        )

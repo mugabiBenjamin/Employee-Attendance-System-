@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.core.enums import (
     AttendanceStatus, LeaveRequestStatus, LeaveType,
     CorrectionStatus, OvertimeStatus, EmployeeType, ShiftType, SystemAction,
-    RoleName, Permission, PermissionGroup
+    RoleName, PermissionGroup
 )
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
