@@ -19,16 +19,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def check_cyclic_hierarchy(db: AsyncSession, employee_id: int, manager_id: int, request_id: Optional[str] = None) -> None:
+async def check_cyclic_hierarchy(db: AsyncSession, employee_id: int, supervisor_id: int, request_id: Optional[str] = None) -> None:
     """Check for cyclic hierarchy to prevent circular reporting structures."""
     try:
-        if employee_id <= 0 or manager_id <= 0:
+        if employee_id <= 0 or supervisor_id <= 0:
             raise ValidationError(detail="Invalid employee or manager ID")
-        if employee_id == manager_id:
+        if employee_id == supervisor_id:
             raise EmployeeHierarchyError(detail="Employee cannot be their own manager")
         
         seen = {employee_id}
-        current_id = manager_id
+        current_id = supervisor_id
         while current_id:
             query = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == current_id,
@@ -39,10 +39,10 @@ async def check_cyclic_hierarchy(db: AsyncSession, employee_id: int, manager_id:
             hierarchy = result.scalar_one_or_none()
             if not hierarchy:
                 break
-            if hierarchy.manager_id in seen:
+            if hierarchy.supervisor_id in seen:
                 raise EmployeeHierarchyError(detail="Cyclic hierarchy detected")
             seen.add(current_id)
-            current_id = hierarchy.manager_id
+            current_id = hierarchy.supervisor_id
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
@@ -65,11 +65,11 @@ async def create_employee_hierarchy(
     """Create a new employee-manager relationship with validation, logging, and cache clearing."""
     try:
         # Validate employee and manager
-        if hierarchy.employee_id <= 0 or hierarchy.manager_id <= 0:
+        if hierarchy.employee_id <= 0 or hierarchy.supervisor_id <= 0:
             raise ValidationError(detail="Invalid employee or manager ID")
         await validate_user_exists(db, hierarchy.employee_id, request_id)
-        await validate_user_exists(db, hierarchy.manager_id, request_id)
-        if hierarchy.employee_id == hierarchy.manager_id:
+        await validate_user_exists(db, hierarchy.supervisor_id, request_id)
+        if hierarchy.employee_id == hierarchy.supervisor_id:
             raise EmployeeHierarchyError(detail="Employee cannot be their own manager")
 
         # Check for existing active hierarchy
@@ -83,7 +83,7 @@ async def create_employee_hierarchy(
             raise EmployeeHierarchyError(detail="Employee already has an active manager assigned")
 
         # Check for cyclic hierarchy
-        await check_cyclic_hierarchy(db, hierarchy.employee_id, hierarchy.manager_id, request_id)
+        await check_cyclic_hierarchy(db, hierarchy.employee_id, hierarchy.supervisor_id, request_id)
 
         db_hierarchy = EmployeeHierarchy(
             **hierarchy.model_dump(),
@@ -99,11 +99,11 @@ async def create_employee_hierarchy(
         # Invalidate caches
         await invalidate_cache_prefix("employee_hierarchy")
         await invalidate_cache_prefix(f"user:{hierarchy.employee_id}")
-        await invalidate_cache_prefix(f"user:{hierarchy.manager_id}")
+        await invalidate_cache_prefix(f"user:{hierarchy.supervisor_id}")
         invalidate_user_cache(hierarchy.employee_id)
-        invalidate_user_cache(hierarchy.manager_id)
+        invalidate_user_cache(hierarchy.supervisor_id)
         logger.info(
-            f"Cache invalidated for employee_hierarchy, employee_id:{hierarchy.employee_id}, manager_id:{hierarchy.manager_id}",
+            f"Cache invalidated for employee_hierarchy, employee_id:{hierarchy.employee_id}, supervisor_id:{hierarchy.supervisor_id}",
             extra={"request_id": request_id}
         )
 
@@ -122,7 +122,7 @@ async def create_employee_hierarchy(
         await create_system_log(log, request, current_user, db, request_id)
 
         logger.info(
-            f"Employee hierarchy created, hierarchy_id: {db_hierarchy.hierarchy_id}, employee_id: {hierarchy.employee_id}, manager_id: {hierarchy.manager_id}",
+            f"Employee hierarchy created, hierarchy_id: {db_hierarchy.hierarchy_id}, employee_id: {hierarchy.employee_id}, supervisor_id: {hierarchy.supervisor_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return EmployeeHierarchyOut.model_validate(db_hierarchy)
@@ -166,7 +166,7 @@ async def get_employee_hierarchy(
         if not hierarchy:
             raise EmployeeHierarchyError(detail=f"Employee hierarchy with ID {hierarchy_id} not found")
 
-        if not any(p == Permission.VIEW_HIERARCHY or p == Permission.MANAGE_EMPLOYEES for p in current_user.permissions) and hierarchy.employee_id != current_user.user_id and hierarchy.manager_id != current_user.user_id:
+        if not any(p == Permission.VIEW_HIERARCHY or p == Permission.MANAGE_EMPLOYEES for p in current_user.permissions) and hierarchy.employee_id != current_user.user_id and hierarchy.supervisor_id != current_user.user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to view this hierarchy"
@@ -177,7 +177,7 @@ async def get_employee_hierarchy(
         logger.info(f"Cache set for hierarchy_id: {hierarchy_id}", extra={"request_id": request_id})
 
         logger.info(
-            f"Retrieved employee hierarchy, hierarchy_id: {hierarchy_id}, employee_id: {hierarchy.employee_id}, manager_id: {hierarchy.manager_id}",
+            f"Retrieved employee hierarchy, hierarchy_id: {hierarchy_id}, employee_id: {hierarchy.employee_id}, supervisor_id: {hierarchy.supervisor_id}",
             extra={"request_id": request_id}
         )
         return EmployeeHierarchyOut.model_validate(hierarchy)
@@ -198,7 +198,7 @@ async def get_employee_hierarchy(
 async def list_employee_hierarchies(
     employee_id: Optional[int] = None,
     department_id: Optional[int] = None,
-    manager_id: Optional[int] = None,
+    supervisor_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
     current_user: Users = Depends(get_current_user),
@@ -220,15 +220,15 @@ async def list_employee_hierarchies(
             if target_employee_id <= 0:
                 raise ValidationError(detail="Invalid employee ID")
             await validate_user_exists(db, target_employee_id, request_id)
-        if manager_id:
-            if manager_id <= 0:
+        if supervisor_id:
+            if supervisor_id <= 0:
                 raise ValidationError(detail="Invalid manager ID")
-            await validate_user_exists(db, manager_id, request_id)
+            await validate_user_exists(db, supervisor_id, request_id)
 
-        cache_key = f"employee_hierarchies:{target_employee_id or 'all'}:{department_id or 'all'}:{manager_id or 'all'}:{skip}:{limit or settings.DEFAULT_PAGE_SIZE}"
+        cache_key = f"employee_hierarchies:{target_employee_id or 'all'}:{department_id or 'all'}:{supervisor_id or 'all'}:{skip}:{limit or settings.DEFAULT_PAGE_SIZE}"
         cached_hierarchies = await get_cache(cache_key)
         if cached_hierarchies:
-            logger.info(f"Cache hit for employee_hierarchies, employee_id: {target_employee_id or 'all'}, department_id: {department_id or 'all'}, manager_id: {manager_id or 'all'}", extra={"request_id": request_id})
+            logger.info(f"Cache hit for employee_hierarchies, employee_id: {target_employee_id or 'all'}, department_id: {department_id or 'all'}, supervisor_id: {supervisor_id or 'all'}", extra={"request_id": request_id})
             return [EmployeeHierarchyOut(**h) for h in cached_hierarchies]
 
         query = select(EmployeeHierarchy).where(
@@ -238,7 +238,7 @@ async def list_employee_hierarchies(
         if target_employee_id:
             query = query.where(
                 (EmployeeHierarchy.employee_id == target_employee_id) |
-                (EmployeeHierarchy.manager_id == target_employee_id)
+                (EmployeeHierarchy.supervisor_id == target_employee_id)
             )
         if department_id:
             if department_id <= 0:
@@ -251,8 +251,8 @@ async def list_employee_hierarchies(
                 UserDepartments.is_active.is_(True),
                 UserDepartments.deleted_at.is_(None)
             )
-        if manager_id:
-            query = query.where(EmployeeHierarchy.manager_id == manager_id)
+        if supervisor_id:
+            query = query.where(EmployeeHierarchy.supervisor_id == supervisor_id)
 
         limit = limit or settings.DEFAULT_PAGE_SIZE
         query = query.offset(skip).limit(limit)
@@ -261,10 +261,10 @@ async def list_employee_hierarchies(
 
         hierarchies_dict = [EmployeeHierarchyOut.model_validate(h).model_dump() for h in hierarchies]
         await set_cache(cache_key, hierarchies_dict, ttl=300)
-        logger.info(f"Cache set for employee_hierarchies, employee_id: {target_employee_id or 'all'}, department_id: {department_id or 'all'}, manager_id: {manager_id or 'all'}", extra={"request_id": request_id})
+        logger.info(f"Cache set for employee_hierarchies, employee_id: {target_employee_id or 'all'}, department_id: {department_id or 'all'}, supervisor_id: {supervisor_id or 'all'}", extra={"request_id": request_id})
 
         logger.info(
-            f"Retrieved {len(hierarchies)} employee hierarchies for employee_id: {target_employee_id or 'all'}, department_id: {department_id or 'all'}, manager_id: {manager_id or 'all'}",
+            f"Retrieved {len(hierarchies)} employee hierarchies for employee_id: {target_employee_id or 'all'}, department_id: {department_id or 'all'}, supervisor_id: {supervisor_id or 'all'}",
             extra={"request_id": request_id}
         )
         return [EmployeeHierarchyOut.model_validate(hierarchy) for hierarchy in hierarchies]
@@ -310,14 +310,14 @@ async def update_employee_hierarchy(
             raise ValidationError(detail="No fields provided for update")
 
         old_employee_id = db_hierarchy.employee_id
-        old_manager_id = db_hierarchy.manager_id
-        if "manager_id" in update_data:
-            if update_data["manager_id"] <= 0:
+        old_supervisor_id = db_hierarchy.supervisor_id
+        if "supervisor_id" in update_data:
+            if update_data["supervisor_id"] <= 0:
                 raise ValidationError(detail="Invalid manager ID")
-            await validate_user_exists(db, update_data["manager_id"], request_id)
-            if update_data["manager_id"] == db_hierarchy.employee_id:
+            await validate_user_exists(db, update_data["supervisor_id"], request_id)
+            if update_data["supervisor_id"] == db_hierarchy.employee_id:
                 raise EmployeeHierarchyError(detail="Employee cannot be their own manager")
-            await check_cyclic_hierarchy(db, db_hierarchy.employee_id, update_data["manager_id"], request_id)
+            await check_cyclic_hierarchy(db, db_hierarchy.employee_id, update_data["supervisor_id"], request_id)
 
         old_values = db_hierarchy.__dict__.copy()
         for key, value in update_data.items():
@@ -331,15 +331,15 @@ async def update_employee_hierarchy(
         # Invalidate caches
         await invalidate_cache_prefix("employee_hierarchy")
         await invalidate_cache_prefix(f"user:{db_hierarchy.employee_id}")
-        await invalidate_cache_prefix(f"user:{db_hierarchy.manager_id}")
+        await invalidate_cache_prefix(f"user:{db_hierarchy.supervisor_id}")
         invalidate_user_cache(db_hierarchy.employee_id)
-        invalidate_user_cache(db_hierarchy.manager_id)
+        invalidate_user_cache(db_hierarchy.supervisor_id)
         if old_employee_id != db_hierarchy.employee_id:
             invalidate_user_cache(old_employee_id)
-        if old_manager_id != db_hierarchy.manager_id:
-            invalidate_user_cache(old_manager_id)
+        if old_supervisor_id != db_hierarchy.supervisor_id:
+            invalidate_user_cache(old_supervisor_id)
         logger.info(
-            f"Cache invalidated for employee_hierarchy, employee_id:{db_hierarchy.employee_id},{old_employee_id}, manager_id:{db_hierarchy.manager_id},{old_manager_id}",
+            f"Cache invalidated for employee_hierarchy, employee_id:{db_hierarchy.employee_id},{old_employee_id}, supervisor_id:{db_hierarchy.supervisor_id},{old_supervisor_id}",
             extra={"request_id": request_id}
         )
 
@@ -358,7 +358,7 @@ async def update_employee_hierarchy(
         await create_system_log(log, request, current_user, db, request_id)
 
         logger.info(
-            f"Employee hierarchy updated, hierarchy_id: {hierarchy_id}, employee_id: {db_hierarchy.employee_id}, manager_id: {db_hierarchy.manager_id}",
+            f"Employee hierarchy updated, hierarchy_id: {hierarchy_id}, employee_id: {db_hierarchy.employee_id}, supervisor_id: {db_hierarchy.supervisor_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return EmployeeHierarchyOut.model_validate(db_hierarchy)
@@ -400,7 +400,7 @@ async def delete_employee_hierarchy(
 
         # Check if the employee is a manager of others
         query = select(EmployeeHierarchy).where(
-            EmployeeHierarchy.manager_id == db_hierarchy.employee_id,
+            EmployeeHierarchy.supervisor_id == db_hierarchy.employee_id,
             EmployeeHierarchy.is_active.is_(True),
             EmployeeHierarchy.deleted_at.is_(None)
         )
@@ -417,11 +417,11 @@ async def delete_employee_hierarchy(
         # Invalidate caches
         await invalidate_cache_prefix("employee_hierarchy")
         await invalidate_cache_prefix(f"user:{db_hierarchy.employee_id}")
-        await invalidate_cache_prefix(f"user:{db_hierarchy.manager_id}")
+        await invalidate_cache_prefix(f"user:{db_hierarchy.supervisor_id}")
         invalidate_user_cache(db_hierarchy.employee_id)
-        invalidate_user_cache(db_hierarchy.manager_id)
+        invalidate_user_cache(db_hierarchy.supervisor_id)
         logger.info(
-            f"Cache invalidated for employee_hierarchy, employee_id:{db_hierarchy.employee_id}, manager_id:{db_hierarchy.manager_id}",
+            f"Cache invalidated for employee_hierarchy, employee_id:{db_hierarchy.employee_id}, supervisor_id:{db_hierarchy.supervisor_id}",
             extra={"request_id": request_id}
         )
 
@@ -440,7 +440,7 @@ async def delete_employee_hierarchy(
         await create_system_log(log, request, current_user, db, request_id)
 
         logger.info(
-            f"Employee hierarchy soft deleted, hierarchy_id: {hierarchy_id}, employee_id: {db_hierarchy.employee_id}, manager_id: {db_hierarchy.manager_id}",
+            f"Employee hierarchy soft deleted, hierarchy_id: {hierarchy_id}, employee_id: {db_hierarchy.employee_id}, supervisor_id: {db_hierarchy.supervisor_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
 

@@ -19,9 +19,9 @@ class EmployeeHierarchy(Base):
     __table_args__ = (
         CheckConstraint("level >= 1 AND level <= 10", name="level_valid"),
         CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="hierarchy_dates_valid"),
-        CheckConstraint("employee_id != manager_id", name="no_self_reporting"),
+        CheckConstraint("employee_id != supervisor_id", name="no_self_reporting"),
         CheckConstraint("effective_from <= current_date", name="effective_from_valid"),
         CheckConstraint("deleted_at IS NULL OR is_active = FALSE", name="soft_delete_check"),
         Index('idx_employee_hierarchy_employee_id', 'employee_id'),
-        Index('idx_employee_hierarchy_manager_id', 'manager_id'),
+        Index('idx_employee_hierarchy_supervisor_id', 'supervisor_id'),
     )

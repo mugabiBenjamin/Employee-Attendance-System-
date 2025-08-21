@@ -23,7 +23,7 @@ class Users(Base):
     hire_date = Column(Date, nullable=False)
     employee_type = Column(ENUM_CLASSES['employee_type'], nullable=False, default=EmployeeType.FULL_TIME)
     salary = Column(DECIMAL(12, 2), nullable=True)
-    manager_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    supervisor_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     department_id = Column(Integer, ForeignKey("departments.department_id", ondelete="SET NULL"), nullable=True)
     version = Column(Integer, nullable=False, default=1)
     is_active = Column(Boolean, default=True)
@@ -50,7 +50,7 @@ class Users(Base):
         UniqueConstraint('email', name='unique_email'),
         Index('idx_users_employee_id', 'employee_id'),
         Index('idx_users_email', 'email'),
-        Index('idx_users_manager_id', 'manager_id'),
+        Index('idx_users_supervisor_id', 'supervisor_id'),
         Index('idx_users_department_id', 'department_id'),
         Index('idx_users_employee_type', 'employee_type'),
     )

@@ -43,9 +43,9 @@ async def create_user(
         if result.scalar_one_or_none():
             raise ResourceConflictError(detail="Email already registered")
 
-        # Validate manager_id if provided
-        if user.manager_id:
-            await validate_user_exists(user.manager_id, db)
+        # Validate supervisor_id if provided
+        if user.supervisor_id:
+            await validate_user_exists(user.supervisor_id, db)
 
         # Validate required fields
         if not user.email or not user.password:
@@ -62,7 +62,7 @@ async def create_user(
             hire_date=user.hire_date,
             employee_type=user.employee_type,
             salary=user.salary,
-            manager_id=user.manager_id,
+            supervisor_id=user.supervisor_id,
             is_active=user.is_active,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
@@ -250,8 +250,8 @@ async def update_user(
             if result.scalar_one_or_none():
                 raise ResourceConflictError(detail="Email already registered")
 
-        if "manager_id" in update_data and update_data["manager_id"] is not None:
-            await validate_user_exists(update_data["manager_id"], db)
+        if "supervisor_id" in update_data and update_data["supervisor_id"] is not None:
+            await validate_user_exists(update_data["supervisor_id"], db)
 
         if "employee_type" in update_data and update_data["employee_type"]:
             if not await validate_enum_value(EmployeeType, update_data["employee_type"]):
@@ -337,7 +337,7 @@ async def delete_user(
             raise UserNotFoundError(user_id=user_id)
 
         query = select(Users).where(
-            Users.manager_id == user_id,
+            Users.supervisor_id == user_id,
             Users.is_active.is_(True),
             Users.deleted_at.is_(None)
         )

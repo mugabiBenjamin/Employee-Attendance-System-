@@ -14,7 +14,7 @@ class UserCreate(BaseModel):
     hire_date: date = Field(..., description="User hire date")
     employee_type: str = Field('full_time', description="User employee type")
     salary: Optional[float] = Field(None, ge=0, description="User salary")
-    manager_id: Optional[int] = Field(None, description="User manager ID")
+    supervisor_id: Optional[int] = Field(None, description="User manager ID")
     is_active: bool = Field(True, description="User active status")
 
     @field_validator('hire_date')
@@ -39,7 +39,7 @@ class UserUpdate(BaseModel):
     job_title: Optional[str] = Field(None, max_length=100, description="User job title")
     employee_type: Optional[str] = Field(None, description="User employee type")
     salary: Optional[float] = Field(None, ge=0, description="User salary")
-    manager_id: Optional[int] = Field(None, description="User manager ID")
+    supervisor_id: Optional[int] = Field(None, description="User manager ID")
     is_active: Optional[bool] = Field(None, description="User active status")
     hire_date: Optional[date] = Field(None, description="User hire date")
 
@@ -67,7 +67,7 @@ class UserOut(BaseModel):
     hire_date: date = Field(..., description="User hire date")
     employee_type: str = Field(..., description="User employee type")
     salary: Optional[float] = Field(None, description="User salary")
-    manager_id: Optional[int] = Field(None, description="User manager ID")
+    supervisor_id: Optional[int] = Field(None, description="User manager ID")
     is_active: bool = Field(..., description="User active status")
     employee_id: str = Field(..., description="User employee ID")
     last_login: Optional[datetime] = Field(None, description="User last login timestamp")

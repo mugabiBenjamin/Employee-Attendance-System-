@@ -39,9 +39,9 @@ async def create_department(
         if result.scalar_one_or_none():
             raise ValidationError(detail="Department name already exists")
 
-        # Validate manager_id if provided
-        if department.manager_id:
-            await validate_user_exists(db, department.manager_id, request_id)
+        # Validate supervisor_id if provided
+        if department.supervisor_id:
+            await validate_user_exists(db, department.supervisor_id, request_id)
 
         db_department = Departments(
             **department.model_dump(),
@@ -54,9 +54,9 @@ async def create_department(
 
         # Invalidate caches
         await invalidate_cache_prefix("department")
-        if department.manager_id:
-            invalidate_user_cache(department.manager_id)
-        logger.info(f"Cache invalidated for department and user:{department.manager_id}", extra={"request_id": request_id})
+        if department.supervisor_id:
+            invalidate_user_cache(department.supervisor_id)
+        logger.info(f"Cache invalidated for department and user:{department.supervisor_id}", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -221,10 +221,10 @@ async def update_department(
             if result.scalar_one_or_none():
                 raise ValidationError(detail="Department name already exists")
 
-        # Validate manager_id if updated
-        old_manager_id = db_department.manager_id
-        if "manager_id" in update_data and update_data["manager_id"]:
-            await validate_user_exists(db, update_data["manager_id"], request_id)
+        # Validate supervisor_id if updated
+        old_supervisor_id = db_department.supervisor_id
+        if "supervisor_id" in update_data and update_data["supervisor_id"]:
+            await validate_user_exists(db, update_data["supervisor_id"], request_id)
 
         old_values = db_department.__dict__.copy()
         for key, value in update_data.items():
@@ -237,11 +237,11 @@ async def update_department(
 
         # Invalidate caches
         await invalidate_cache_prefix("department")
-        if old_manager_id:
-            invalidate_user_cache(old_manager_id)
-        if db_department.manager_id and db_department.manager_id != old_manager_id:
-            invalidate_user_cache(db_department.manager_id)
-        logger.info(f"Cache invalidated for department and users:{old_manager_id},{db_department.manager_id}", extra={"request_id": request_id})
+        if old_supervisor_id:
+            invalidate_user_cache(old_supervisor_id)
+        if db_department.supervisor_id and db_department.supervisor_id != old_supervisor_id:
+            invalidate_user_cache(db_department.supervisor_id)
+        logger.info(f"Cache invalidated for department and users:{old_supervisor_id},{db_department.supervisor_id}", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -310,9 +310,9 @@ async def delete_department(
 
         # Invalidate caches
         await invalidate_cache_prefix("department")
-        if db_department.manager_id:
-            invalidate_user_cache(db_department.manager_id)
-        logger.info(f"Cache invalidated for department and user:{db_department.manager_id}", extra={"request_id": request_id})
+        if db_department.supervisor_id:
+            invalidate_user_cache(db_department.supervisor_id)
+        logger.info(f"Cache invalidated for department and user:{db_department.supervisor_id}", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(

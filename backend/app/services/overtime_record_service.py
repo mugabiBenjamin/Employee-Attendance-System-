@@ -404,7 +404,7 @@ async def get_team_overtime_records(
         logger.info(f"Cache set for overtime_records_team:{current_user.user_id}", extra={"request_id": request_id})
 
         logger.info(
-            f"Retrieved {len(overtime_records)} overtime records for manager_id: {current_user.user_id}",
+            f"Retrieved {len(overtime_records)} overtime records for supervisor_id: {current_user.user_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
         return [OvertimeRecordOut.model_validate(record) for record in overtime_records]
@@ -413,7 +413,7 @@ async def get_team_overtime_records(
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error retrieving team overtime records for manager_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error retrieving team overtime records for supervisor_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving team overtime records")
 
 async def update_overtime_record(

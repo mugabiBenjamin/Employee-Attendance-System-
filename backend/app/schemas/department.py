@@ -7,7 +7,7 @@ from app.core.exceptions import ValidationError
 class DepartmentBase(BaseModel):
     department_name: str = Field(..., max_length=100, description="Name of the department")
     description: Optional[str] = Field(None, description="Description of the department")
-    manager_id: Optional[int] = Field(None, description="ID of the user managing the department")
+    supervisor_id: Optional[int] = Field(None, description="ID of the user managing the department")
     budget: Optional[Decimal] = Field(None, ge=0, description="Department budget")
     location: Optional[str] = Field(None, max_length=255, description="Department location")
     is_active: bool = Field(True, description="Whether the department is active")
@@ -19,9 +19,9 @@ class DepartmentBase(BaseModel):
             raise ValidationError(detail="Department name cannot be empty")
         return value
 
-    @field_validator('manager_id')
+    @field_validator('supervisor_id')
     @classmethod
-    def validate_manager_id(cls, value: Optional[int]) -> Optional[int]:
+    def validate_supervisor_id(cls, value: Optional[int]) -> Optional[int]:
         if value is not None and value <= 0:
             raise ValidationError(detail="Invalid manager ID")
         return value
@@ -32,7 +32,7 @@ class DepartmentCreate(DepartmentBase):
 class DepartmentUpdate(BaseModel):
     department_name: Optional[str] = Field(None, max_length=100, description="Updated name of the department")
     description: Optional[str] = Field(None, description="Updated description of the department")
-    manager_id: Optional[int] = Field(None, description="Updated ID of the user managing the department")
+    supervisor_id: Optional[int] = Field(None, description="Updated ID of the user managing the department")
     budget: Optional[Decimal] = Field(None, ge=0, description="Updated department budget")
     location: Optional[str] = Field(None, max_length=255, description="Updated department location")
     is_active: Optional[bool] = Field(None, description="Updated active status of the department")
@@ -44,9 +44,9 @@ class DepartmentUpdate(BaseModel):
             raise ValidationError(detail="Department name cannot be empty")
         return value
 
-    @field_validator('manager_id')
+    @field_validator('supervisor_id')
     @classmethod
-    def validate_manager_id(cls, value: Optional[int]) -> Optional[int]:
+    def validate_supervisor_id(cls, value: Optional[int]) -> Optional[int]:
         if value is not None and value <= 0:
             raise ValidationError(detail="Invalid manager ID")
         return value
