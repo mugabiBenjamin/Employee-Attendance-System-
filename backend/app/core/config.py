@@ -101,6 +101,24 @@ class Settings(BaseSettings):
 
     MATERIALIZED_VIEW_REFRESH_INTERVAL: int = Field(default=3600, env="MATERIALIZED_VIEW_REFRESH_INTERVAL")
 
+    REQUIRE_ATTENDANCE_LOCATION: bool = Field(default=False, env="REQUIRE_ATTENDANCE_LOCATION")
+    CHECK_HOLIDAYS_ON_ATTENDANCE: bool = Field(default=True, env="CHECK_HOLIDAYS_ON_ATTENDANCE")
+    NOTIFY_ON_ATTENDANCE: bool = Field(default=True, env="NOTIFY_ON_ATTENDANCE")
+    MINIMUM_SHIFT_DURATION: float = Field(default=4.0, env="MINIMUM_SHIFT_DURATION")
+    MAX_EMERGENCY_CONTACTS: int = Field(default=3, env="MAX_EMERGENCY_CONTACTS")
+    MAX_WORKFLOW_LEVELS: int = Field(default=5, env="MAX_WORKFLOW_LEVELS")
+    PREVENT_DELETE_APPROVED_WORKFLOW: bool = Field(default=True, env="PREVENT_DELETE_APPROVED_WORKFLOW")
+    MAX_BALANCE_CHANGE: float = Field(default=30.0, env="MAX_BALANCE_CHANGE")
+    PREVENT_NEGATIVE_ALLOCATION: bool = Field(default=True, env="PREVENT_NEGATIVE_ALLOCATION")
+    CHECK_HOLIDAYS_ON_LEAVE: bool = Field(default=True, env="CHECK_HOLIDAYS_ON_LEAVE")
+    PREVENT_DELETE_APPROVED_LEAVE: bool = Field(default=True, env="PREVENT_DELETE_APPROVED_LEAVE")
+    PREVENT_DELETE_APPROVED_OVERTIME: bool = Field(default=True, env="PREVENT_DELETE_APPROVED_OVERTIME")
+    CHECK_HOLIDAYS_ON_OVERTIME: bool = Field(default=True, env="CHECK_HOLIDAYS_ON_OVERTIME")
+    DEFAULT_OVERTIME_RATE: float = Field(default=1.5, env="DEFAULT_OVERTIME_RATE")
+    REQUIRE_ACTIVE_SHIFT_ASSIGNMENT: bool = Field(default=True, env="REQUIRE_ACTIVE_SHIFT_ASSIGNMENT")
+    MAX_TIME_CORRECTION_HOURS: float = Field(default=12.0, env="MAX_TIME_CORRECTION_HOURS")
+    PREVENT_INVALID_TIME_CORRECTIONS: bool = Field(default=True, env="PREVENT_INVALID_TIME_CORRECTIONS")
+
     # Static lists for validation
     ATTENDANCE_STATUSES: List[str] = Field(default_factory=lambda: [e.value for e in AttendanceStatus])
     LEAVE_TYPES: List[str] = Field(default_factory=lambda: [e.value for e in LeaveType])
