@@ -20,7 +20,8 @@ from app.api.v1.endpoints import (
     leave_balances,
     leave_policies,
     overtime_records,
-    time_corrections
+    time_corrections,
+    enums,
 )
 
 api_router = APIRouter()
@@ -45,3 +46,4 @@ api_router.include_router(leave_balances.router)
 api_router.include_router(leave_policies.router)
 api_router.include_router(overtime_records.router)
 api_router.include_router(time_corrections.router)
+api_router.include_router(enums.router)
