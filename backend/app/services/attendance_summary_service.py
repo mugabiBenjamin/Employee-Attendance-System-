@@ -237,8 +237,7 @@ async def generate_attendance_summary(
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == user_id,
             AttendanceRecords.date == attendance_summary_date,
-            AttendanceRecords.is_active.is_(True),
-            AttendanceRecords.deleted_at.is_(None)
+            AttendanceRecords.is_active.is_(True)
         )
         result = await db.execute(query)
         attendance = result.scalars().first()
@@ -249,8 +248,7 @@ async def generate_attendance_summary(
         query = select(AttendanceSummary).where(
             AttendanceSummary.user_id == user_id,
             AttendanceSummary.attendance_summary_date == attendance_summary_date,
-            AttendanceSummary.is_active.is_(True),
-            AttendanceSummary.deleted_at.is_(None)
+            AttendanceSummary.is_active.is_(True)
         )
         result = await db.execute(query)
         db_summary = result.scalars().first()

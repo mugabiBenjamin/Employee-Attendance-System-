@@ -279,14 +279,17 @@ def require_leave_management():
         Permission.VIEW_LEAVE_REQUEST,
         Permission.VIEW_TEAM_LEAVE_REQUESTS,
         Permission.VIEW_ALL_LEAVE_REQUESTS,
-        Permission.APPROVE_LEAVE
+        Permission.CREATE_ALL_LEAVE_REQUESTS,
+        Permission.APPROVE_LEAVE,
+        Permission.MANAGE_LEAVE
     ])
 
 def require_attendance_view():
     return require_any_permissions([
         Permission.VIEW_OWN_ATTENDANCE,
         Permission.VIEW_TEAM_ATTENDANCE,
-        Permission.VIEW_ALL_ATTENDANCE
+        Permission.VIEW_ALL_ATTENDANCE,
+        Permission.VIEW_ATTENDANCE
     ])
 
 def require_user_management():
@@ -337,6 +340,36 @@ def require_hierarchy_access():
         Permission.VIEW_OWN_HIERARCHY,
         Permission.VIEW_HIERARCHY,
         Permission.UPDATE_HIERARCHY
+    ])
+    
+def require_attendance_management():
+    return require_any_permissions([
+        Permission.MANAGE_ATTENDANCE,
+        Permission.VIEW_ATTENDANCE,
+        Permission.VIEW_ALL_ATTENDANCE
+    ])
+
+def require_time_correction_management():
+    return require_any_permissions([
+        Permission.MANAGE_TIME_CORRECTION,
+        Permission.CREATE_TIME_CORRECTION,
+        Permission.UPDATE_TIME_CORRECTION,
+        Permission.DELETE_TIME_CORRECTION
+    ])
+
+def require_comprehensive_leave_management():
+    return require_any_permissions([
+        Permission.CREATE_ALL_LEAVE_REQUESTS,
+        Permission.VIEW_ALL_LEAVE_REQUESTS,
+        Permission.APPROVE_LEAVE_REQUEST,
+        Permission.MANAGE_LEAVE
+    ])
+
+def require_system_log_management():
+    return require_any_permissions([
+        Permission.VIEW_LOGS,
+        Permission.DELETE_LOGS,
+        Permission.CREATE_LOGS
     ])
 
 async def validate_role_permissions(role_permissions: dict, db: AsyncSession) -> tuple[bool, list[str]]:

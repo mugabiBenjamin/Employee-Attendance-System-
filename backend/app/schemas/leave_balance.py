@@ -60,6 +60,7 @@ class LeaveBalanceOut(LeaveBalanceBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     policy_details: LeavePolicyDetails = {}
+    pending_days: float = Field(0, ge=0)
 
     @field_validator('balance_id', 'version')
     @classmethod

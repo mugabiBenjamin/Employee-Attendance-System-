@@ -6,6 +6,7 @@ from app.core.exceptions import ValidationError
 
 class OvertimeRecordBase(BaseModel):
     user_id: int = Field(..., description="ID of the user")
+    attendance_id: int = Field(..., description="ID of the associated attendance record")
     date: DateType = Field(..., description="Date of the overtime")
     overtime_hours: float = Field(..., gt=0, description="Overtime hours worked")
     overtime_rate: float = Field(1.5, gt=0, description="Overtime pay rate multiplier")
@@ -17,11 +18,11 @@ class OvertimeRecordBase(BaseModel):
     approved_at: Optional[datetime] = Field(None, description="Timestamp of approval")
     is_active: bool = Field(True, description="Whether the record is active")
 
-    @field_validator('user_id', 'approved_by')
+    @field_validator('user_id', 'approved_by', 'attendance_id')
     @classmethod
     def validate_ids(cls, value: Optional[int], info: ValidationInfo) -> Optional[int]:
         if value is not None and value <= 0:
-            field = 'user_id' if info.field_name == 'user_id' else 'approved_by'
+            field = info.field_name
             raise ValidationError(detail=f"Invalid {field}")
         return value
 
@@ -52,11 +53,15 @@ class OvertimeRecordBase(BaseModel):
 
 class OvertimeRecordCreate(OvertimeRecordBase):
     user_id: int
+    attendance_id: int
     date: DateType
     overtime_hours: float
     description: Optional[str] = None
 
 class OvertimeRecordUpdate(BaseModel):
+    user_id: Optional[int] = Field(None, description="Updated user ID")
+    attendance_id: Optional[int] = Field(None, description="Updated attendance record ID")
+    date: Optional[DateType] = Field(None, description="Updated date of the overtime")
     overtime_hours: Optional[float] = Field(None, gt=0, description="Updated overtime hours")
     overtime_rate: Optional[float] = Field(None, gt=0, description="Updated overtime rate")
     overtime_amount: Optional[float] = Field(None, description="Updated overtime amount")
@@ -67,11 +72,19 @@ class OvertimeRecordUpdate(BaseModel):
     approved_at: Optional[datetime] = Field(None, description="Updated approval timestamp")
     is_active: Optional[bool] = Field(None, description="Updated active status")
 
-    @field_validator('approved_by')
+    @field_validator('user_id', 'approved_by', 'attendance_id')
     @classmethod
-    def validate_approved_by(cls, value: Optional[int]) -> Optional[int]:
+    def validate_ids(cls, value: Optional[int], info: ValidationInfo) -> Optional[int]:
         if value is not None and value <= 0:
-            raise ValidationError(detail="Invalid approved_by ID")
+            field = info.field_name
+            raise ValidationError(detail=f"Invalid {field}")
+        return value
+
+    @field_validator('date')
+    @classmethod
+    def validate_date(cls, value: Optional[DateType]) -> Optional[DateType]:
+        if value and value > datetime.now(timezone.utc).date():
+            raise ValidationError(detail="Date cannot be in the future")
         return value
 
     @field_validator('approved_at')

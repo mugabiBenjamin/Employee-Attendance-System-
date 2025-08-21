@@ -519,7 +519,7 @@ async def _notify_admins_of_contact_change(
                     f"An emergency contact has been {action} for {current_user.first_name} {current_user.last_name} ({current_user.email}).\n\n"
                     f"Details:\n"
                     f"Contact ID: {contact.contact_id}\n"
-                    f"Name: {contact.name}\n"
+                    f"Name: {contact.contact_name}\n"
                     f"Relationship: {contact.relationship}\n"
                     f"Phone: {contact.phone}\n"
                     f"Alternate Phone: {contact.alternate_phone or 'N/A'}\n"

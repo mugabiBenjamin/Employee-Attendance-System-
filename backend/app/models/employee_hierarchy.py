@@ -7,7 +7,7 @@ class EmployeeHierarchy(Base):
     
     hierarchy_id = Column(Integer, primary_key=True)
     employee_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
-    manager_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    supervisor_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     level = Column(Integer, nullable=False, default=1)
     effective_from = Column(Date, nullable=False, server_default=func.current_date())
     effective_to = Column(Date)

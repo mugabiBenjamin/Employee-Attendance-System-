@@ -61,6 +61,7 @@ class SystemAction(str, Enum):
     UPDATE_USER_DEPARTMENT = "UPDATE_USER_DEPARTMENT"
     DELETE_USER_DEPARTMENT = "DELETE_USER_DEPARTMENT"
     DEFINE_WORKFLOW = "DEFINE_WORKFLOW"
+    DELETE_SYSTEM_LOG = "DELETE_SYSTEM_LOG" 
 
 class AttendanceStatus(str, Enum):
     PRESENT = "present"
@@ -210,6 +211,10 @@ class Permission(str, Enum):
     UPDATE_SHIFT_ASSIGNMENT = "update_shift_assignment"
     DELETE_SHIFT_ASSIGNMENT = "delete_shift_assignment"
     MANAGE_SHIFT_ASSIGNMENTS = "manage_shift_assignments"
+    MANAGE_ATTENDANCE = "manage_attendance"
+    VIEW_ATTENDANCE = "view_attendance"  
+    CREATE_ALL_LEAVE_REQUESTS = "create_all_leave_requests"
+    MANAGE_TIME_CORRECTION = "manage_time_correction"
     
     # Admin permissions
     VIEW_LOGS = "view_logs"
@@ -236,6 +241,7 @@ class Permission(str, Enum):
     CREATE_LOGS = "create_logs"
     VIEW_WORKFLOWS = "view_workflows"
     MANAGE_WORKFLOWS = "manage_workflows"
+    DELETE_LOGS = "delete_logs"
     
     # Super Admin permissions
     ALL_PERMISSIONS = "all_permissions"
@@ -343,6 +349,11 @@ _HR_PERMISSIONS = [
     Permission.UPDATE_SHIFT_ASSIGNMENT,
     Permission.DELETE_SHIFT_ASSIGNMENT,
     Permission.MANAGE_SHIFT_ASSIGNMENTS,
+    Permission.MANAGE_SHIFT_ASSIGNMENTS,
+    Permission.MANAGE_ATTENDANCE,
+    Permission.VIEW_ATTENDANCE,
+    Permission.CREATE_ALL_LEAVE_REQUESTS,
+    Permission.MANAGE_TIME_CORRECTION,
 ]
 
 _ADMIN_PERMISSIONS = [
@@ -371,6 +382,7 @@ _ADMIN_PERMISSIONS = [
     Permission.DELETE_TIME_CORRECTION,
     Permission.VIEW_WORKFLOWS,
     Permission.MANAGE_WORKFLOWS,
+    Permission.DELETE_LOGS, 
 ]
 
 PERMISSION_GROUPS = {

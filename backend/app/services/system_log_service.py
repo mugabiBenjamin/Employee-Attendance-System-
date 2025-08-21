@@ -103,20 +103,7 @@ async def read_system_log(
     request_id: Optional[str] = Depends(get_request_id),
     _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
 ) -> SystemLogOut:
-    """Retrieve a system log by ID.
-
-    Args:
-        log_id: The ID of the system log to retrieve.
-        db: Database session dependency.
-        request_id: Unique request identifier for logging.
-        _: Permission check for VIEW_LOGS.
-
-    Returns:
-        SystemLogOut: The requested system log record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
-    """
+    """Retrieve a system log by ID."""
     try:
         if log_id <= 0:
             raise ValidationError(detail="Invalid log ID")

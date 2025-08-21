@@ -42,7 +42,7 @@ async def get_leave_balances_by_user_and_type(
         await validate_user_exists(db, user_id, request_id)
 
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.VIEW_LEAVE_BALANCE.value or p == Permission.MANAGE_LEAVE.value for p in user_permissions) and user_id != current_user.user_id:
+        if not any(p == Permission.VIEW_LEAVE_BALANCE or p == Permission.MANAGE_LEAVE for p in user_permissions) and user_id != current_user.user_id:
             query_hierarchy = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == user_id,
                 EmployeeHierarchy.supervisor_id == current_user.user_id,
@@ -182,8 +182,8 @@ async def update_leave_balance(
             raise LeavePolicyNotFoundError(leave_type=leave_type)
         if balance_change > 0:
             total_allocated = float(db_balance.allocated_days) + float(db_balance.carried_forward)
-            if total_allocated + balance_change > policy.max_days:
-                raise ValidationError(detail=f"Balance change would exceed policy limit of {policy.max_days} days for {leave_type.value}")
+            if total_allocated + balance_change > policy.max_consecutive_days:
+                raise ValidationError(detail=f"Balance change would exceed policy limit of {policy.max_consecutive_days} days for {leave_type}")
 
         # Check for pending and approved leave requests
         query_requests = select(LeaveRequests).where(
@@ -195,8 +195,9 @@ async def update_leave_balance(
         )
         result_requests = await db.execute(query_requests)
         pending_requests = result_requests.scalars().all()
+        total_pending_days = sum((req.end_date - req.start_date).days + 1 for req in pending_requests if req.start_date and req.end_date)
+
         if pending_requests and balance_change < 0:
-            total_pending_days = sum((req.end_date - req.start_date).days + 1 for req in pending_requests if req.start_date and req.end_date)
             available_balance = float(db_balance.allocated_days) + float(db_balance.carried_forward) - float(db_balance.used_days)
             if available_balance - total_pending_days + balance_change < 0:
                 raise ValidationError(detail="Balance change would result in negative balance due to pending or approved requests")
@@ -275,21 +276,21 @@ async def update_leave_balance(
                 subject=f"Leave Balance Updated (ID: {db_balance.balance_id})",
                 body=(
                     f"Dear {first_name},\n\n"
-                    f"The leave balance (ID: {db_balance.balance_id}) for user ID {user_id} and {leave_type.value.capitalize()} "
+                    f"The leave balance (ID: {db_balance.balance_id}) for user ID {user_id} and {leave_type} "
                     f"has been updated to version {db_balance.version}.\n"
                     f"Change: {'Added' if balance_change > 0 else 'Deducted'} {abs(balance_change)} days\n"
                     f"New Used Days: {db_balance.used_days}\n"
                     f"Available Balance: {float(db_balance.allocated_days) + float(db_balance.carried_forward) - float(db_balance.used_days)} days\n"
                     f"Updated At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
                     f"Please review in the Employee Management System.\n\n"
-                    f"Best regards,\nRueEmployee Management System"
+                    f"Best regards,\nEmployee Management System"
                 ),
                 request_id=request_id
             )
 
         balance_out = LeaveBalanceOut.model_validate(db_balance)
         balance_out.policy_details = LeavePolicyDetails.model_validate(policy) if policy else LeavePolicyDetails()
-        balance_out.pending_days = total_pending_days if pending_requests else 0
+        balance_out.pending_days = total_pending_days
 
         logger.info(
             f"Leave balance updated, balance_id: {db_balance.balance_id}, user_id: {user_id}, leave_type: {leave_type}, change: {balance_change}",

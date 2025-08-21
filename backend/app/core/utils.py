@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Optional, List
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,6 +36,20 @@ def calculate_overtime_hours(total_hours: float, standard_hours: float = setting
     """Calculate overtime hours based on total hours exceeding standard hours."""
     overtime = max(0, total_hours - standard_hours)
     return round(overtime, 2)
+
+def calculate_shift_hours(start_time: time, end_time: time, is_overnight: bool = False) -> float:
+    """Calculate shift duration in hours based on start_time, end_time, and is_overnight."""
+    # Convert time objects to datetime for calculation (use a dummy date)
+    dummy_date = datetime(2023, 1, 1)
+    start_dt = datetime.combine(dummy_date, start_time)
+    end_dt = datetime.combine(dummy_date, end_time)
+    
+    if is_overnight and end_time < start_time:
+        # Add 1 day to end_dt for overnight shifts
+        end_dt += timedelta(days=1)
+    
+    duration = (end_dt - start_dt).total_seconds() / 3600  # Convert to hours
+    return round(max(0, duration), 2)
 
 async def validate_file_upload(file: UploadFile, allowed_extensions: List[str] = settings.ALLOWED_EXTENSIONS, max_size: int = settings.MAX_FILE_SIZE) -> None:
     """Validate file upload based on extension and size by reading the stream."""

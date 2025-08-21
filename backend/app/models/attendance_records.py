@@ -21,6 +21,7 @@ class AttendanceRecords(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         CheckConstraint("clock_out_time IS NULL OR clock_out_time > clock_in_time", name="clock_times_valid"),

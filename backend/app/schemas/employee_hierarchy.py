@@ -5,20 +5,20 @@ from app.core.exceptions import ValidationError
 
 class EmployeeHierarchyBase(BaseModel):
     employee_id: int = Field(..., description="ID of the employee")
-    manager_id: int = Field(..., description="ID of the manager")
+    supervisor_id: int = Field(..., description="ID of the manager")
     level: int = Field(1, ge=1, le=10, description="Hierarchy level (1-10)")
     effective_from: date = Field(..., description="Effective start date")
     effective_to: Optional[date] = Field(None, description="Effective end date")
     is_active: bool = Field(True, description="Whether the hierarchy is active")
 
-    @field_validator('employee_id', 'manager_id')
+    @field_validator('employee_id', 'supervisor_id')
     @classmethod
     def validate_ids(cls, value: int, info) -> int:
         if value <= 0:
             raise ValidationError(detail=f"Invalid {info.field_name}")
         return value
 
-    @field_validator('manager_id')
+    @field_validator('supervisor_id')
     @classmethod
     def prevent_self_reporting(cls, value: int, values) -> int:
         if 'employee_id' in values and value == values['employee_id']:
@@ -41,19 +41,19 @@ class EmployeeHierarchyBase(BaseModel):
 
 class EmployeeHierarchyCreate(EmployeeHierarchyBase):
     employee_id: int
-    manager_id: int
+    supervisor_id: int
     level: Optional[int] = Field(1, ge=1, le=10)
 
 class EmployeeHierarchyUpdate(BaseModel):
-    manager_id: Optional[int] = Field(None, description="Updated manager ID")
+    supervisor_id: Optional[int] = Field(None, description="Updated manager ID")
     level: Optional[int] = Field(None, ge=1, le=10, description="Updated hierarchy level")
     effective_from: Optional[date] = Field(None, description="Updated effective start date")
     effective_to: Optional[date] = Field(None, description="Updated effective end date")
     is_active: Optional[bool] = Field(None, description="Updated active status")
 
-    @field_validator('manager_id')
+    @field_validator('supervisor_id')
     @classmethod
-    def validate_manager_id(cls, value: Optional[int]) -> Optional[int]:
+    def validate_supervisor_id(cls, value: Optional[int]) -> Optional[int]:
         if value is not None and value <= 0:
             raise ValidationError(detail="Invalid manager ID")
         return value

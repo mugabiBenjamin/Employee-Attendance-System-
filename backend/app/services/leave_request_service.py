@@ -456,8 +456,8 @@ async def update_leave_request(
             )
             result_policy = await db.execute(query_policy)
             leave_policy = result_policy.scalar_one_or_none()
-            if leave_policy and days_requested > leave_policy.max_days:
-                raise ValidationError(detail=f"Requested days ({days_requested}) exceed policy limit ({leave_policy.max_days}) for {leave_type.value}")
+            if leave_policy and days_requested > leave_policy.max_consecutive_days:
+                raise ValidationError(detail=f"Requested days ({days_requested}) exceed policy limit ({leave_policy.max_consecutive_days}) for {leave_type.value}")
 
             await validate_no_overlapping_leave_requests(db, user_id, start_date, end_date, leave_id, request_id, settings)
             update_data["days_requested"] = days_requested

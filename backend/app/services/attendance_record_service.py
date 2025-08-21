@@ -12,17 +12,16 @@ from app.models.shift_patterns import ShiftPatterns
 from app.models.holiday_calendar import HolidayCalendar
 from app.schemas.attendance_record import AttendanceRecordCreate, AttendanceRecordOut
 from app.core.config import Settings, get_settings
-from app.core.utils import calculate_total_hours, calculate_overtime_hours
+from app.core.utils import calculate_total_hours, calculate_overtime_hours, calculate_shift_hours
 from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.exceptions import UserNotFoundError, ValidationError, ResourceNotFoundError, DatabaseError, AttendanceError
 from app.core.utils import get_request_id, get_users_with_permission
 from app.core.mail import send_email
+from app.models.employee_hierarchy import EmployeeHierarchy
 import logging
-
-from backend.app.models.employee_hierarchy import EmployeeHierarchy
 
 logger = logging.getLogger(__name__)
 
@@ -222,9 +221,18 @@ async def clock_out(
         )
         if total_hours is not None:
             db_record.total_hours = total_hours
+            if shift_pattern:
+                standard_hours = calculate_shift_hours(
+                    start_time=shift_pattern.start_time,
+                    end_time=shift_pattern.end_time,
+                    is_overnight=shift_pattern.is_overnight
+                )
+            else:
+                standard_hours = settings.OVERTIME_THRESHOLD
+            
             db_record.overtime_hours = calculate_overtime_hours(
                 total_hours,
-                standard_hours=shift_pattern.total_hours if shift_pattern else settings.STANDARD_SHIFT_HOURS
+                standard_hours=standard_hours
             )
 
         db_record.updated_at = current_time
@@ -316,8 +324,9 @@ async def get_attendance_history(
             raise ValidationError(detail="Invalid user_id")
 
         # Authorization check
+        user_permissions = await get_user_permissions(current_user.user_id, db)
         if user_id and user_id != current_user.user_id:
-            if not any(p in [Permission.MANAGE_ATTENDANCE, Permission.VIEW_ATTENDANCE] for p in current_user.permissions):
+            if not any(p == Permission.MANAGE_ATTENDANCE.value or p == Permission.VIEW_ATTENDANCE.value for p in user_permissions):
                 # Check if user is a supervisor
                 query_supervisor = select(EmployeeHierarchy).where(
                     EmployeeHierarchy.supervisor_id == current_user.user_id,

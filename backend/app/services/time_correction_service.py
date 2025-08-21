@@ -742,17 +742,16 @@ async def _validate_correction_against_shift(
             ShiftAssignments.user_id == user_id,
             ShiftAssignments.is_active.is_(True),
             ShiftAssignments.deleted_at.is_(None),
-            ShiftAssignments.start_date <= attendance.attendance_date,
-            or_(ShiftAssignments.end_date.is_(None), ShiftAssignments.end_date >= attendance.attendance_date)
+            ShiftAssignments.effective_from <= attendance.date,
+            or_(ShiftAssignments.effective_to.is_(None), ShiftAssignments.effective_to >= attendance.date)
         )
         result_shift = await db.execute(query_shift)
         shift = result_shift.scalar_one_or_none()
 
         if shift and settings.PREVENT_INVALID_TIME_CORRECTIONS:
-            shift_pattern = shift.pattern
-            shift_start = datetime.combine(attendance.attendance_date, shift_pattern.start_time)
-            shift_end = datetime.combine(attendance.attendance_date, shift_pattern.end_time)
-            if shift_pattern.end_time < shift_pattern.start_time:  # Handle overnight shifts
+            shift_start = datetime.combine(attendance.date, shift.effective_from)
+            shift_end = datetime.combine(attendance.date, shift.effective_to)
+            if shift.effective_to < shift.effective_from:  # Handle overnight shifts
                 shift_end += timedelta(days=1)
             
             if time_correction.corrected_clock_in and time_correction.corrected_clock_in < shift_start - timedelta(minutes=30):
@@ -859,7 +858,7 @@ async def _notify_user_and_admins_of_status_change(
         admins = await get_users_with_permission(Permission.MANAGE_TIME_CORRECTION, db)
         recipients.extend([(admin.email, admin.first_name) for admin in admins if admin.email])
 
-        status_value = correction.status.value
+        status_value = str(correction.status)
         status_text = status_value.replace('_', ' ').title()
         for email, first_name in recipients:
             await send_email(

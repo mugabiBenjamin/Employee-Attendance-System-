@@ -108,12 +108,12 @@ async def get_employee_hierarchy_endpoint(
     "/",
     response_model=List[EmployeeHierarchyOut],
     summary="List employee hierarchies",
-    description="Retrieve a list of employee hierarchies, optionally filtered by employee_id, department_id, or manager_id with pagination."
+    description="Retrieve a list of employee hierarchies, optionally filtered by employee_id, department_id, or supervisor_id with pagination."
 )
 async def list_employee_hierarchies_endpoint(
     employee_id: Optional[int] = None,
     department_id: Optional[int] = None,
-    manager_id: Optional[int] = None,
+    supervisor_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
     request: Request = Depends(),
@@ -126,7 +126,7 @@ async def list_employee_hierarchies_endpoint(
     Args:
         employee_id: Optional employee ID to filter hierarchies.
         department_id: Optional department ID to filter hierarchies.
-        manager_id: Optional manager ID to filter hierarchies.
+        supervisor_id: Optional manager ID to filter hierarchies.
         skip: Number of records to skip for pagination (default: 0).
         limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
         request: The incoming HTTP request for logging client details.
@@ -142,7 +142,7 @@ async def list_employee_hierarchies_endpoint(
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await list_employee_hierarchies(employee_id, department_id, manager_id, skip, limit, current_user, db, settings, request_id)
+        return await list_employee_hierarchies(employee_id, department_id, supervisor_id, skip, limit, current_user, db, settings, request_id)
     except HTTPException as e:
         logger.error(f"Error listing employee hierarchies: {str(e)}", extra={"request_id": request_id})
         raise

@@ -95,7 +95,7 @@ async def approve_or_reject_leave(
 
         # Prevent re-approval/rejection
         if leave_request.status != LeaveRequestStatus.UNDER_REVIEW:
-            raise ValidationError(detail=f"Leave request is already {leave_request.status.value.lower()}")
+            raise ValidationError(detail=f"Leave request is already {str(leave_request.status).lower()}")
 
         # Validate approver
         await validate_user_exists(db, approval.approver_id, request_id)
@@ -158,8 +158,8 @@ async def approve_or_reject_leave(
             )
             result_policy = await db.execute(query_policy)
             leave_policy = result_policy.scalar_one_or_none()
-            if leave_policy and leave_request.days_requested > leave_policy.max_days:
-                raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_days}) for {leave_request.leave_type.value}")
+            if leave_policy and leave_request.days_requested > leave_policy.max_consecutive_days:
+                raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_consecutive_days}) for {str(leave_request.leave_type).capitalize()}")
 
         # Create approval entry
         db_approval = LeaveApprovalWorkflow(
@@ -246,7 +246,7 @@ async def approve_or_reject_leave(
                     f"Dear {first_name},\n\n"
                     f"The leave request (ID: {approval.leave_id}) from {leave_request.start_date} to {leave_request.end_date} "
                     f"has been {approval.status.value.lower()}.\n"
-                    f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                    f"Leave Type: {str(leave_request.leave_type).capitalize()}\n"
                     f"Days Requested: {leave_request.days_requested}\n"
                     f"Comments: {approval.comments or 'None'}\n"
                     f"Action Taken At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
@@ -529,8 +529,8 @@ async def update_leave_approval(
                 )
                 result_policy = await db.execute(query_policy)
                 leave_policy = result_policy.scalar_one_or_none()
-                if leave_policy and leave_request.days_requested > leave_policy.max_days:
-                    raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_days}) for {leave_request.leave_type.value}")
+                if leave_policy and leave_request.days_requested > leave_policy.max_consecutive_days:
+                    raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_consecutive_days}) for {str(leave_request.leave_type).capitalize()}")
 
         old_values = approval.__dict__.copy()
         for key, value in update_dict.items():
@@ -631,7 +631,7 @@ async def update_leave_approval(
                         f"Dear {first_name},\n\n"
                         f"The leave approval (ID: {workflow_id}) for leave request (ID: {approval.leave_id}) "
                         f"has been updated to {update_dict['status'].value.lower()}.\n"
-                        f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                        f"Leave Type: {str(leave_request.leave_type).capitalize()}\n"
                         f"Days Requested: {leave_request.days_requested}\n"
                         f"Comments: {update_dict.get('comments', 'None')}\n"
                         f"Updated At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
@@ -788,7 +788,7 @@ async def delete_leave_approval(
                 body=(
                     f"Dear {first_name},\n\n"
                     f"The leave approval (ID: {workflow_id}) for leave request (ID: {approval.leave_id}) has been deleted.\n"
-                    f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                    f"Leave Type: {str(leave_request.leave_type).capitalize()}\n"
                     f"Days Requested: {leave_request.days_requested}\n"
                     f"Deleted At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
                     f"Please contact HR for any questions.\n\n"
@@ -957,7 +957,7 @@ async def define_workflow_steps(
                 subject=f"New Workflow Steps Defined for Leave Request (ID: {leave_id})",
                 body=(
                     f"Dear {first_name},\n\n"
-                    f"New workflow steps have been defined for leave request (ID: {leave_id}) of type {leave_request.leave_type.value.capitalize()}.\n"
+                    f"New workflow steps have been defined for leave request (ID: {leave_id}) of type {str(leave_request.leave_type).capitalize()}.\n"
                     f"Days Requested: {leave_request.days_requested}\n"
                     f"Created At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
                     f"Please review in the Employee Management System.\n\n"
