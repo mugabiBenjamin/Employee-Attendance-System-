@@ -14,7 +14,10 @@ from app.services.user_service import (
     get_current_user_profile as service_get_current_user_profile
 )
 from app.schemas.user import UserCreate, UserUpdate, UserOut
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +35,8 @@ async def create_new_user_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_USER]))
 ) -> UserOut:
     """Create a new user.
 
@@ -68,7 +72,8 @@ async def create_new_user_endpoint(
 async def read_user_endpoint(
     user_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> UserOut:
     """Retrieve a user by ID.
 
@@ -104,7 +109,8 @@ async def read_users_endpoint(
     skip: int = 0,
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> List[UserOut]:
     """List all active users with pagination.
 
@@ -143,7 +149,8 @@ async def update_existing_user_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_USER]))
 ) -> UserOut:
     """Update a user's details.
 
@@ -182,7 +189,8 @@ async def delete_existing_user_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_USER]))
 ) -> None:
     """Soft delete a user.
 
@@ -218,7 +226,8 @@ async def delete_existing_user_endpoint(
 async def get_current_user_profile_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
 ) -> UserOut:
     """Retrieve the current user's profile.
 

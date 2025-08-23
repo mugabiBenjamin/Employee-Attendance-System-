@@ -4,7 +4,7 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.security import get_current_user
-from app.core.enums import CorrectionStatus
+from app.core.enums import CorrectionStatus, Permission
 from app.core.config import Settings, get_settings
 from app.core.utils import get_request_id
 from app.services.time_correction_service import (
@@ -18,6 +18,7 @@ from app.services.time_correction_service import (
 )
 from app.schemas.time_correction import TimeCorrectionCreate, TimeCorrectionUpdate, TimeCorrectionOut, TimeCorrectionApproval
 from app.core.exceptions import ValidationError
+from app.core.permissions import require_permissions, require_any_permissions
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,23 +37,10 @@ async def request_time_correction(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
-    """Submit a time correction request for an attendance record.
-
-    Args:
-        correction: The time correction request data.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        TimeCorrectionOut: The created time correction record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Submit a time correction request for an attendance record."""
     try:
         request_id = get_request_id(request)
         return await service_create_time_correction(correction, request, current_user, db, settings, request_id)
@@ -73,22 +61,10 @@ async def get_time_correction(
     correction_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_any_permissions([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
-    """Retrieve a specific time correction request.
-
-    Args:
-        correction_id: The ID of the time correction to retrieve.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-
-    Returns:
-        TimeCorrectionOut: The requested time correction record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Retrieve a specific time correction request."""
     try:
         request_id = get_request_id(request)
         return await service_get_time_correction(correction_id, current_user, db, request_id)
@@ -114,27 +90,10 @@ async def list_time_corrections(
     limit: Optional[int] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_any_permissions([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
 ) -> List[TimeCorrectionOut]:
-    """Retrieve time correction requests for current user, specified user, or department.
-
-    Args:
-        request: The incoming HTTP request for logging client details.
-        user_id: Optional user ID to filter corrections (requires authorization).
-        department_id: Optional department ID to filter corrections (requires authorization).
-        status: Optional status filter (e.g., UNDER_REVIEW, APPROVED).
-        skip: Number of records to skip for pagination.
-        limit: Maximum number of records to return (default from settings).
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[TimeCorrectionOut]: List of time correction records.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Retrieve time correction requests for current user, specified user, or department."""
     try:
         request_id = get_request_id(request)
         if user_id and department_id:
@@ -167,24 +126,10 @@ async def update_time_correction(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
-    """Update an existing time correction request.
-
-    Args:
-        correction_id: The ID of the time correction to update.
-        time_correction_update: The updated time correction data.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        TimeCorrectionOut: The updated time correction record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), conflicts (409), or server errors (500).
-    """
+    """Update an existing time correction request."""
     try:
         request_id = get_request_id(request)
         return await service_update_time_correction(correction_id, time_correction_update, request, current_user, db, settings, request_id)
@@ -207,24 +152,10 @@ async def approve_reject_time_correction(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.MANAGE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
-    """Approve or reject a time correction request.
-
-    Args:
-        correction_id: The ID of the time correction to approve/reject.
-        approval_data: The approval data containing the new status.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        TimeCorrectionOut: The updated time correction record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), conflicts (409), or server errors (500).
-    """
+    """Approve or reject a time correction request."""
     try:
         request_id = get_request_id(request)
         return await service_approve_time_correction(correction_id, approval_data, request, current_user, db, settings, request_id)
@@ -246,20 +177,10 @@ async def remove_time_correction(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_TIME_CORRECTION]))
 ) -> None:
-    """Soft delete a time correction request (HR/admin only).
-
-    Args:
-        correction_id: The ID of the time correction to delete.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Soft delete a time correction request (HR/admin only)."""
     try:
         request_id = get_request_id(request)
         await service_delete_time_correction(correction_id, request, current_user, db, settings, request_id)

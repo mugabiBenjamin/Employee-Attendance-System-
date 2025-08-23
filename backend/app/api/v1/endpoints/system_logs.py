@@ -4,10 +4,8 @@ from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import Permission
 from app.core.utils import get_request_id
 from app.services.system_log_service import (
     create_system_log as service_create_system_log,
@@ -18,6 +16,8 @@ from app.services.system_log_service import (
     delete_system_log as service_delete_system_log
 )
 from app.schemas.system_log import SystemLogCreate, SystemLogOut, SystemLogActionSummary
+from app.core.enums import Permission
+from app.core.permissions import require_permissions
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,23 +36,10 @@ async def create_system_log_endpoint(
     request: Request,
     current_user: Optional[Users] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_LOGS]))
 ) -> SystemLogOut:
-    """Create a new system log entry.
-
-    Args:
-        log: The system log data to create.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action (optional).
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        SystemLogOut: The created system log record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
-    """
+    """Create a new system log entry."""
     try:
         request_id = get_request_id(request)
         return await service_create_system_log(log, request, current_user, db, settings, request_id)
@@ -69,25 +56,13 @@ async def create_system_log_endpoint(
     summary="Get system log by ID",
     description="Retrieve a specific system log by its ID."
 )
-@require_permissions([Permission.VIEW_LOGS])
 async def read_system_log_endpoint(
     log_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
 ) -> SystemLogOut:
-    """Retrieve a system log by ID.
-
-    Args:
-        log_id: The ID of the system log to retrieve.
-        request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
-
-    Returns:
-        SystemLogOut: The requested system log record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
-    """
+    """Retrieve a system log by ID."""
     try:
         request_id = get_request_id(request)
         return await service_read_system_log(log_id, db, request_id)
@@ -104,7 +79,6 @@ async def read_system_log_endpoint(
     summary="List system logs",
     description="List system logs with optional filters for user, action, table affected, department, date range, and active status."
 )
-@require_permissions([Permission.VIEW_LOGS])
 async def read_system_logs_endpoint(
     user_id: Optional[int] = None,
     action: Optional[str] = None,
@@ -115,34 +89,13 @@ async def read_system_logs_endpoint(
     is_active: Optional[bool] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
+    request: Request = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
-    """List system logs with optional filters and pagination.
-
-    Args:
-        user_id: Optional user ID to filter logs.
-        action: Optional action to filter logs.
-        table_affected: Optional table name to filter logs.
-        department_id: Optional department ID to filter logs.
-        start_date: Optional start date to filter logs.
-        end_date: Optional end date to filter logs.
-        is_active: Optional filter for active/inactive logs.
-        skip: Number of records to skip for pagination.
-        limit: Maximum number of records to return.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[SystemLogOut]: List of system log records.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """List system logs with optional filters and pagination."""
     try:
         request_id = get_request_id(request)
         return await service_read_system_logs(user_id, action, table_affected, department_id, start_date, end_date, is_active, skip, limit, current_user, db, settings, request_id)
@@ -159,35 +112,18 @@ async def read_system_logs_endpoint(
     summary="Get logs for specific user",
     description="Retrieve system logs for a specific user, optionally filtered by action and table affected."
 )
-@require_permissions([Permission.VIEW_LOGS])
 async def get_user_logs_endpoint(
     user_id: int,
     action: Optional[str] = None,
     table_affected: Optional[str] = None,
     limit: Optional[int] = None,
-    request: Request = Depends(),
+    request: Request = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
-    """Retrieve logs for a specific user.
-
-    Args:
-        user_id: The ID of the user to retrieve logs for.
-        action: Optional action to filter logs.
-        table_affected: Optional table name to filter logs.
-        limit: Maximum number of records to return.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[SystemLogOut]: List of system log records for the user.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Retrieve logs for a specific user."""
     try:
         request_id = get_request_id(request)
         return await service_get_user_logs(user_id, action, table_affected, limit, current_user, db, settings, request_id)
@@ -204,33 +140,17 @@ async def get_user_logs_endpoint(
     summary="Get log action summary",
     description="Retrieve a summary of system actions with occurrence counts, optionally filtered by user, department, and date range."
 )
-@require_permissions([Permission.VIEW_LOGS])
 async def get_log_actions_summary_endpoint(
     user_id: Optional[int] = None,
     department_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    request: Request = Depends(),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
 ) -> List[SystemLogActionSummary]:
-    """Retrieve a summary of system actions with occurrence counts.
-
-    Args:
-        user_id: Optional user ID to filter logs.
-        department_id: Optional department ID to filter logs.
-        start_date: Optional start date to filter logs.
-        end_date: Optional end date to filter logs.
-        request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[SystemLogActionSummary]: Summary of actions with counts.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
-    """
+    """Retrieve a summary of system actions with occurrence counts."""
     try:
         request_id = get_request_id(request)
         return await service_get_log_actions_summary(user_id, department_id, start_date, end_date, db, settings, request_id)
@@ -247,26 +167,15 @@ async def get_log_actions_summary_endpoint(
     summary="Delete system log",
     description="Soft delete a system log by its ID."
 )
-@require_permissions([Permission.DELETE_LOGS])
 async def delete_system_log_endpoint(
     log_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_LOGS]))
 ) -> None:
-    """Soft delete a system log.
-
-    Args:
-        log_id: The ID of the system log to delete.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
-    """
+    """Soft delete a system log."""
     try:
         request_id = get_request_id(request)
         await service_delete_system_log(log_id, request, current_user, db, settings, request_id)

@@ -13,6 +13,8 @@ from app.services.department_service import (
     delete_department
 )
 from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentOut
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ async def create_department_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    _: bool = Depends(require_permissions([Permission.CREATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """Create a new department.
 
@@ -40,7 +42,6 @@ async def create_department_endpoint(
         request: The incoming HTTP request for logging client details.
         current_user: The authenticated user performing the action.
         db: Database session dependency.
-        settings: Application settings.
 
     Returns:
         DepartmentOut: The created department.
@@ -67,7 +68,8 @@ async def create_department_endpoint(
 async def get_department_endpoint(
     department_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> DepartmentOut:
     """Retrieve a department by ID.
 
@@ -103,7 +105,8 @@ async def list_departments_endpoint(
     skip: int = 0,
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> List[DepartmentOut]:
     """List all active departments with pagination.
 
@@ -141,7 +144,8 @@ async def update_department_endpoint(
     department_update: DepartmentUpdate,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.UPDATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """Update a department.
 
@@ -178,7 +182,8 @@ async def delete_department_endpoint(
     department_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.DELETE_DEPARTMENT]))
 ) -> None:
     """Soft delete a department.
 

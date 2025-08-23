@@ -9,6 +9,8 @@ from app.core.database import get_db
 from app.core.config import Settings, get_settings
 from app.core.utils import get_request_id
 from app.schemas.attendance_record import AttendanceRecordOut, ClockInOut
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,8 @@ async def clock_in_out_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CLOCK_IN, Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
     """Handle clock-in or clock-out requests.
 
@@ -74,7 +77,8 @@ async def get_attendance_history_endpoint(
     request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
     """Retrieve attendance history for a user.
 

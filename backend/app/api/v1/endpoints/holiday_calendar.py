@@ -5,7 +5,6 @@ from app.core.database import get_db
 from app.models.users import Users
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ValidationError
 from app.services.holiday_calendar_service import (
     create_holiday,
     get_holiday,
@@ -18,6 +17,8 @@ from app.schemas.holiday_calendar import (
     HolidayCalendarUpdate,
     HolidayCalendarOut
 )
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,8 @@ async def create_holiday_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Create a new holiday.
 
@@ -72,7 +74,8 @@ async def create_holiday_endpoint(
 async def get_holiday_endpoint(
     holiday_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Retrieve a holiday by ID.
 
@@ -88,13 +91,8 @@ async def get_holiday_endpoint(
         HTTPException: For validation errors (422), not found (404), or server errors (500).
     """
     try:
-        if holiday_id <= 0:
-            raise ValidationError(detail="Invalid holiday ID")
         request_id = getattr(request.state, "request_id", None)
         return await get_holiday(holiday_id, db, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error retrieving holiday {holiday_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -116,7 +114,8 @@ async def list_holidays_endpoint(
     request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> List[HolidayCalendarOut]:
     """List all active holidays with optional filters and pagination.
 
@@ -158,7 +157,8 @@ async def update_holiday_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Update a holiday.
 
@@ -177,13 +177,8 @@ async def update_holiday_endpoint(
         HTTPException: For validation errors (422), not found (404), or server errors (500).
     """
     try:
-        if holiday_id <= 0:
-            raise ValidationError(detail="Invalid holiday ID")
         request_id = getattr(request.state, "request_id", None)
         return await update_holiday(holiday_id, holiday_update, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error updating holiday {holiday_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -202,7 +197,8 @@ async def delete_holiday_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_HOLIDAY]))
 ) -> None:
     """Soft delete a holiday.
 
@@ -220,13 +216,8 @@ async def delete_holiday_endpoint(
         HTTPException: For validation errors (422), not found (404), or server errors (500).
     """
     try:
-        if holiday_id <= 0:
-            raise ValidationError(detail="Invalid holiday ID")
         request_id = getattr(request.state, "request_id", None)
         await delete_holiday(holiday_id, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error deleting holiday {holiday_id}: {str(e)}", extra={"request_id": request_id})
         raise

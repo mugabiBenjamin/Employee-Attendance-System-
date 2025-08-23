@@ -5,11 +5,13 @@ from app.core.database import get_db
 from app.models.users import Users
 from app.core.security import get_current_user, oauth2_scheme
 from app.core.config import Settings, get_settings
-from app.services.auth_service import  ( 
-    login_user, 
-    logout_user, 
-    refresh_token, 
-    get_current_user_profile, 
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
+from app.services.auth_service import (
+    login_user,
+    logout_user,
+    refresh_token,
+    get_current_user_profile,
     validate_token
 )
 from app.schemas.auth_schema import Token, RefreshTokenRequest, UserProfile
@@ -43,7 +45,14 @@ async def login_endpoint(
     Returns:
         Token: JWT access and refresh tokens.
     """
-    return await login_user({"username": form_data.username, "password": form_data.password}, request, db, settings)
+    request_id = request.state.request_id
+    return await login_user(
+        request=request,
+        credentials={"username": form_data.username, "password": form_data.password},
+        db=db,
+        settings=settings,
+        request_id=request_id
+    )
 
 @router.post(
     "/refresh",
@@ -52,6 +61,7 @@ async def login_endpoint(
     summary="Refresh access token",
     description="Generate new access token using a valid refresh token."
 )
+@require_permissions([Permission.REFRESH_TOKEN])
 async def refresh_token_endpoint(
     request: Request,
     token_request: RefreshTokenRequest,
@@ -69,7 +79,14 @@ async def refresh_token_endpoint(
     Returns:
         Token: New JWT access and refresh tokens.
     """
-    return await refresh_token(token_request.dict(), request, db, settings)
+    request_id = request.state.request_id
+    return await refresh_token(
+        request=request,
+        token_request=token_request.dict(),
+        db=db,
+        settings=settings,
+        request_id=request_id
+    )
 
 @router.post(
     "/logout",
@@ -78,21 +95,33 @@ async def refresh_token_endpoint(
     description="Log out current user."
 )
 async def logout_endpoint(
+    request: Request,
     current_user: Users = Depends(get_current_user),
     token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> dict:
     """Handle user logout.
 
     Args:
+        request: The incoming HTTP request.
         current_user: The authenticated user.
-        token: The JWT token to blacklist.
+        token: The JWT token.
         db: Database session dependency.
+        settings: Application settings.
 
     Returns:
         dict: Logout confirmation message.
     """
-    await logout_user(current_user, token, db)
+    request_id = request.state.request_id
+    await logout_user(
+        request=request,
+        user=current_user,
+        token=token,
+        db=db,
+        settings=settings,
+        request_id=request_id
+    )
     return {"message": "Successfully logged out"}
 
 @router.get(
@@ -101,20 +130,28 @@ async def logout_endpoint(
     summary="Get current user profile",
     description="Retrieve profile information for the current user."
 )
+@require_permissions([Permission.VIEW_OWN_PROFILE])
 async def get_profile_endpoint(
+    request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
     """Retrieve current user profile.
 
     Args:
+        request: The incoming HTTP request.
         current_user: The authenticated user.
         db: Database session dependency.
 
     Returns:
         UserProfile: User profile data.
     """
-    return await get_current_user_profile(current_user, db)
+    request_id = request.state.request_id
+    return await get_current_user_profile(
+        user=current_user,
+        db=db,
+        request_id=request_id
+    )
 
 @router.post(
     "/validate-token",
@@ -122,15 +159,25 @@ async def get_profile_endpoint(
     summary="Validate access token",
     description="Validate if the current access token is valid and user is active."
 )
+@require_permissions([Permission.VIEW_OWN_PROFILE])
 async def validate_token_endpoint(
-    current_user: Users = Depends(get_current_user)
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> dict:
     """Validate access token.
 
     Args:
+        request: The incoming HTTP request.
         current_user: The authenticated user.
+        db: Database session dependency.
 
     Returns:
         dict: Token validation result.
     """
-    return await validate_token(current_user)
+    request_id = request.state.request_id
+    return await validate_token(
+        user=current_user,
+        db=db,
+        request_id=request_id
+    )

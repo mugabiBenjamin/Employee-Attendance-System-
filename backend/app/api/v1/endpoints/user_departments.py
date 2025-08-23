@@ -14,6 +14,8 @@ from app.services.user_department_service import (
     get_user_departments as service_get_user_departments
 )
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,24 +32,25 @@ router = APIRouter(prefix="/user-departments", tags=["User Departments"])
 async def create_user_department_endpoint(
     user_department: UserDepartmentCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Create a new user-department assignment.
 
     Args:
         user_department: The user-department data to create.
         request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
         current_user: The authenticated user performing the action.
+        db: Database session dependency.
         settings: Application settings.
 
     Returns:
         UserDepartmentOut: The created user-department assignment.
 
     Raises:
-        HTTPException: For validation errors (422), not found (404), conflict (409), or server errors (500).
+        HTTPException: For validation errors (422), not found (404), conflict (409), authorization errors (403), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
@@ -68,7 +71,8 @@ async def create_user_department_endpoint(
 async def read_user_department_endpoint(
     user_department_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Retrieve a user-department assignment by ID.
 
@@ -105,8 +109,10 @@ async def read_user_departments_endpoint(
     department_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """List user-department assignments with optional filters and pagination.
 
@@ -116,6 +122,7 @@ async def read_user_departments_endpoint(
         skip: Number of records to skip for pagination (default: 0).
         limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
         request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
         db: Database session dependency.
         settings: Application settings.
 
@@ -123,11 +130,11 @@ async def read_user_departments_endpoint(
         List[UserDepartmentOut]: List of user-department assignments.
 
     Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
+        HTTPException: For validation errors (422), not found (404), authorization errors (403), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await service_read_user_departments(user_id, department_id, skip, limit, db, settings, request_id)
+        return await service_read_user_departments(user_id, department_id, skip, limit, current_user, db, settings, request_id)
     except HTTPException as e:
         logger.error(f"Error listing user-department assignments: {str(e)}", extra={"request_id": request_id})
         raise
@@ -145,9 +152,10 @@ async def update_user_department_endpoint(
     user_department_id: int,
     user_department_update: UserDepartmentUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Update a user-department assignment.
 
@@ -155,15 +163,15 @@ async def update_user_department_endpoint(
         user_department_id: The ID of the user-department assignment to update.
         user_department_update: The updated user-department data.
         request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
         current_user: The authenticated user performing the action.
+        db: Database session dependency.
         settings: Application settings.
 
     Returns:
         UserDepartmentOut: The updated user-department assignment.
 
     Raises:
-        HTTPException: For validation errors (422), not found (404), conflict (409), or server errors (500).
+        HTTPException: For validation errors (422), not found (404), conflict (409), authorization errors (403), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
@@ -184,24 +192,25 @@ async def update_user_department_endpoint(
 async def delete_user_department_endpoint(
     user_department_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_USER_DEPARTMENT]))
 ) -> None:
     """Soft delete a user-department assignment.
 
     Args:
         user_department_id: The ID of the user-department assignment to delete.
         request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
         current_user: The authenticated user performing the action.
+        db: Database session dependency.
         settings: Application settings.
 
     Returns:
         None: No content returned on successful deletion.
 
     Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
+        HTTPException: For validation errors (422), not found (404), authorization errors (403), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
@@ -224,8 +233,10 @@ async def get_user_departments_endpoint(
     request: Request,
     skip: int = 0,
     limit: Optional[int] = None,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """Retrieve all department assignments for a specific user with pagination.
 
@@ -234,6 +245,7 @@ async def get_user_departments_endpoint(
         skip: Number of records to skip for pagination (default: 0).
         limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
         request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
         db: Database session dependency.
         settings: Application settings.
 
@@ -241,11 +253,11 @@ async def get_user_departments_endpoint(
         List[UserDepartmentOut]: List of user-department assignments.
 
     Raises:
-        HTTPException: For validation errors (422), not found (404), or server errors (500).
+        HTTPException: For validation errors (422), not found (404), authorization errors (403), or server errors (500).
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await service_get_user_departments(user_id, skip, limit, db, settings, request_id)
+        return await service_get_user_departments(user_id, skip, limit, current_user, db, settings, request_id)
     except HTTPException as e:
         logger.error(f"Error retrieving departments for user {user_id}: {str(e)}", extra={"request_id": request_id})
         raise

@@ -15,6 +15,8 @@ from app.services.user_role_service import (
     get_user_permissions as service_get_user_permissions
 )
 from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,18 +33,17 @@ router = APIRouter(prefix="/user-roles", tags=["User Roles"])
 async def create_user_role_endpoint(
     user_role: UserRoleCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.CREATE_USER_ROLE]))
 ) -> UserRoleOut:
     """Create a user role assignment.
 
     Args:
         user_role: The user role data to create.
         request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
         current_user: The authenticated user performing the action.
-        settings: Application settings.
+        db: Database session dependency.
 
     Returns:
         UserRoleOut: The created user role assignment.
@@ -69,7 +70,8 @@ async def create_user_role_endpoint(
 async def read_user_role_endpoint(
     user_role_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> UserRoleOut:
     """Retrieve a user role assignment by ID.
 
@@ -107,7 +109,8 @@ async def read_user_roles_endpoint(
     skip: int = 0,
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """List user role assignments with optional filters and pagination.
 
@@ -146,9 +149,9 @@ async def update_user_role_endpoint(
     user_role_id: int,
     user_role_update: UserRoleUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.UPDATE_USER_ROLE]))
 ) -> UserRoleOut:
     """Update a user role assignment.
 
@@ -156,9 +159,8 @@ async def update_user_role_endpoint(
         user_role_id: The ID of the user role assignment to update.
         user_role_update: The updated user role data.
         request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
         current_user: The authenticated user performing the action.
-        settings: Application settings.
+        db: Database session dependency.
 
     Returns:
         UserRoleOut: The updated user role assignment.
@@ -185,18 +187,17 @@ async def update_user_role_endpoint(
 async def delete_user_role_endpoint(
     user_role_id: int,
     request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user: Users = Depends(get_current_user),
-    settings: Settings = Depends(get_settings)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.DELETE_USER_ROLE]))
 ) -> None:
     """Soft delete a user role assignment.
 
     Args:
         user_role_id: The ID of the user role assignment to delete.
         request: The incoming HTTP request for logging client details.
-        db: Database session dependency.
         current_user: The authenticated user performing the action.
-        settings: Application settings.
+        db: Database session dependency.
 
     Returns:
         None: No content returned on successful deletion.
@@ -221,12 +222,13 @@ async def delete_user_role_endpoint(
     description="Retrieve all active roles for a specific user with pagination."
 )
 async def get_user_roles_endpoint(
-    request: Request,
     user_id: int,
+    request: Request,
     skip: int = 0,
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """Retrieve all roles for a specific user with pagination.
 
@@ -261,9 +263,10 @@ async def get_user_roles_endpoint(
     description="Retrieve all permissions assigned to a specific user based on their roles."
 )
 async def get_user_permissions_endpoint(
-    request: Request,
     user_id: int,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> dict:
     """Retrieve all permissions for a specific user.
 

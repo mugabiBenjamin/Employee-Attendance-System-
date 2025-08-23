@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import date
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions, require_attendance_view
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.utils import get_request_id
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/attendance-summary", tags=["Attendance Summary"])
     summary="Get attendance summary by user and date range",
     description="Retrieve attendance summaries for a specific user within a date range, with optional department and active status filters."
 )
-@require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE])
+@require_attendance_view()
 async def get_attendance_summary_endpoint(
     user_id: int,
     start_date: Optional[date] = None,

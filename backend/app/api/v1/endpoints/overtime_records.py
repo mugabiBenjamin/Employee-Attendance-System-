@@ -6,8 +6,7 @@ from app.core.database import get_db
 from app.models.users import Users
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import OvertimeStatus
-from app.core.exceptions import ValidationError
+from app.core.enums import OvertimeStatus, Permission
 from app.core.utils import get_request_id
 from app.services.overtime_record_service import (
     create_overtime_record,
@@ -19,6 +18,7 @@ from app.services.overtime_record_service import (
     delete_overtime_record
 )
 from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordUpdate, OvertimeRecordOut, OvertimeRecordApproval
+from app.core.permissions import require_permissions
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,8 @@ async def create_overtime_record_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """Create a new overtime record.
 
@@ -74,7 +75,8 @@ async def get_overtime_record_endpoint(
     overtime_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """Retrieve an overtime record by ID.
 
@@ -91,13 +93,8 @@ async def get_overtime_record_endpoint(
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
     try:
-        if overtime_id <= 0:
-            raise ValidationError(detail="Invalid overtime_id")
         request_id = get_request_id(request)
         return await get_overtime_record(overtime_id, current_user, db, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error retrieving overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
@@ -121,7 +118,8 @@ async def get_user_overtime_records_endpoint(
     request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> List[OvertimeRecordOut]:
     """List overtime records for a specific user.
 
@@ -168,7 +166,8 @@ async def get_team_overtime_records_endpoint(
     request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
 ) -> List[OvertimeRecordOut]:
     """List overtime records for a manager's team.
 
@@ -211,7 +210,8 @@ async def update_overtime_record_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_OVERTIME]))
 ) -> OvertimeRecordOut:
     """Update an overtime record.
 
@@ -230,13 +230,8 @@ async def update_overtime_record_endpoint(
         HTTPException: For validation errors (422), not found (404), database errors (500), or unexpected errors (500).
     """
     try:
-        if overtime_id <= 0:
-            raise ValidationError(detail="Invalid overtime_id")
         request_id = get_request_id(request)
         return await update_overtime_record(overtime_id, overtime_update, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error updating overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
@@ -256,7 +251,8 @@ async def approve_overtime_record_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.APPROVE_OVERTIME]))
 ) -> OvertimeRecordOut:
     """Approve or reject an overtime record.
 
@@ -275,13 +271,8 @@ async def approve_overtime_record_endpoint(
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
     try:
-        if record_id <= 0:
-            raise ValidationError(detail="Invalid overtime_id")
         request_id = get_request_id(request)
         return await approve_overtime_record(record_id, approval, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error approving overtime record {record_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
@@ -300,7 +291,8 @@ async def delete_overtime_record_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_OVERTIME]))
 ) -> None:
     """Soft delete an overtime record.
 
@@ -318,13 +310,8 @@ async def delete_overtime_record_endpoint(
         HTTPException: For validation errors (422), not found (404), business logic errors (422), database errors (500), or unexpected errors (500).
     """
     try:
-        if overtime_id <= 0:
-            raise ValidationError(detail="Invalid overtime_id")
         request_id = get_request_id(request)
         await delete_overtime_record(overtime_id, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error deleting overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise

@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends, status, Request, HTTPException
+from fastapi import APIRouter, Depends, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.enums import LeaveType
-from app.core.exceptions import ValidationError
+from app.core.enums import LeaveType, Permission
 from app.core.utils import get_request_id
+from app.core.permissions import require_permissions
 from app.services.leave_approval_workflow_service import (
     approve_or_reject_leave,
     get_leave_approval,
@@ -37,6 +37,7 @@ router = APIRouter(prefix="/leave-approval-workflow", tags=["Leave Approval Work
     summary="Approve or reject a leave request",
     description="Approve or reject a leave request with validation and notifications."
 )
+@require_permissions([Permission.APPROVE_LEAVE])
 async def approve_leave_endpoint(
     approval: LeaveApprovalWorkflowCreate,
     request: Request,
@@ -59,20 +60,8 @@ async def approve_leave_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
-    try:
-        if approval.leave_id <= 0 or approval.approver_id <= 0:
-            raise ValidationError(detail="Invalid leave_id or approver_id")
-        request_id = get_request_id(request)
-        return await approve_or_reject_leave(approval, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error approving leave: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error approving leave: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    request_id = get_request_id(request)
+    return await approve_or_reject_leave(approval, request, current_user, db, settings, request_id)
 
 @router.get(
     "/{workflow_id}",
@@ -80,6 +69,7 @@ async def approve_leave_endpoint(
     summary="Get leave approval by ID",
     description="Retrieve a specific leave approval workflow entry by its ID."
 )
+@require_permissions([Permission.VIEW_LEAVE_APPROVAL])
 async def get_leave_approval_endpoint(
     workflow_id: int,
     request: Request,
@@ -102,20 +92,8 @@ async def get_leave_approval_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
-    try:
-        if workflow_id <= 0:
-            raise ValidationError(detail="Invalid workflow_id")
-        request_id = get_request_id(request)
-        return await get_leave_approval(workflow_id, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error retrieving leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error retrieving leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    request_id = get_request_id(request)
+    return await get_leave_approval(workflow_id, current_user, db, settings, request_id)
 
 @router.get(
     "/request/{leave_id}",
@@ -123,6 +101,7 @@ async def get_leave_approval_endpoint(
     summary="List leave approvals by request",
     description="Retrieve a list of approvals for a specific leave request with pagination."
 )
+@require_permissions([Permission.VIEW_LEAVE_APPROVAL])
 async def get_leave_approvals_by_request_endpoint(
     leave_id: int,
     skip: int = 0,
@@ -149,20 +128,8 @@ async def get_leave_approvals_by_request_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
-    try:
-        if leave_id <= 0:
-            raise ValidationError(detail="Invalid leave_id")
-        request_id = get_request_id(request)
-        return await get_leave_approvals_by_request(leave_id, skip, limit, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error retrieving leave approvals for leave_id {leave_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error retrieving leave approvals for leave_id {leave_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    request_id = get_request_id(request)
+    return await get_leave_approvals_by_request(leave_id, skip, limit, current_user, db, settings, request_id)
 
 @router.put(
     "/{workflow_id}",
@@ -170,6 +137,7 @@ async def get_leave_approvals_by_request_endpoint(
     summary="Update leave approval",
     description="Update a leave approval workflow entry with validation and notifications."
 )
+@require_permissions([Permission.MANAGE_LEAVE])
 async def update_leave_approval_endpoint(
     workflow_id: int,
     update_data: LeaveApprovalWorkflowUpdate,
@@ -194,20 +162,8 @@ async def update_leave_approval_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
-    try:
-        if workflow_id <= 0:
-            raise ValidationError(detail="Invalid workflow_id")
-        request_id = get_request_id(request)
-        return await update_leave_approval(workflow_id, update_data, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error updating leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error updating leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    request_id = get_request_id(request)
+    return await update_leave_approval(workflow_id, update_data, request, current_user, db, settings, request_id)
 
 @router.delete(
     "/{workflow_id}",
@@ -215,6 +171,7 @@ async def update_leave_approval_endpoint(
     summary="Delete leave approval",
     description="Soft delete a leave approval workflow entry with validation and notifications."
 )
+@require_permissions([Permission.MANAGE_LEAVE])
 async def delete_leave_approval_endpoint(
     workflow_id: int,
     request: Request,
@@ -237,20 +194,8 @@ async def delete_leave_approval_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), business logic errors (422), database errors (500), or unexpected errors (500).
     """
-    try:
-        if workflow_id <= 0:
-            raise ValidationError(detail="Invalid workflow_id")
-        request_id = get_request_id(request)
-        await delete_leave_approval(workflow_id, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error deleting leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error deleting leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    request_id = get_request_id(request)
+    await delete_leave_approval(workflow_id, request, current_user, db, settings, request_id)
 
 @router.post(
     "/steps",
@@ -259,6 +204,7 @@ async def delete_leave_approval_endpoint(
     summary="Define leave approval workflow steps",
     description="Define steps for a leave approval workflow with approver sequencing and notifications."
 )
+@require_permissions([Permission.MANAGE_WORKFLOWS])
 async def define_workflow_steps_endpoint(
     workflow_steps: List[WorkflowStepCreate],
     request: Request,
@@ -281,21 +227,8 @@ async def define_workflow_steps_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
-    try:
-        for step in workflow_steps:
-            if step.leave_id <= 0 or step.approver_id <= 0:
-                raise ValidationError(detail="Invalid leave_id or approver_id")
-        request_id = get_request_id(request)
-        return await define_workflow_steps(workflow_steps, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error defining workflow steps: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error defining workflow steps: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    request_id = get_request_id(request)
+    return await define_workflow_steps(workflow_steps, request, current_user, db, settings, request_id)
 
 @router.get(
     "/type/{leave_type}",
@@ -303,6 +236,7 @@ async def define_workflow_steps_endpoint(
     summary="Get workflow by leave type",
     description="Retrieve approval workflow steps for a specific leave type with pagination."
 )
+@require_permissions([Permission.VIEW_WORKFLOWS])
 async def get_workflow_by_type_endpoint(
     leave_type: LeaveType,
     request: Request,
@@ -325,17 +259,5 @@ async def get_workflow_by_type_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
-    try:
-        if leave_type not in LeaveType:
-            raise ValidationError(detail=f"Invalid leave type: {leave_type}")
-        request_id = get_request_id(request)
-        return await get_workflow_by_type(leave_type, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error retrieving workflow steps for leave_type {leave_type}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error retrieving workflow steps for leave_type {leave_type}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    request_id = get_request_id(request)
+    return await get_workflow_by_type(leave_type, current_user, db, settings, request_id)

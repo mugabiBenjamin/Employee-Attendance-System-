@@ -18,6 +18,8 @@ from app.schemas.employee_emergency_contact import (
     EmployeeEmergencyContactUpdate,
     EmployeeEmergencyContactOut
 )
+from app.core.enums import Permission
+from app.core.permissions import require_permissions, require_any_permissions
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,23 +38,10 @@ async def create_emergency_contact_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
-    """Create an emergency contact for the current user.
-
-    Args:
-        contact: The emergency contact data.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        EmployeeEmergencyContactOut: The created emergency contact record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Create an emergency contact for the current user."""
     try:
         request_id = get_request_id(request)
         return await create_emergency_contact(contact, request, current_user, db, settings, request_id)
@@ -73,22 +62,10 @@ async def get_emergency_contact_endpoint(
     contact_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
-    """Retrieve an emergency contact by ID.
-
-    Args:
-        contact_id: The ID of the emergency contact to retrieve.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-
-    Returns:
-        EmployeeEmergencyContactOut: The requested emergency contact record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Retrieve an emergency contact by ID."""
     try:
         request_id = get_request_id(request)
         return await get_emergency_contact(contact_id, current_user, db, request_id)
@@ -114,27 +91,10 @@ async def list_emergency_contacts_endpoint(
     request: Request = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> List[EmployeeEmergencyContactOut]:
-    """List emergency contacts with pagination and optional filters.
-
-    Args:
-        user_id: Optional user ID to filter contacts.
-        department_id: Optional department ID to filter contacts.
-        is_active: Optional filter for active/inactive contacts.
-        skip: Number of records to skip for pagination.
-        limit: Maximum number of records to return (default from settings).
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[EmployeeEmergencyContactOut]: List of emergency contact records.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """List emergency contacts with pagination and optional filters."""
     try:
         request_id = get_request_id(request)
         return await list_emergency_contacts(user_id, department_id, is_active, skip, limit, current_user, db, settings, request_id)
@@ -157,24 +117,10 @@ async def update_emergency_contact_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_any_permissions([Permission.UPDATE_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
-    """Update an emergency contact.
-
-    Args:
-        contact_id: The ID of the emergency contact to update.
-        contact_update: The updated emergency contact data.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        EmployeeEmergencyContactOut: The updated emergency contact record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Update an emergency contact."""
     try:
         request_id = get_request_id(request)
         return await update_emergency_contact(contact_id, contact_update, request, current_user, db, settings, request_id)
@@ -196,20 +142,10 @@ async def delete_emergency_contact_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_EMERGENCY_CONTACT]))
 ) -> None:
-    """Soft delete an emergency contact.
-
-    Args:
-        contact_id: The ID of the emergency contact to delete.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), or server errors (500).
-    """
+    """Soft delete an emergency contact."""
     try:
         request_id = get_request_id(request)
         await delete_emergency_contact(contact_id, request, current_user, db, settings, request_id)

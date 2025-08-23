@@ -1,12 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, status, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
-from app.core.exceptions import ValidationError
-from app.core.utils import get_request_id
 from app.services.shift_assignment_service import (
     create_shift_assignment,
     read_shift_assignment,
@@ -16,6 +14,9 @@ from app.services.shift_assignment_service import (
     get_my_shift_assignments
 )
 from app.schemas.shift_assignment import ShiftAssignmentCreate, ShiftAssignmentUpdate, ShiftAssignmentOut
+from app.core.permissions import require_permissions
+from app.core.utils import get_request_id
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,8 @@ async def create_shift_assignment_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
     """Create a new shift assignment.
 
@@ -72,7 +74,8 @@ async def read_shift_assignment_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
     """Retrieve a shift assignment by ID.
 
@@ -90,13 +93,8 @@ async def read_shift_assignment_endpoint(
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
     try:
-        if assignment_id <= 0:
-            raise ValidationError(detail="Invalid assignment_id")
         request_id = get_request_id(request)
         return await read_shift_assignment(assignment_id, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error retrieving shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -119,7 +117,8 @@ async def read_shift_assignments_endpoint(
     request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> List[ShiftAssignmentOut]:
     """List shift assignments with optional filters and pagination.
 
@@ -162,7 +161,8 @@ async def update_shift_assignment_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
     """Update a shift assignment.
 
@@ -181,13 +181,8 @@ async def update_shift_assignment_endpoint(
         HTTPException: For validation errors (422), not found (404), database errors (500), or unexpected errors (500).
     """
     try:
-        if assignment_id <= 0:
-            raise ValidationError(detail="Invalid assignment_id")
         request_id = get_request_id(request)
         return await update_shift_assignment(assignment_id, shift_assignment_update, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error updating shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -206,7 +201,8 @@ async def delete_shift_assignment_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_SHIFT_ASSIGNMENT]))
 ) -> None:
     """Soft delete a shift assignment.
 
@@ -224,13 +220,8 @@ async def delete_shift_assignment_endpoint(
         HTTPException: For validation errors (422), not found (404), business logic errors (422), database errors (500), or unexpected errors (500).
     """
     try:
-        if assignment_id <= 0:
-            raise ValidationError(detail="Invalid assignment_id")
         request_id = get_request_id(request)
         await delete_shift_assignment(assignment_id, request, current_user, db, settings, request_id)
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except HTTPException as e:
         logger.error(f"Error deleting shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
         raise
@@ -250,7 +241,8 @@ async def get_my_shift_assignments_endpoint(
     request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> List[ShiftAssignmentOut]:
     """Retrieve the current user's shift assignments.
 
