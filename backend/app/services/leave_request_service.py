@@ -862,7 +862,7 @@ async def delete_leave_request(
                     f"Dear {first_name},\n\n"
                     f"The leave request (ID: {db_leave_request.leave_id}) for user ID {db_leave_request.user_id} has been deleted.\n"
                     f"Details:\n"
-                    f"Leave Type: {db_leave_request.leave_type.value.capitalize()}\n"
+                    f"Leave Type: {str(db_leave_request.leave_type).capitalize()}\n"
                     f"Start Date: {db_leave_request.start_date}\n"
                     f"End Date: {db_leave_request.end_date}\n"
                     f"Deleted At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"

@@ -149,6 +149,7 @@ class Permission(str, Enum):
     VIEW_OWN_EMERGENCY_CONTACT = "view_own_emergency_contact"
     VIEW_OWN_HIERARCHY = "view_own_hierarchy"
     VIEW_OWN_SHIFT_ASSIGNMENT = "view_own_shift_assignment"
+    VIEW_OWN_DEPARTMENT = "view_own_department"
     
     # Manager permissions
     APPROVE_LEAVE = "approve_leave"
@@ -285,6 +286,7 @@ _EMPLOYEE_PERMISSIONS = [
     Permission.VIEW_OWN_EMERGENCY_CONTACT,
     Permission.VIEW_OWN_HIERARCHY,
     Permission.VIEW_OWN_SHIFT_ASSIGNMENT,
+    Permission.VIEW_OWN_DEPARTMENT,
 ]
 
 _MANAGER_PERMISSIONS = [

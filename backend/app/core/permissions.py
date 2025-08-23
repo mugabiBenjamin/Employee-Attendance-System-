@@ -221,6 +221,41 @@ def invalidate_department_cache(department_id: int):
     """Invalidate cached permissions for a department."""
     cache_key = f"department_{department_id}_permissions"
     department_permission_cache.pop(cache_key, None)
+    
+async def invalidate_cache_prefix(prefix: str):
+    """Invalidate all cached entries that start with the given prefix."""
+    try:
+        # Get all cache keys that match the prefix
+        keys_to_remove = []
+        
+        # Check user permission cache
+        for key in list(user_permission_cache.keys()):
+            if str(key).startswith(prefix):
+                keys_to_remove.append(('user', key))
+        
+        # Check role permission cache  
+        for key in list(role_permission_cache.keys()):
+            if str(key).startswith(prefix):
+                keys_to_remove.append(('role', key))
+                
+        # Check department permission cache
+        for key in list(department_permission_cache.keys()):
+            if str(key).startswith(prefix):
+                keys_to_remove.append(('dept', key))
+        
+        # Remove the keys
+        for cache_type, key in keys_to_remove:
+            if cache_type == 'user':
+                user_permission_cache.pop(key, None)
+            elif cache_type == 'role':
+                role_permission_cache.pop(key, None)
+            elif cache_type == 'dept':
+                department_permission_cache.pop(key, None)
+                
+        logger.debug(f"Invalidated {len(keys_to_remove)} cache entries with prefix: {prefix}")
+        
+    except Exception as e:
+        logger.error(f"Error invalidating cache with prefix {prefix}: {str(e)}")
 
 # Role-based decorators
 def require_employee_access():
