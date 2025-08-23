@@ -107,11 +107,11 @@ async def get_shift_pattern_endpoint(
     description="List all active shift patterns with optional filtering by shift type and department, and pagination."
 )
 async def list_shift_patterns_endpoint(
+    request: Request,
     shift_type: Optional[ShiftType] = None,
     department_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

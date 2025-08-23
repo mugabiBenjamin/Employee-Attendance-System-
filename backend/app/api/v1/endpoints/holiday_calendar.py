@@ -107,11 +107,11 @@ async def get_holiday_endpoint(
     description="Retrieve a list of active holidays, optionally filtered by department or year with pagination."
 )
 async def list_holidays_endpoint(
+    request: Request,
     department_id: Optional[int] = None,
     year: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

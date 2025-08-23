@@ -109,12 +109,12 @@ async def read_shift_assignment_endpoint(
     description="List shift assignments with optional filtering by user ID, pattern ID, or department ID, and pagination."
 )
 async def read_shift_assignments_endpoint(
+    request: Request,
     user_id: Optional[int] = None,
     pattern_id: Optional[int] = None,
     department_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -236,9 +236,9 @@ async def delete_shift_assignment_endpoint(
     description="Retrieve the current user's shift assignments with pagination."
 )
 async def get_my_shift_assignments_endpoint(
+    request: Request,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

@@ -109,12 +109,12 @@ async def get_employee_hierarchy_endpoint(
     description="Retrieve a list of employee hierarchies, optionally filtered by employee_id, department_id, or supervisor_id with pagination."
 )
 async def list_employee_hierarchies_endpoint(
+    request: Request,
     employee_id: Optional[int] = None,
     department_id: Optional[int] = None,
     supervisor_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

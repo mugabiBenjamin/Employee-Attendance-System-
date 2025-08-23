@@ -111,12 +111,12 @@ async def get_leave_request_endpoint(
     description="List leave requests with optional filters and pagination."
 )
 async def get_leave_requests_endpoint(
+    request: Request,
     user_id: Optional[int] = None,
     status: Optional[LeaveRequestStatus] = None,
     leave_type: Optional[LeaveType] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -158,13 +158,13 @@ async def get_leave_requests_endpoint(
     description="List leave requests for a manager's team with optional filters and pagination."
 )
 async def get_team_leave_requests_endpoint(
+    request: Request,
     status: Optional[LeaveRequestStatus] = None,
     leave_type: Optional[LeaveType] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

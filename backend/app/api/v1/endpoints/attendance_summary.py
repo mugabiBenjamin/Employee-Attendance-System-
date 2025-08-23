@@ -29,6 +29,7 @@ router = APIRouter(prefix="/attendance-summary", tags=["Attendance Summary"])
 )
 @require_attendance_view()
 async def get_attendance_summary_endpoint(
+    request: Request,
     user_id: int,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
@@ -36,7 +37,6 @@ async def get_attendance_summary_endpoint(
     is_active: Optional[bool] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)

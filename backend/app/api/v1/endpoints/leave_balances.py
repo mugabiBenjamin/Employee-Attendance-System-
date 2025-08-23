@@ -27,9 +27,9 @@ router = APIRouter(prefix="/leave-balances", tags=["Leave Balances"])
     description="Retrieve leave balances for a specific user, optionally filtered by leave type."
 )
 async def get_leave_balances_endpoint(
+    request: Request,
     user_id: int,
     leave_type: Optional[LeaveType] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

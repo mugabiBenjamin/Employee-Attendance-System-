@@ -109,13 +109,13 @@ async def get_overtime_record_endpoint(
     description="List overtime records for a specific user with optional status, date range, and pagination."
 )
 async def get_user_overtime_records_endpoint(
+    request: Request,
     user_id: int,
     status: Optional[OvertimeStatus] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -158,12 +158,12 @@ async def get_user_overtime_records_endpoint(
     description="List overtime records for a manager's team with optional status, date range, and pagination."
 )
 async def get_team_overtime_records_endpoint(
+    request: Request,
     status: Optional[OvertimeStatus] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

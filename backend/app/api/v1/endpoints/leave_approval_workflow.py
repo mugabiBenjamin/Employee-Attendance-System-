@@ -103,10 +103,10 @@ async def get_leave_approval_endpoint(
 )
 @require_permissions([Permission.VIEW_LEAVE_APPROVAL])
 async def get_leave_approvals_by_request_endpoint(
+    request: Request,
     leave_id: int,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
