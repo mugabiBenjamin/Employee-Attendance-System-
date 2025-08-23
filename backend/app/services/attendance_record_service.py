@@ -10,6 +10,7 @@ from app.models.system_logs import SystemLogs
 from app.models.shift_assignments import ShiftAssignments
 from app.models.shift_patterns import ShiftPatterns
 from app.models.holiday_calendar import HolidayCalendar
+from app.models.employee_hierarchy import EmployeeHierarchy
 from app.schemas.attendance_record import AttendanceRecordCreate, AttendanceRecordOut
 from app.core.config import Settings, get_settings
 from app.core.utils import calculate_total_hours, calculate_overtime_hours, calculate_shift_hours
@@ -17,10 +18,9 @@ from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
-from app.core.exceptions import UserNotFoundError, ValidationError, ResourceNotFoundError, DatabaseError, AttendanceError
+from app.core.exceptions import UserNotFoundError, ValidationError, ResourceNotFoundError, AttendanceError
 from app.core.utils import get_request_id, get_users_with_permission
 from app.core.mail import send_email
-from app.models.employee_hierarchy import EmployeeHierarchy
 import logging
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ async def clock_in(
         # Validate location if required
         if settings.REQUIRE_ATTENDANCE_LOCATION and (not location or location.strip() == ""):
             raise ValidationError(detail="Location is required for clock-in")
-        if location and len(location) > 255:  # Assuming max length for location field
+        if location and len(location) > 255:
             raise ValidationError(detail="Location exceeds maximum length")
 
         # Check for existing clock-in
@@ -80,7 +80,8 @@ async def clock_in(
             ).model_dump(),
             date=current_date,
             created_at=current_time,
-            updated_at=current_time
+            updated_at=current_time,
+            is_active=True
         )
         db.add(db_record)
         await db.commit()
@@ -103,9 +104,13 @@ async def clock_in(
         await db.commit()
 
         # Invalidate cache
-        invalidate_user_cache(user.user_id)
         await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
-        logger.info(f"Cache invalidated for attendance_history:{user.user_id}", extra={"request_id": request_id})
+        invalidate_user_cache(user.user_id)
+        invalidate_user_cache(user.user_id)  # Invalidate current user's cache (same as user in this case)
+        logger.info(
+            f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Notify user and admins if enabled
         if settings.NOTIFY_ON_ATTENDANCE:
@@ -139,12 +144,9 @@ async def clock_in(
     except ValidationError as e:
         logger.error(f"Validation error during clock-in for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error during clock-in for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error during clock-in for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error processing clock-in")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing clock-in")
 
 async def clock_out(
     request: Request,
@@ -257,9 +259,13 @@ async def clock_out(
         await db.commit()
 
         # Invalidate cache
-        invalidate_user_cache(user.user_id)
         await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
-        logger.info(f"Cache invalidated for attendance_history:{user.user_id}", extra={"request_id": request_id})
+        invalidate_user_cache(user.user_id)
+        invalidate_user_cache(user.user_id)  # Invalidate current user's cache (same as user in this case)
+        logger.info(
+            f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Notify user and admins if enabled
         if settings.NOTIFY_ON_ATTENDANCE:
@@ -294,12 +300,9 @@ async def clock_out(
     except ValidationError as e:
         logger.error(f"Validation error during clock-out for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error during clock-out for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error during clock-out for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error processing clock-out")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing clock-out")
 
 async def get_attendance_history(
     user_id: Optional[int] = None,
@@ -326,8 +329,7 @@ async def get_attendance_history(
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db)
         if user_id and user_id != current_user.user_id:
-            if not any(p == Permission.MANAGE_ATTENDANCE.value or p == Permission.VIEW_ATTENDANCE.value for p in user_permissions):
-                # Check if user is a supervisor
+            if Permission.VIEW_ATTENDANCE not in user_permissions and Permission.MANAGE_ATTENDANCE not in user_permissions:
                 query_supervisor = select(EmployeeHierarchy).where(
                     EmployeeHierarchy.supervisor_id == current_user.user_id,
                     EmployeeHierarchy.employee_id == user_id,
@@ -395,9 +397,6 @@ async def get_attendance_history(
     except HTTPException as e:
         logger.error(f"Forbidden access to attendance history for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error in get_attendance_history for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error in get_attendance_history for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error retrieving attendance history")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving attendance history")

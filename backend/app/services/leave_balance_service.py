@@ -19,7 +19,7 @@ from app.core.security import get_current_user
 from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_leave_policy_exists
-from app.core.utils import get_request_id, get_users_with_permission
+from app.core.utils import get_request_id
 from app.services.system_log_service import create_system_log
 import logging
 
@@ -41,8 +41,8 @@ async def get_leave_balances_by_user_and_type(
 
         await validate_user_exists(db, user_id, request_id)
 
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.VIEW_LEAVE_BALANCE or p == Permission.MANAGE_LEAVE for p in user_permissions) and user_id != current_user.user_id:
+        user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
+        if not any(p in [Permission.VIEW_LEAVE_BALANCE.value, Permission.MANAGE_LEAVE.value] for p in user_permissions) and user_id != current_user.user_id:
             query_hierarchy = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == user_id,
                 EmployeeHierarchy.supervisor_id == current_user.user_id,
@@ -81,9 +81,7 @@ async def get_leave_balances_by_user_and_type(
             query_policy = select(LeavePolicies).where(
                 LeavePolicies.leave_type == balance.leave_type,
                 LeavePolicies.is_active.is_(True),
-                LeavePolicies.deleted_at.is_(None),
-                LeavePolicies.effective_from <= datetime.now(timezone.utc).date(),
-                or_(LeavePolicies.effective_to.is_(None), LeavePolicies.effective_to >= datetime.now(timezone.utc).date())
+                LeavePolicies.deleted_at.is_(None)
             )
             result_policy = await db.execute(query_policy)
             policy = result_policy.scalar_one_or_none()
@@ -172,9 +170,7 @@ async def update_leave_balance(
         query_policy = select(LeavePolicies).where(
             LeavePolicies.leave_type == leave_type,
             LeavePolicies.is_active.is_(True),
-            LeavePolicies.deleted_at.is_(None),
-            LeavePolicies.effective_from <= datetime.now(timezone.utc).date(),
-            or_(LeavePolicies.effective_to.is_(None), LeavePolicies.effective_to >= datetime.now(timezone.utc).date())
+            LeavePolicies.deleted_at.is_(None)
         )
         result_policy = await db.execute(query_policy)
         policy = result_policy.scalar_one_or_none()
@@ -182,8 +178,8 @@ async def update_leave_balance(
             raise LeavePolicyNotFoundError(leave_type=leave_type)
         if balance_change > 0:
             total_allocated = float(db_balance.allocated_days) + float(db_balance.carried_forward)
-            if total_allocated + balance_change > policy.max_consecutive_days:
-                raise ValidationError(detail=f"Balance change would exceed policy limit of {policy.max_consecutive_days} days for {leave_type}")
+            if total_allocated + balance_change > policy.max_days:
+                raise ValidationError(detail=f"Balance change would exceed policy limit of {policy.max_days} days for {leave_type.value}")
 
         # Check for pending and approved leave requests
         query_requests = select(LeaveRequests).where(
@@ -220,10 +216,60 @@ async def update_leave_balance(
         await db.commit()
         await db.refresh(db_balance)
 
+        # Notify employee, manager, and admins
+        eat_tz = ZoneInfo("Africa/Nairobi")
+        current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
+        recipients = []
+        query_employee = select(Users).where(
+            Users.user_id == user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_employee = await db.execute(query_employee)
+        employee = result_employee.scalar_one_or_none()
+        if employee:
+            recipients.append((employee.email, employee.first_name))
+        query_manager = select(Users).join(
+            EmployeeHierarchy,
+            and_(
+                EmployeeHierarchy.supervisor_id == Users.user_id,
+                EmployeeHierarchy.is_active.is_(True),
+                EmployeeHierarchy.deleted_at.is_(None)
+            )
+        ).where(
+            EmployeeHierarchy.employee_id == user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_manager = await db.execute(query_manager)
+        manager = result_manager.scalar_one_or_none()
+        if manager:
+            recipients.append((manager.email, manager.first_name))
+        admins = await get_user_permissions(Permission.MANAGE_LEAVE, db)
+        recipients.extend([(admin.email, admin.first_name) for admin in admins])
+        for email, first_name in recipients:
+            await send_email(
+                to_email=email,
+                subject=f"Leave Balance Updated (ID: {db_balance.balance_id})",
+                body=(
+                    f"Dear {first_name},\n\n"
+                    f"The leave balance (ID: {db_balance.balance_id}) for user ID {user_id} has been updated.\n"
+                    f"Details:\n"
+                    f"Leave Type: {leave_type.value.capitalize()}\n"
+                    f"Change: {'Added' if balance_change > 0 else 'Deducted'} {abs(balance_change)} days\n"
+                    f"New Used Days: {db_balance.used_days}\n"
+                    f"Available Balance: {float(db_balance.allocated_days) + float(db_balance.carried_forward) - float(db_balance.used_days)} days\n"
+                    f"Updated At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
+                    f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
+
         # Invalidate cache
         invalidate_user_cache(user_id)
-        await invalidate_cache_prefix(f"leave_balances:{user_id}")
-        logger.info(f"Cache invalidated for leave_balances:{user_id} and user_id: {user_id}", extra={"request_id": request_id})
+        await invalidate_cache_prefix("leave_balances")
+        logger.info(f"Cache invalidated for leave_balances and user_id: {user_id}", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -238,55 +284,6 @@ async def update_leave_balance(
             request_id=request_id
         )
         await create_system_log(log, request, current_user, db, settings, request_id)
-
-        # Notify employee, supervisor, and admins
-        eat_tz = ZoneInfo("Africa/Nairobi")
-        current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
-        recipients = []
-        query_user = select(Users).where(
-            Users.user_id == user_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result_user = await db.execute(query_user)
-        employee = result_user.scalar_one_or_none()
-        if employee:
-            recipients.append((employee.email, employee.first_name))
-        query_supervisor = select(Users).join(
-            EmployeeHierarchy,
-            and_(
-                EmployeeHierarchy.supervisor_id == Users.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-        ).where(
-            EmployeeHierarchy.employee_id == user_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result_supervisor = await db.execute(query_supervisor)
-        supervisor = result_supervisor.scalar_one_or_none()
-        if supervisor:
-            recipients.append((supervisor.email, supervisor.first_name))
-        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
-        recipients.extend([(admin.email, admin.first_name) for admin in admins])
-        for email, first_name in recipients:
-            await send_email(
-                to_email=email,
-                subject=f"Leave Balance Updated (ID: {db_balance.balance_id})",
-                body=(
-                    f"Dear {first_name},\n\n"
-                    f"The leave balance (ID: {db_balance.balance_id}) for user ID {user_id} and {leave_type} "
-                    f"has been updated to version {db_balance.version}.\n"
-                    f"Change: {'Added' if balance_change > 0 else 'Deducted'} {abs(balance_change)} days\n"
-                    f"New Used Days: {db_balance.used_days}\n"
-                    f"Available Balance: {float(db_balance.allocated_days) + float(db_balance.carried_forward) - float(db_balance.used_days)} days\n"
-                    f"Updated At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
-                    f"Please review in the Employee Management System.\n\n"
-                    f"Best regards,\nEmployee Management System"
-                ),
-                request_id=request_id
-            )
 
         balance_out = LeaveBalanceOut.model_validate(db_balance)
         balance_out.policy_details = LeavePolicyDetails.model_validate(policy) if policy else LeavePolicyDetails()

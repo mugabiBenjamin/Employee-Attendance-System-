@@ -13,7 +13,7 @@ from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.mail import send_email
 from app.core.exceptions import LeavePolicyNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_policy_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -58,7 +58,8 @@ async def create_leave_policy(
             **policy.model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
-            version=policy.version or 1
+            version=policy.version or 1,
+            is_active=True
         )
         db.add(db_policy)
         await db.commit()
@@ -105,7 +106,11 @@ async def create_leave_policy(
         # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        logger.info(f"Cache invalidated for leave_policies, leave_balances, and {len(users)} users", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for leave_policies, leave_balances, {len(users)} users, and current_user:{current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(
@@ -182,11 +187,13 @@ async def get_leave_policy(
             raise LeavePolicyNotFoundError(leave_type=f"ID {policy_id}")
 
         # Authorization check
-        if not any(p == Permission.VIEW_LEAVE_POLICY or p == Permission.MANAGE_LEAVE for p in current_user.permissions) and policy.employee_type != EmployeeType.ALL and policy.employee_type != current_user.employee_type:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to view this leave policy"
-            )
+        user_permissions = await get_user_permissions(current_user.user_id, db)
+        if Permission.VIEW_LEAVE_POLICY not in user_permissions and Permission.MANAGE_LEAVE not in user_permissions:
+            if policy.employee_type != EmployeeType.ALL and policy.employee_type != current_user.employee_type:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to view this leave policy"
+                )
 
         policy_dict = LeavePolicyOut.model_validate(policy).model_dump()
         await set_cache(cache_key, policy_dict, ttl=300)
@@ -239,7 +246,8 @@ async def list_leave_policies(
             LeavePolicies.is_active.is_(True),
             LeavePolicies.deleted_at.is_(None)
         )
-        if not any(p == Permission.VIEW_LEAVE_POLICY or p == Permission.MANAGE_LEAVE for p in current_user.permissions):
+        user_permissions = await get_user_permissions(current_user.user_id, db)
+        if Permission.VIEW_LEAVE_POLICY not in user_permissions and Permission.MANAGE_LEAVE not in user_permissions:
             query = query.where(
                 (LeavePolicies.employee_type == EmployeeType.ALL) |
                 (LeavePolicies.employee_type == current_user.employee_type)
@@ -370,7 +378,11 @@ async def update_leave_policy(
         # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        logger.info(f"Cache invalidated for leave_policies, leave_balances, and {len(users)} users", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for leave_policies, leave_balances, {len(users)} users, and current_user:{current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(
@@ -478,7 +490,11 @@ async def delete_leave_policy(
         # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        logger.info(f"Cache invalidated for leave_policies, leave_balances, and {len(users)} users", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for leave_policies, leave_balances, {len(users)} users, and current_user:{current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(

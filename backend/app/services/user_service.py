@@ -71,12 +71,12 @@ async def create_user(
         await db.commit()
         await db.refresh(db_user)
 
-        # Invalidate cache for users list
+        # Invalidate cache for users list and user
         await invalidate_cache_prefix("users")
         invalidate_user_cache(db_user.user_id)
         logger.info(f"Cache invalidated for user_id: {db_user.user_id} and users list")
 
-        # Log action
+        # Log action using SystemAction.INSERT
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.INSERT,
@@ -142,7 +142,7 @@ async def read_user(
 
         user_dict = UserOut.model_validate(user).model_dump()
         await set_cache(cache_key, user_dict, ttl=300)
-        logger.info(f"Cache set for user_id: {user_id}", extra={"request_id": request_id})
+        logger.info(f"Cache set for user_id inaccurately {user_id}", extra={"request_id": request_id})
 
         logger.info(
             f"Retrieved user, user_id: {user_id}",
@@ -276,7 +276,7 @@ async def update_user(
         invalidate_user_cache(user_id)
         logger.info(f"Cache invalidated for user_id: {user_id} and users list")
 
-        # Log action
+        # Log action using SystemAction.UPDATE
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE,
@@ -355,7 +355,7 @@ async def delete_user(
         invalidate_user_cache(user_id)
         logger.info(f"Cache invalidated for user_id: {user_id} and users list")
 
-        # Log action
+        # Log action using SystemAction.DELETE
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE,
@@ -391,7 +391,7 @@ async def delete_user(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 async def get_current_user_profile(
-    current_user: Users,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
     _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))

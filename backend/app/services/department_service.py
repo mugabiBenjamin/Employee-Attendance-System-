@@ -56,9 +56,10 @@ async def create_department(
         await invalidate_cache_prefix("department")
         if department.supervisor_id:
             invalidate_user_cache(department.supervisor_id)
-        logger.info(f"Cache invalidated for department and user:{department.supervisor_id}", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(f"Cache invalidated for department and users:{department.supervisor_id},{current_user.user_id}", extra={"request_id": request_id})
 
-        # Log action
+        # Log action using SystemAction.CREATE_DEPARTMENT
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.CREATE_DEPARTMENT,
@@ -82,7 +83,7 @@ async def create_department(
         logger.error(f"Validation error creating department: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except UserNotFoundError as e:
-        logger.error(f"Manager not found: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error creating department: {str(e)}", extra={"request_id": request_id})
@@ -241,9 +242,10 @@ async def update_department(
             invalidate_user_cache(old_supervisor_id)
         if db_department.supervisor_id and db_department.supervisor_id != old_supervisor_id:
             invalidate_user_cache(db_department.supervisor_id)
-        logger.info(f"Cache invalidated for department and users:{old_supervisor_id},{db_department.supervisor_id}", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(f"Cache invalidated for department and users:{old_supervisor_id},{db_department.supervisor_id},{current_user.user_id}", extra={"request_id": request_id})
 
-        # Log action
+        # Log action using SystemAction.UPDATE_DEPARTMENT
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE_DEPARTMENT,
@@ -270,7 +272,7 @@ async def update_department(
         logger.error(f"Department not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except UserNotFoundError as e:
-        logger.error(f"Manager not found: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"User not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error updating department {department_id}: {str(e)}", extra={"request_id": request_id})
@@ -312,9 +314,10 @@ async def delete_department(
         await invalidate_cache_prefix("department")
         if db_department.supervisor_id:
             invalidate_user_cache(db_department.supervisor_id)
-        logger.info(f"Cache invalidated for department and user:{db_department.supervisor_id}", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(f"Cache invalidated for department and users:{db_department.supervisor_id},{current_user.user_id}", extra={"request_id": request_id})
 
-        # Log action
+        # Log action using SystemAction.DELETE_DEPARTMENT
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE_DEPARTMENT,

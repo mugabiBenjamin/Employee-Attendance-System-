@@ -37,6 +37,7 @@ class LeaveRequestBase(BaseModel):
         return days
 
 class LeaveRequestCreate(LeaveRequestBase):
+    user_id: int
     leave_type: LeaveType
     start_date: date
     end_date: date

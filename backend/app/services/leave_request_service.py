@@ -87,7 +87,7 @@ async def create_leave_request(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.MANAGE_LEAVE.value or p == Permission.CREATE_ALL_LEAVE_REQUESTS.value for p in user_permissions) and leave_request.user_id != current_user.user_id:
+        if not any(p in [Permission.MANAGE_LEAVE.value, Permission.CREATE_ALL_LEAVE_REQUESTS.value] for p in user_permissions) and leave_request.user_id != current_user.user_id:
             query_hierarchy = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == leave_request.user_id,
                 EmployeeHierarchy.supervisor_id == current_user.user_id,
@@ -126,8 +126,8 @@ async def create_leave_request(
         )
         result_policy = await db.execute(query_policy)
         leave_policy = result_policy.scalar_one_or_none()
-        if leave_policy and days_requested > leave_policy.max_days:
-            raise ValidationError(detail=f"Requested days ({days_requested}) exceed policy limit ({leave_policy.max_days}) for {leave_request.leave_type.value}")
+        if leave_policy and days_requested > leave_policy.max_consecutive_days:
+            raise ValidationError(detail=f"Requested days ({days_requested}) exceed policy limit ({leave_policy.max_consecutive_days}) for {leave_request.leave_type.value}")
 
         # Create leave request
         db_leave_request = LeaveRequests(
@@ -184,7 +184,7 @@ async def create_leave_request(
                 subject=f"New Leave Request Submitted (ID: {db_leave_request.leave_id})",
                 body=(
                     f"Dear {first_name},\n\n"
-                    f"Employee {employee.first_name} {employee.last_name} submitted a leave request.\n"
+                    f"Employee {employee.first_name if employee else 'Unknown'} {employee.last_name if employee else ''} submitted a leave request.\n"
                     f"Details:\n"
                     f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
                     f"Start Date: {leave_request.start_date}\n"
@@ -260,7 +260,7 @@ async def get_leave_request(
             LeaveRequests.deleted_at.is_(None)
         )
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.VIEW_LEAVE_REQUEST.value or p == Permission.MANAGE_LEAVE.value for p in user_permissions):
+        if not any(p in [Permission.VIEW_LEAVE_REQUEST.value, Permission.MANAGE_LEAVE.value] for p in user_permissions):
             query = query.where(
                 or_(
                     LeaveRequests.user_id == current_user.user_id,
@@ -338,7 +338,7 @@ async def get_leave_requests(
         if leave_type:
             query = query.where(LeaveRequests.leave_type == leave_type)
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.VIEW_LEAVE_REQUEST.value or p == Permission.MANAGE_LEAVE.value for p in user_permissions):
+        if not any(p in [Permission.VIEW_LEAVE_REQUEST.value, Permission.MANAGE_LEAVE.value] for p in user_permissions):
             query = query.where(
                 or_(
                     LeaveRequests.user_id == current_user.user_id,
@@ -674,7 +674,7 @@ async def approve_reject_leave_request(
                     f"Days Requested: {leave_request.days_requested}\n"
                     f"Comments: {approval.comments or 'None'}\n"
                     f"Approved At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
-                    f"Please contact HR for any questions.\n\n"
+                    f"Please review in the Employee Management System.\n\n"
                     f"Best regards,\nEmployee Management System"
                 ),
                 request_id=request_id
@@ -712,12 +712,88 @@ async def approve_reject_leave_request(
         logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error approving leave request {leave_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error approving/rejecting leave request {leave_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing leave request")
+
+async def get_team_leave_requests(
+    status: Optional[LeaveRequestStatus] = None,
+    leave_type: Optional[LeaveType] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    skip: int = 0,
+    limit: Optional[int] = None,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = Depends(get_request_id),
+    _: bool = Depends(require_permissions([Permission.VIEW_TEAM_LEAVE_REQUESTS]))
+) -> List[LeaveRequestOut]:
+    """Retrieve leave requests for a manager's team with optional filters and pagination."""
+    try:
+        if skip < 0 or (limit is not None and limit <= 0):
+            raise ValidationError(detail="Invalid pagination parameters")
+        if start_date and end_date and start_date > end_date:
+            raise ValidationError(detail="Start date must be on or before end date")
+        if leave_type is not None and leave_type not in LeaveType:
+            raise ValidationError(detail=f"Invalid leave type: {leave_type}")
+
+        cache_key = f"leave_requests_team:{current_user.user_id}:{status or 'all'}:{leave_type or 'all'}:{start_date or 'all'}:{end_date or 'all'}:{skip}:{limit or settings.DEFAULT_PAGE_SIZE}"
+        cached_requests = await get_cache(cache_key)
+        if cached_requests:
+            logger.info(f"Cache hit for leave_requests_team:{current_user.user_id}", extra={"request_id": request_id})
+            return [LeaveRequestOut(**req) for req in cached_requests]
+
+        query = select(EmployeeHierarchy).where(
+            EmployeeHierarchy.supervisor_id == current_user.user_id,
+            EmployeeHierarchy.is_active.is_(True),
+            EmployeeHierarchy.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        team = result.scalars().all()
+        employee_ids = [emp.employee_id for emp in team]
+
+        if not employee_ids:
+            return []
+
+        query = select(LeaveRequests).where(
+            LeaveRequests.user_id.in_(employee_ids),
+            LeaveRequests.is_active.is_(True),
+            LeaveRequests.deleted_at.is_(None)
+        )
+        if status:
+            query = query.where(LeaveRequests.status == status)
+        if leave_type:
+            query = query.where(LeaveRequests.leave_type == leave_type)
+        if start_date:
+            query = query.where(LeaveRequests.start_date >= start_date)
+        if end_date:
+            query = query.where(LeaveRequests.end_date <= end_date)
+
+        limit = limit or settings.DEFAULT_PAGE_SIZE
+        query = query.order_by(LeaveRequests.created_at.desc()).offset(skip).limit(limit)
+        result = await db.execute(query)
+        leave_requests = result.scalars().all()
+
+        leave_requests_dict = [LeaveRequestOut.model_validate(req).model_dump() for req in leave_requests]
+        await set_cache(cache_key, leave_requests_dict, ttl=300)
+        logger.info(f"Cache set for leave_requests_team:{current_user.user_id}", extra={"request_id": request_id})
+
+        logger.info(
+            f"Retrieved {len(leave_requests)} leave requests for supervisor_id: {current_user.user_id}",
+            extra={"request_id": request_id, "user_id": current_user.user_id}
+        )
+        return [LeaveRequestOut.model_validate(req) for req in leave_requests]
+
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving team leave requests for supervisor_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving team leave requests")
 
 async def delete_leave_request(
     leave_id: int,
-    request: Request,
+    request: Optional[Request] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -729,8 +805,6 @@ async def delete_leave_request(
         if leave_id <= 0:
             raise ValidationError(detail="Invalid leave_id")
 
-        await validate_leave_request_exists(db, leave_id, request_id)
-
         query = select(LeaveRequests).where(
             LeaveRequests.leave_id == leave_id,
             LeaveRequests.is_active.is_(True),
@@ -738,6 +812,7 @@ async def delete_leave_request(
         )
         result = await db.execute(query)
         db_leave_request = result.scalar_one_or_none()
+
         if not db_leave_request:
             raise LeaveRequestNotFoundError(leave_id=leave_id)
 
@@ -764,7 +839,7 @@ async def delete_leave_request(
         db.add(db_leave_request)
         await db.commit()
 
-        # Notify employee, manager, and admins
+        # Notify employee and admins
         eat_tz = ZoneInfo("Africa/Nairobi")
         current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
         recipients = []
@@ -777,22 +852,6 @@ async def delete_leave_request(
         employee = result_employee.scalar_one_or_none()
         if employee:
             recipients.append((employee.email, employee.first_name))
-        query_manager = select(Users).join(
-            EmployeeHierarchy,
-            and_(
-                EmployeeHierarchy.supervisor_id == Users.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-        ).where(
-            EmployeeHierarchy.employee_id == db_leave_request.user_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result_manager = await db.execute(query_manager)
-        manager = result_manager.scalar_one_or_none()
-        if manager:
-            recipients.append((manager.email, manager.first_name))
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients.extend([(admin.email, admin.first_name) for admin in admins])
         for email, first_name in recipients:
@@ -806,7 +865,6 @@ async def delete_leave_request(
                     f"Leave Type: {db_leave_request.leave_type.value.capitalize()}\n"
                     f"Start Date: {db_leave_request.start_date}\n"
                     f"End Date: {db_leave_request.end_date}\n"
-                    f"Days Requested: {db_leave_request.days_requested}\n"
                     f"Deleted At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
                     f"Please contact HR for any questions.\n\n"
                     f"Best regards,\nEmployee Management System"
@@ -819,7 +877,7 @@ async def delete_leave_request(
         await invalidate_cache_prefix("leave_requests")
         logger.info(f"Cache invalidated for leave_requests and user_id: {db_leave_request.user_id}", extra={"request_id": request_id})
 
-        # Log action
+        # Log the action
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE_LEAVE_REQUEST,
@@ -834,7 +892,7 @@ async def delete_leave_request(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         logger.info(
-            f"Leave request deleted, leave_id: {leave_id}, user_id: {db_leave_request.user_id}",
+            f"Leave request soft deleted, leave_id: {leave_id}, user_id: {db_leave_request.user_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
 

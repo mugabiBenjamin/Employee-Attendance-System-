@@ -12,11 +12,11 @@ from app.schemas.shift_assignment import ShiftAssignmentCreate, ShiftAssignmentU
 from app.schemas.system_log import SystemLogCreate
 from app.core.config import Settings, get_settings
 from app.core.enums import Permission, SystemAction
-from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, ValidationError, DatabaseError
+from app.core.exceptions import UserNotFoundError, ResourceNotFoundError, ValidationError
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
-from app.core.validators import validate_shift_assignment_exists
+from app.core.validators import validate_shift_assignment_exists, validate_department_exists
 from app.core.utils import get_request_id, get_users_with_permission
 from app.services.system_log_service import create_system_log
 from app.core.mail import send_email
@@ -112,16 +112,21 @@ async def create_shift_assignment(
         db_assignment = ShiftAssignments(
             **shift_assignment.model_dump(),
             created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            updated_at=datetime.now(timezone.utc),
+            is_active=True
         )
         db.add(db_assignment)
         await db.commit()
         await db.refresh(db_assignment)
 
         # Invalidate caches
-        invalidate_user_cache(shift_assignment.user_id)
         await invalidate_cache_prefix("shift_assignments")
-        logger.info(f"Cache invalidated for shift_assignments and user_id: {shift_assignment.user_id}", extra={"request_id": request_id})
+        invalidate_user_cache(shift_assignment.user_id)
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for shift_assignments, user_id: {shift_assignment.user_id}, and current_user: {current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(
@@ -172,12 +177,9 @@ async def create_shift_assignment(
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error creating shift assignment: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error creating shift assignment: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating shift assignment")
 
 async def read_shift_assignment(
     assignment_id: int,
@@ -213,9 +215,8 @@ async def read_shift_assignment(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.MANAGE_SHIFT_ASSIGNMENTS.value or p == Permission.VIEW_SHIFT_ASSIGNMENT.value for p in user_permissions):
+        if Permission.VIEW_SHIFT_ASSIGNMENT not in user_permissions and Permission.MANAGE_SHIFT_ASSIGNMENTS not in user_permissions:
             if db_assignment.user_id != current_user.user_id:
-                # Check if user is a supervisor
                 query_supervisor = select(EmployeeHierarchy).where(
                     EmployeeHierarchy.supervisor_id == current_user.user_id,
                     EmployeeHierarchy.employee_id == db_assignment.user_id,
@@ -248,12 +249,9 @@ async def read_shift_assignment(
     except HTTPException as e:
         logger.error(f"Forbidden access to shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error retrieving shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving shift assignment")
 
 async def read_shift_assignments(
     user_id: Optional[int] = None,
@@ -285,6 +283,7 @@ async def read_shift_assignments(
             logger.info(f"Cache hit for shift_assignments, user_id: {user_id or 'all'}, pattern_id: {pattern_id or 'all'}", extra={"request_id": request_id})
             return [ShiftAssignmentOut(**a) for a in cached_assignments]
 
+        # Validate inputs
         if user_id:
             query = select(Users).where(
                 Users.user_id == user_id,
@@ -304,6 +303,9 @@ async def read_shift_assignments(
             result = await db.execute(query)
             if not result.scalar_one_or_none():
                 raise ResourceNotFoundError(detail=f"Shift pattern ID {pattern_id} not found")
+
+        if department_id:
+            await validate_department_exists(db, department_id, request_id)
 
         query = select(ShiftAssignments).where(
             ShiftAssignments.is_active.is_(True),
@@ -326,7 +328,7 @@ async def read_shift_assignments(
 
         # Restrict to own or subordinate assignments for non-privileged users
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.MANAGE_SHIFT_ASSIGNMENTS.value or p == Permission.VIEW_SHIFT_ASSIGNMENT.value for p in user_permissions):
+        if Permission.VIEW_SHIFT_ASSIGNMENT not in user_permissions and Permission.MANAGE_SHIFT_ASSIGNMENTS not in user_permissions:
             query_subordinates = select(EmployeeHierarchy.employee_id).where(
                 EmployeeHierarchy.supervisor_id == current_user.user_id,
                 EmployeeHierarchy.is_active.is_(True),
@@ -364,12 +366,9 @@ async def read_shift_assignments(
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving shift assignments: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error retrieving shift assignments: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving shift assignments")
 
 async def update_shift_assignment(
     assignment_id: int,
@@ -447,9 +446,13 @@ async def update_shift_assignment(
         await db.refresh(db_assignment)
 
         # Invalidate caches
-        invalidate_user_cache(db_assignment.user_id)
         await invalidate_cache_prefix("shift_assignments")
-        logger.info(f"Cache invalidated for shift_assignments and user_id: {db_assignment.user_id}", extra={"request_id": request_id})
+        invalidate_user_cache(db_assignment.user_id)
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for shift_assignments, user_id: {db_assignment.user_id}, and current_user: {current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(
@@ -520,12 +523,9 @@ async def update_shift_assignment(
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error updating shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error updating shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating shift assignment")
 
 async def delete_shift_assignment(
     assignment_id: int,
@@ -573,9 +573,13 @@ async def delete_shift_assignment(
         await db.commit()
 
         # Invalidate caches
-        invalidate_user_cache(db_assignment.user_id)
         await invalidate_cache_prefix("shift_assignments")
-        logger.info(f"Cache invalidated for shift_assignments and user_id: {db_assignment.user_id}", extra={"request_id": request_id})
+        invalidate_user_cache(db_assignment.user_id)
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for shift_assignments, user_id: {db_assignment.user_id}, and current_user: {current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(
@@ -637,12 +641,9 @@ async def delete_shift_assignment(
     except ResourceNotFoundError as e:
         logger.error(f"Shift assignment not found: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error deleting shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error deleting shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting shift assignment")
 
 async def get_my_shift_assignments(
     skip: int = 0,
@@ -686,9 +687,6 @@ async def get_my_shift_assignments(
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving shift assignments for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error retrieving shift assignments for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving shift assignments")

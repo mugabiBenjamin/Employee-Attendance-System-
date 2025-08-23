@@ -10,7 +10,7 @@ from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserRoleNotFoundError, ValidationError, DatabaseError, ResourceConflictError, UserNotFoundError, RoleNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, invalidate_role_cache
+from app.core.permissions import require_permissions, invalidate_user_cache, invalidate_role_cache, get_user_permissions
 from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists, validate_role_exists
@@ -65,9 +65,10 @@ async def create_user_role(
         await invalidate_cache_prefix(f"user:{user_role.user_id}")
         invalidate_user_cache(user_role.user_id)
         invalidate_role_cache(user_role.role_id)
-        logger.info(f"Cache invalidated for user_role, user:{user_role.user_id}, role:{user_role.role_id}", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(f"Cache invalidated for user_role, user:{user_role.user_id}, role:{user_role.role_id}, current_user:{current_user.user_id}", extra={"request_id": request_id})
 
-        # Log action
+        # Log action using SystemAction.INSERT
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.INSERT,
@@ -288,9 +289,10 @@ async def update_user_role(
         await invalidate_cache_prefix(f"user:{db_user_role.user_id}")
         invalidate_user_cache(db_user_role.user_id)
         invalidate_role_cache(db_user_role.role_id)
-        logger.info(f"Cache invalidated for user_role, user:{db_user_role.user_id}, role:{db_user_role.role_id}", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(f"Cache invalidated for user_role, user:{db_user_role.user_id}, role:{db_user_role.role_id}, current_user:{current_user.user_id}", extra={"request_id": request_id})
 
-        # Log action
+        # Log action using SystemAction.UPDATE
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE,
@@ -378,9 +380,10 @@ async def delete_user_role(
         await invalidate_cache_prefix(f"user:{db_user_role.user_id}")
         invalidate_user_cache(db_user_role.user_id)
         invalidate_role_cache(db_user_role.role_id)
-        logger.info(f"Cache invalidated for user_role, user:{db_user_role.user_id}, role:{db_user_role.role_id}", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(f"Cache invalidated for user_role, user:{db_user_role.user_id}, role:{db_user_role.role_id}, current_user:{current_user.user_id}", extra={"request_id": request_id})
 
-        # Log action
+        # Log action using SystemAction.DELETE
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE,
@@ -477,47 +480,9 @@ async def get_user_permissions(
             raise ValidationError(detail="Invalid user ID")
         await validate_user_exists(db, user_id, request_id)
 
-        cache_key = f"user_permissions:{user_id}"
-        cached_permissions = await get_cache(cache_key)
-        if cached_permissions:
-            logger.info(f"Cache hit for user_permissions, user_id: {user_id}", extra={"request_id": request_id})
-            return cached_permissions
-
-        # Get user roles
-        query = select(UserRoles).where(
-            UserRoles.user_id == user_id,
-            UserRoles.is_active.is_(True),
-            UserRoles.deleted_at.is_(None)
-        )
-        result = await db.execute(query)
-        user_roles = result.scalars().all()
-
-        if not user_roles:
-            logger.info(
-                f"No roles found for user_id: {user_id}",
-                extra={"request_id": request_id}
-            )
-            return {}
-
-        # Get permissions from roles
-        role_ids = [ur.role_id for ur in user_roles]
-        query = select(Roles).where(
-            Roles.role_id.in_(role_ids),
-            Roles.is_active.is_(True),
-            Roles.deleted_at.is_(None)
-        )
-        result = await db.execute(query)
-        roles = result.scalars().all()
-
-        # Aggregate permissions
-        permissions = {}
-        for role in roles:
-            if role.permissions:
-                permissions.update(role.permissions)
-
-        await set_cache(cache_key, permissions, ttl=300)
-        logger.info(f"Cache set for user_permissions, user_id: {user_id}", extra={"request_id": request_id})
-
+        # Use get_user_permissions from permissions file
+        permissions = await get_user_permissions(user_id, db)
+        
         logger.info(
             f"Retrieved {len(permissions)} permissions for user_id: {user_id}",
             extra={"request_id": request_id}

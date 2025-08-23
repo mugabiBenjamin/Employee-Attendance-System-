@@ -9,7 +9,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import HolidayNotFoundError, DepartmentNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_department_cache, get_user_permissions
+from app.core.permissions import invalidate_user_cache, require_permissions, invalidate_department_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_department_exists
 from app.services.system_log_service import create_system_log
@@ -66,8 +66,9 @@ async def create_holiday(
         if holiday.department_id:
             await invalidate_cache_prefix(f"department:{holiday.department_id}")
             invalidate_department_cache(holiday.department_id)
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
         logger.info(
-            f"Cache invalidated for holiday_calendar and department:{holiday.department_id or 'all'}",
+            f"Cache invalidated for holiday_calendar, department:{holiday.department_id or 'all'}, current_user:{current_user.user_id}",
             extra={"request_id": request_id}
         )
 
@@ -183,7 +184,7 @@ async def list_holidays(
             HolidayCalendar.deleted_at.is_(None)
         )
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p in [Permission.VIEW_HOLIDAY, Permission.MANAGE_HOLIDAYS] for p in user_permissions):
+        if Permission.VIEW_HOLIDAY not in user_permissions and Permission.MANAGE_HOLIDAYS not in user_permissions:
             from app.models.user_departments import UserDepartments
             query = query.join(UserDepartments, UserDepartments.user_id == current_user.user_id).where(
                 (HolidayCalendar.applies_to_all.is_(True)) |
@@ -294,8 +295,9 @@ async def update_holiday(
         if old_department_id and old_department_id != db_holiday.department_id:
             await invalidate_cache_prefix(f"department:{old_department_id}")
             invalidate_department_cache(old_department_id)
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
         logger.info(
-            f"Cache invalidated for holiday_calendar and department:{db_holiday.department_id or 'all'},{old_department_id or 'none'}",
+            f"Cache invalidated for holiday_calendar, department:{db_holiday.department_id or 'all'},{old_department_id or 'none'}, current_user:{current_user.user_id}",
             extra={"request_id": request_id}
         )
 
@@ -365,8 +367,9 @@ async def delete_holiday(
         if db_holiday.department_id:
             await invalidate_cache_prefix(f"department:{db_holiday.department_id}")
             invalidate_department_cache(db_holiday.department_id)
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
         logger.info(
-            f"Cache invalidated for holiday_calendar and department:{db_holiday.department_id or 'all'}",
+            f"Cache invalidated for holiday_calendar, department:{db_holiday.department_id or 'all'}, current_user:{current_user.user_id}",
             extra={"request_id": request_id}
         )
 

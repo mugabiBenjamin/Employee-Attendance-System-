@@ -65,7 +65,11 @@ async def create_shift_pattern(
 
         # Invalidate cache
         await invalidate_cache_prefix("shift_patterns")
-        logger.info(f"Cache invalidated for shift_patterns", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for shift_patterns and current_user:{current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(
@@ -202,12 +206,8 @@ async def list_shift_patterns(
             ShiftPatterns.is_active.is_(True),
             ShiftPatterns.deleted_at.is_(None)
         )
-        if shift_type:
-            query = query.where(ShiftPatterns.shift_type == shift_type)
-
-        # Restrict to department-assigned shift patterns for non-privileged users
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if department_id or not any(p == Permission.MANAGE_SHIFT_PATTERNS.value for p in user_permissions):
+        if department_id or Permission.MANAGE_SHIFT_PATTERNS not in user_permissions:
             query = query.join(
                 ShiftAssignments,
                 and_(
@@ -224,9 +224,13 @@ async def list_shift_patterns(
                 )
             )
             if department_id:
+                from app.core.validators import validate_department_exists
+                await validate_department_exists(db, department_id, request_id)
                 query = query.where(UserDepartments.department_id == department_id)
-            elif not any(p == Permission.MANAGE_SHIFT_PATTERNS.value for p in user_permissions):
+            elif Permission.MANAGE_SHIFT_PATTERNS not in user_permissions:
                 query = query.where(UserDepartments.user_id == current_user.user_id)
+        if shift_type:
+            query = query.where(ShiftPatterns.shift_type == shift_type)
 
         limit = limit or settings.DEFAULT_PAGE_SIZE
         query = query.order_by(ShiftPatterns.pattern_name.asc()).offset(skip).limit(limit)
@@ -323,9 +327,13 @@ async def update_shift_pattern(
         for assignment in assignments:
             invalidate_user_cache(assignment.user_id)
 
-        # Invalidate cache
+        # Invalidate caches
         await invalidate_cache_prefix("shift_patterns")
-        logger.info(f"Cache invalidated for shift_patterns and {len(assignments)} users", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for shift_patterns, {len(assignments)} users, and current_user:{current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(
@@ -425,9 +433,13 @@ async def delete_shift_pattern(
         db.add(db_shift_pattern)
         await db.commit()
 
-        # Invalidate cache
+        # Invalidate caches
         await invalidate_cache_prefix("shift_patterns")
-        logger.info(f"Cache invalidated for shift_patterns", extra={"request_id": request_id})
+        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        logger.info(
+            f"Cache invalidated for shift_patterns and current_user:{current_user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         # Log action
         log = SystemLogCreate(

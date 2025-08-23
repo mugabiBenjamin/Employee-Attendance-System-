@@ -16,9 +16,9 @@ from app.core.enums import Permission, SystemAction, CorrectionStatus
 from app.core.mail import send_email
 from app.core.security import get_current_user
 from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
-from app.core.exceptions import TimeCorrectionNotFoundError, AttendanceRecordNotFoundError, UserNotFoundError, ValidationError, DatabaseError, DepartmentNotFoundError
+from app.core.exceptions import DepartmentNotFoundError, TimeCorrectionNotFoundError, AttendanceRecordNotFoundError, UserNotFoundError, ValidationError, DatabaseError
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
-from app.core.validators import validate_user_exists, validate_attendance_record_exists, validate_department_exists
+from app.core.validators import validate_department_exists, validate_user_exists, validate_attendance_record_exists
 from app.core.utils import get_request_id, get_users_with_permission
 from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
@@ -26,6 +26,26 @@ from app.models.user_departments import UserDepartments
 import logging
 
 logger = logging.getLogger(__name__)
+
+async def _check_user_authorization(
+    db: AsyncSession,
+    current_user: Users,
+    target_user_id: int,
+    required_permissions: List[Permission],
+    request_id: Optional[str] = None
+) -> bool:
+    """Check if the current user is authorized to perform actions on the target user's records."""
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    if target_user_id == current_user.user_id or any(p.value in user_permissions for p in required_permissions):
+        return True
+    query_hierarchy = select(EmployeeHierarchy).where(
+        EmployeeHierarchy.employee_id == target_user_id,
+        EmployeeHierarchy.supervisor_id == current_user.user_id,
+        EmployeeHierarchy.is_active.is_(True),
+        EmployeeHierarchy.deleted_at.is_(None)
+    )
+    result_hierarchy = await db.execute(query_hierarchy)
+    return bool(result_hierarchy.scalar_one_or_none())
 
 async def create_time_correction(
     time_correction: TimeCorrectionCreate,
@@ -150,20 +170,11 @@ async def get_time_correction(
             raise TimeCorrectionNotFoundError(correction_id=correction_id)
 
         # Authorization check
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        if correction.user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == correction.user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
+        if not await _check_user_authorization(db, current_user, correction.user_id, [Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION], request_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to view this time correction"
             )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.VIEW_TIME_CORRECTION.value or p == Permission.MANAGE_TIME_CORRECTION.value for p in user_permissions):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to view this time correction"
-                )
 
         correction_dict = TimeCorrectionOut.model_validate(correction).model_dump()
         await set_cache(cache_key, correction_dict, ttl=300)
@@ -213,20 +224,11 @@ async def get_user_time_corrections(
         limit = limit or settings.DEFAULT_PAGE_SIZE
 
         # Authorization check
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        if user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
+        if not await _check_user_authorization(db, current_user, user_id, [Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION], request_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to view time corrections for this user"
             )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.VIEW_TIME_CORRECTION.value or p == Permission.MANAGE_TIME_CORRECTION.value for p in user_permissions):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to view time corrections for this user"
-                )
 
         cache_key = f"time_corrections:user:{user_id}:{skip}:{limit}:{status or 'all'}"
         cached_corrections = await get_cache(cache_key)
@@ -377,19 +379,11 @@ async def update_time_correction(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cannot update approved or rejected time correction")
 
         # Authorization check
-        if db_correction.user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == db_correction.user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
+        if not await _check_user_authorization(db, current_user, db_correction.user_id, [Permission.MANAGE_TIME_CORRECTION], request_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to update this time correction"
             )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.MANAGE_TIME_CORRECTION.value for p in user_permissions):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to update this time correction"
-                )
 
         # Validate update data
         update_data = time_correction_update.model_dump(exclude_none=True)
@@ -506,14 +500,7 @@ async def approve_time_correction(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Time correction is already approved or rejected")
 
         # Authorization check
-        query_hierarchy = select(EmployeeHierarchy).where(
-            EmployeeHierarchy.employee_id == db_correction.user_id,
-            EmployeeHierarchy.supervisor_id == current_user.user_id,
-            EmployeeHierarchy.is_active.is_(True),
-            EmployeeHierarchy.deleted_at.is_(None)
-        )
-        result_hierarchy = await db.execute(query_hierarchy)
-        if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.MANAGE_TIME_CORRECTION.value for p in user_permissions):
+        if not await _check_user_authorization(db, current_user, db_correction.user_id, [Permission.MANAGE_TIME_CORRECTION], request_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to approve/reject this time correction"

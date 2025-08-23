@@ -25,6 +25,28 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+async def _check_user_authorization(
+    db: AsyncSession,
+    current_user: Users,
+    target_user_id: int,
+    required_permissions: List[Permission],
+    request_id: Optional[str] = None
+) -> bool:
+    """Check if the current user is authorized to perform actions on the target user's attendance summaries."""
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    if target_user_id == current_user.user_id and Permission.VIEW_OWN_ATTENDANCE.value in user_permissions:
+        return True
+    if any(p.value in user_permissions for p in required_permissions):
+        return True
+    query_hierarchy = select(EmployeeHierarchy).where(
+        EmployeeHierarchy.employee_id == target_user_id,
+        EmployeeHierarchy.supervisor_id == current_user.user_id,
+        EmployeeHierarchy.is_active.is_(True),
+        EmployeeHierarchy.deleted_at.is_(None)
+    )
+    result_hierarchy = await db.execute(query_hierarchy)
+    return bool(result_hierarchy.scalar_one_or_none())
+
 async def get_attendance_summary_by_user(
     user_id: int,
     start_date: Optional[date] = None,
@@ -51,20 +73,11 @@ async def get_attendance_summary_by_user(
             raise ValidationError(detail="Cannot specify both user_id and department_id")
 
         # Authorization check
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        if user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
+        if not await _check_user_authorization(db, current_user, user_id, [Permission.VIEW_ALL_ATTENDANCE, Permission.MANAGE_EMPLOYEES], request_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to view this user's attendance summary"
             )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.VIEW_ALL_ATTENDANCE.value or p == Permission.MANAGE_EMPLOYEES.value for p in user_permissions):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to view this user's attendance summary"
-                )
 
         cache_key = f"attendance_summary:{user_id or 'all'}:{department_id or 'all'}:{start_date or 'none'}:{end_date or 'none'}:{is_active or 'all'}:{skip}:{limit or settings.DEFAULT_PAGE_SIZE}"
         cached_result = await get_cache(cache_key)
@@ -211,6 +224,13 @@ async def generate_attendance_summary(
         if attendance_summary_date > date.today():
             raise ValidationError(detail="Attendance summary date cannot be in the future")
 
+        # Authorization check
+        if not await _check_user_authorization(db, current_user, user_id, [Permission.GENERATE_REPORTS, Permission.MANAGE_EMPLOYEES], request_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to generate attendance summary for this user"
+            )
+
         await validate_user_exists(db, user_id, request_id)
         query = select(Users).where(
             Users.user_id == user_id,
@@ -321,6 +341,9 @@ async def generate_attendance_summary(
     except ResourceNotFoundError as e:
         logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except HTTPException as e:
+        logger.error(f"Authorization error generating attendance summary for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise
     except Exception as e:
         logger.error(f"Unexpected error generating attendance summary for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error generating attendance summary")

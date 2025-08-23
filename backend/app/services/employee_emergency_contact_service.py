@@ -30,6 +30,26 @@ def validate_phone_number(phone: str) -> bool:
     pattern = r"^\+\d{1,3}\d{9,15}$"
     return bool(re.match(pattern, phone))
 
+async def _check_user_authorization(
+    db: AsyncSession,
+    current_user: Users,
+    target_user_id: int,
+    required_permissions: List[Permission],
+    request_id: Optional[str] = None
+) -> bool:
+    """Check if the current user is authorized to perform actions on the target user's records."""
+    user_permissions = await get_user_permissions(current_user.user_id, db)
+    if target_user_id == current_user.user_id or any(p.value in user_permissions for p in required_permissions):
+        return True
+    query_hierarchy = select(EmployeeHierarchy).where(
+        EmployeeHierarchy.employee_id == target_user_id,
+        EmployeeHierarchy.supervisor_id == current_user.user_id,
+        EmployeeHierarchy.is_active.is_(True),
+        EmployeeHierarchy.deleted_at.is_(None)
+    )
+    result_hierarchy = await db.execute(query_hierarchy)
+    return bool(result_hierarchy.scalar_one_or_none())
+
 async def create_emergency_contact(
     contact: EmployeeEmergencyContactCreate,
     request: Optional[Request] = None,
@@ -161,16 +181,10 @@ async def get_emergency_contact(
             raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
         # Authorization check
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        if contact.user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == contact.user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.VIEW_EMERGENCY_CONTACT.value or p == Permission.MANAGE_EMPLOYEES.value for p in user_permissions):
+        if not await _check_user_authorization(db, current_user, contact.user_id, [Permission.VIEW_EMERGENCY_CONTACT, Permission.MANAGE_EMPLOYEES], request_id):
+            if contact.user_id == current_user.user_id and Permission.VIEW_OWN_EMERGENCY_CONTACT.value in (await get_user_permissions(current_user.user_id, db)):
+                pass  # Allow if user owns the contact and has VIEW_OWN_EMERGENCY_CONTACT
+            else:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Not authorized to view this emergency contact"
@@ -223,14 +237,7 @@ async def list_emergency_contacts(
 
         user_permissions = await get_user_permissions(current_user.user_id, db)
         if target_user_id and target_user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == target_user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.VIEW_EMERGENCY_CONTACT.value or p == Permission.MANAGE_EMPLOYEES.value for p in user_permissions):
+            if not await _check_user_authorization(db, current_user, target_user_id, [Permission.VIEW_EMERGENCY_CONTACT, Permission.MANAGE_EMPLOYEES], request_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Not authorized to view other user's emergency contacts"
@@ -319,16 +326,10 @@ async def update_emergency_contact(
             raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
         # Authorization check
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        if db_contact.user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == db_contact.user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none() and not any(p == Permission.UPDATE_EMERGENCY_CONTACT.value or p == Permission.MANAGE_EMPLOYEES.value for p in user_permissions):
+        if not await _check_user_authorization(db, current_user, db_contact.user_id, [Permission.UPDATE_EMERGENCY_CONTACT, Permission.MANAGE_EMPLOYEES], request_id):
+            if db_contact.user_id == current_user.user_id and Permission.VIEW_OWN_EMERGENCY_CONTACT.value in (await get_user_permissions(current_user.user_id, db)):
+                pass  # Allow if user owns the contact and has VIEW_OWN_EMERGENCY_CONTACT
+            else:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Not authorized to update this emergency contact"

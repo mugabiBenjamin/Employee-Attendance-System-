@@ -11,7 +11,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission, RoleName, validate_permissions_list
 from app.core.exceptions import RoleNotFoundError, ValidationError, BusinessLogicError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_role_cache
+from app.core.permissions import require_permissions, invalidate_role_cache, invalidate_user_cache
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix, validate_enum_value
 from app.core.validators import validate_role_not_assigned
 from app.services.system_log_service import create_system_log
@@ -33,7 +33,7 @@ async def create_role(
         if not await validate_enum_value(RoleName, role.role_name):
             raise ValidationError(detail=f"Invalid role name: {role.role_name}")
 
-        # Validate permissions
+        # Validate permissions using permissions file function
         is_valid, invalid_perms = validate_permissions_list([k for k, v in role.permissions.items() if v])
         if not is_valid:
             raise ValidationError(detail=f"Invalid permissions: {invalid_perms}")
@@ -59,13 +59,14 @@ async def create_role(
         await db.commit()
         await db.refresh(db_role)
 
-        # Invalidate caches
+        # Invalidate caches for roles and users
         await invalidate_cache_prefix("role")
         await invalidate_cache_prefix("user")
         invalidate_role_cache(db_role.role_id)
+        invalidate_user_cache(current_user.user_id)
         logger.info(f"Cache invalidated for role_id: {db_role.role_id} and users")
 
-        # Log action
+        # Log action using SystemAction.CREATE_ROLE
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.CREATE_ROLE,
@@ -85,9 +86,9 @@ async def create_role(
         )
         return RoleOut.model_validate(db_role)
 
-    except (ValidationError, HTTPException) as e:
+    except ValidationError as e:
         logger.error(f"Validation error creating role: {str(e)}", extra={"request_id": request_id})
-        raise
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error creating role: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
@@ -134,9 +135,12 @@ async def get_role(
         )
         return RoleOut.model_validate(role)
 
-    except (RoleNotFoundError, ValidationError) as e:
-        logger.error(f"Error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
-        raise
+    except ValidationError as e:
+        logger.error(f"Validation error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except RoleNotFoundError as e:
+        logger.error(f"Role not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
@@ -184,7 +188,7 @@ async def list_roles(
 
     except ValidationError as e:
         logger.error(f"Validation error retrieving roles: {str(e)}", extra={"request_id": request_id})
-        raise
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error retrieving roles: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
@@ -247,13 +251,14 @@ async def update_role(
         await db.commit()
         await db.refresh(db_role)
 
-        # Invalidate caches
+        # Invalidate caches for roles and users
         await invalidate_cache_prefix("role")
         await invalidate_cache_prefix("user")
         invalidate_role_cache(role_id)
+        invalidate_user_cache(current_user.user_id)
         logger.info(f"Cache invalidated for role_id: {role_id} and users")
 
-        # Log action
+        # Log action using SystemAction.UPDATE_ROLE
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE_ROLE,
@@ -273,9 +278,12 @@ async def update_role(
         )
         return RoleOut.model_validate(db_role)
 
-    except (RoleNotFoundError, ValidationError, HTTPException) as e:
-        logger.error(f"Error updating role {role_id}: {str(e)}", extra={"request_id": request_id})
-        raise
+    except ValidationError as e:
+        logger.error(f"Validation error updating role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except RoleNotFoundError as e:
+        logger.error(f"Role not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error updating role {role_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
@@ -314,13 +322,14 @@ async def delete_role(
         db.add(db_role)
         await db.commit()
 
-        # Invalidate caches
+        # Invalidate caches for roles and users
         await invalidate_cache_prefix("role")
         await invalidate_cache_prefix("user")
         invalidate_role_cache(role_id)
+        invalidate_user_cache(current_user.user_id)
         logger.info(f"Cache invalidated for role_id: {role_id} and users")
 
-        # Log action
+        # Log action using SystemAction.DELETE_ROLE
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE_ROLE,
@@ -339,9 +348,15 @@ async def delete_role(
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
 
-    except (RoleNotFoundError, BusinessLogicError, ValidationError) as e:
-        logger.error(f"Error deleting role {role_id}: {str(e)}", extra={"request_id": request_id})
-        raise
+    except ValidationError as e:
+        logger.error(f"Validation error deleting role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except RoleNotFoundError as e:
+        logger.error(f"Role not found: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except BusinessLogicError as e:
+        logger.error(f"Business logic error deleting role {role_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error deleting role {role_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(

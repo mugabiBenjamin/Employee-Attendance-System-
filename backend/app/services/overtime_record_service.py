@@ -62,7 +62,7 @@ async def create_overtime_record(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.MANAGE_OVERTIME.value or p == Permission.CREATE_ALL_OVERTIME.value for p in user_permissions) and overtime.user_id != current_user.user_id:
+        if not any(p in [Permission.MANAGE_OVERTIME.value, Permission.CREATE_ALL_OVERTIME.value] for p in user_permissions) and overtime.user_id != current_user.user_id:
             query_hierarchy = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == overtime.user_id,
                 EmployeeHierarchy.supervisor_id == current_user.user_id,
@@ -158,7 +158,7 @@ async def create_overtime_record(
                     subject=f"Overtime Record Created (ID: {db_overtime.overtime_id})",
                     body=(
                         f"Dear {first_name},\n\n"
-                        f"An overtime record (ID: {db_overtime.overtime_id}) has been created for user ID {overtime.user_id} on {overtime.date}.\n"
+                        f"An overtime record (ID: {db_overtime.overtime_id}) has been created for user ID {overtime.user_id}.\n"
                         f"Details:\n"
                         f"Overtime Hours: {overtime.overtime_hours}\n"
                         f"Threshold Exceeded: {settings.OVERTIME_THRESHOLD} hours\n"
@@ -226,7 +226,7 @@ async def get_overtime_record(
             OvertimeRecords.deleted_at.is_(None)
         )
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.VIEW_OVERTIME_RECORD.value or p == Permission.MANAGE_OVERTIME.value for p in user_permissions):
+        if not any(p in [Permission.VIEW_OVERTIME_RECORD.value, Permission.MANAGE_OVERTIME.value] for p in user_permissions):
             query = query.where(
                 or_(
                     OvertimeRecords.user_id == current_user.user_id,
@@ -291,7 +291,7 @@ async def get_user_overtime_records(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db)
-        if not any(p == Permission.VIEW_OVERTIME_RECORD.value or p == Permission.MANAGE_OVERTIME.value for p in user_permissions) and user_id != current_user.user_id:
+        if not any(p in [Permission.VIEW_OVERTIME_RECORD.value, Permission.MANAGE_OVERTIME.value] for p in user_permissions) and user_id != current_user.user_id:
             query_hierarchy = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == user_id,
                 EmployeeHierarchy.supervisor_id == current_user.user_id,

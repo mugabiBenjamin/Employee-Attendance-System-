@@ -1,16 +1,19 @@
+from typing import Optional
 from fastapi import HTTPException, status, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 from jose import JWTError, jwt
 from app.models.users import Users
-from app.models.system_logs import SystemLogs
-from app.core.security import verify_password, create_access_token, create_refresh_token
+from app.schemas.system_log import SystemLogCreate
+from app.services.system_log_service import create_system_log
+from app.core.security import get_current_user, verify_password, create_access_token, create_refresh_token
 from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
-from app.core.exceptions import AuthenticationError
+from app.core.exceptions import AuthenticationError, ValidationError
 from app.core.database import get_db
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.utils import get_request_id
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,10 +22,14 @@ async def login_user(
     request: Request,
     credentials: dict,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = Depends(get_request_id)
 ) -> dict:
     """Authenticate user and generate tokens, logging the login action."""
     try:
+        if not credentials.get("username") or not credentials.get("password"):
+            raise ValidationError(detail="Email and password are required")
+
         query = select(Users).where(
             Users.email == credentials["username"],
             Users.is_active.is_(True),
@@ -40,21 +47,27 @@ async def login_user(
         access_token = create_access_token(data={"sub": str(user.user_id)})
         refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
 
-        system_log = SystemLogs(
+        # Log the action
+        log = SystemLogCreate(
             user_id=user.user_id,
             action=SystemAction.LOGIN,
             table_affected=None,
             record_id=None,
             old_values=None,
             new_values=None,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
-            timestamp=datetime.now(timezone.utc)
+            request_id=request_id
         )
-        db.add(system_log)
+        await create_system_log(log, request, user, db, settings, request_id)
+
+        # Invalidate user cache due to last_login update
+        await invalidate_user_cache(user.user_id)
+        logger.info(f"Cache invalidated for user:{user.user_id}", extra={"request_id": request_id})
+
         await db.commit()
 
-        logger.info(f"User logged in, user_id: {user.user_id}")
+        logger.info(f"User logged in, user_id: {user.user_id}", extra={"request_id": request_id, "user_id": user.user_id})
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
@@ -62,10 +75,14 @@ async def login_user(
             "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         }
 
+    except ValidationError as e:
+        logger.error(f"Validation error during login for email {credentials.get('username', 'unknown')}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except AuthenticationError:
+        logger.error(f"Authentication error for email {credentials.get('username', 'unknown')}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error during login for email {credentials['username']}: {str(e)}")
+        logger.error(f"Unexpected error during login for email {credentials.get('username', 'unknown')}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login"
@@ -73,30 +90,31 @@ async def login_user(
 
 async def logout_user(
     request: Request,
-    user: Users,
-    token: str,
-    db: AsyncSession = Depends(get_db)
+    user: Users = Depends(get_current_user),
+    token: str = None,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = Depends(get_request_id)
 ) -> None:
     """Log user logout action."""
     try:
-        system_log = SystemLogs(
+        log = SystemLogCreate(
             user_id=user.user_id,
             action=SystemAction.LOGOUT,
             table_affected=None,
             record_id=None,
             old_values=None,
             new_values=None,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
-            timestamp=datetime.now(timezone.utc)
+            request_id=request_id
         )
-        db.add(system_log)
-        await db.commit()
+        await create_system_log(log, request, user, db, settings, request_id)
 
-        logger.info(f"User logged out, user_id: {user.user_id}")
+        logger.info(f"User logged out, user_id: {user.user_id}", extra={"request_id": request_id, "user_id": user.user_id})
 
     except Exception as e:
-        logger.error(f"Error during logout for user_id {user.user_id}: {str(e)}")
+        logger.error(f"Unexpected error during logout for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing logout"
@@ -107,10 +125,14 @@ async def refresh_token(
     token_request: dict,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    request_id: Optional[str] = Depends(get_request_id),
     _: bool = Depends(require_permissions([Permission.REFRESH_TOKEN]))
 ) -> dict:
     """Refresh access token using a valid refresh token."""
     try:
+        if not token_request.get("refresh_token"):
+            raise ValidationError(detail="Refresh token is required")
+
         payload = jwt.decode(token_request["refresh_token"], settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
@@ -129,21 +151,21 @@ async def refresh_token(
         access_token = create_access_token(data={"sub": str(user.user_id)})
         new_refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
 
-        system_log = SystemLogs(
+        # Log the action
+        log = SystemLogCreate(
             user_id=user.user_id,
             action=SystemAction.TOKEN_REFRESH,
             table_affected=None,
             record_id=None,
             old_values=None,
             new_values=None,
-            ip_address=request.client.host,
+            ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
-            timestamp=datetime.now(timezone.utc)
+            request_id=request_id
         )
-        db.add(system_log)
-        await db.commit()
+        await create_system_log(log, request, user, db, settings, request_id)
 
-        logger.info(f"Token refreshed for user_id: {user.user_id}")
+        logger.info(f"Token refreshed for user_id: {user.user_id}", extra={"request_id": request_id, "user_id": user.user_id})
         return {
             "access_token": access_token,
             "refresh_token": new_refresh_token,
@@ -151,18 +173,28 @@ async def refresh_token(
             "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         }
 
+    except ValidationError as e:
+        logger.error(f"Validation error during token refresh: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except AuthenticationError:
+        logger.error(f"Authentication error during token refresh", extra={"request_id": request_id})
         raise
     except JWTError:
+        logger.error(f"JWT error during token refresh", extra={"request_id": request_id})
         raise AuthenticationError(detail="Invalid refresh token")
     except Exception as e:
-        logger.error(f"Error refreshing token for user_id {user_id}: {str(e)}")
+        logger.error(f"Unexpected error refreshing token for user_id {user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing token refresh"
         )
 
-async def get_current_user_profile(user: Users, db: AsyncSession = Depends(get_db)) -> dict:
+async def get_current_user_profile(
+    user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    request_id: Optional[str] = Depends(get_request_id),
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
+) -> dict:
     """Retrieve profile information for the current user."""
     try:
         return {
@@ -176,19 +208,24 @@ async def get_current_user_profile(user: Users, db: AsyncSession = Depends(get_d
         }
 
     except Exception as e:
-        logger.error(f"Error retrieving profile for user_id {user.user_id}: {str(e)}")
+        logger.error(f"Error retrieving profile for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving user profile"
         )
 
-async def validate_token(user: Users) -> dict:
+async def validate_token(
+    user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    request_id: Optional[str] = Depends(get_request_id),
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
+) -> dict:
     """Validate if the current access token is valid and user is active."""
     try:
         return {"message": f"Token is valid for user_id {user.user_id}"}
 
     except Exception as e:
-        logger.error(f"Error validating token for user_id {user.user_id}: {str(e)}")
+        logger.error(f"Error validating token for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error validating token"

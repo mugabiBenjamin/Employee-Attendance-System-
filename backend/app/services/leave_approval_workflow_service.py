@@ -23,11 +23,10 @@ from app.core.enums import SystemAction, LeaveRequestStatus, Permission, LeaveTy
 from app.core.mail import send_email
 from app.core.exceptions import DatabaseError, LeaveApprovalWorkflowError, UserNotFoundError, ValidationError, LeaveRequestNotFoundError, LeaveBalanceNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_request_exists, validate_user_exists
-from app.core.utils import get_request_id, get_users_with_permission
-from app.services.user_role_service import get_user_permissions
+from app.core.utils import get_request_id
 from app.services.system_log_service import create_system_log
 from app.services.leave_request_service import validate_no_overlapping_leave_requests
 import logging
@@ -95,38 +94,23 @@ async def approve_or_reject_leave(
 
         # Prevent re-approval/rejection
         if leave_request.status != LeaveRequestStatus.UNDER_REVIEW:
-            raise ValidationError(detail=f"Leave request is already {str(leave_request.status).lower()}")
+            raise ValidationError(detail=f"Leave request is already {leave_request.status.value.lower()}")
 
         # Validate approver
         await validate_user_exists(db, approval.approver_id, request_id)
-        query = select(Users).where(
-            Users.user_id == approval.approver_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result = await db.execute(query)
-        approver = result.scalar_one_or_none()
-        if not approver:
-            raise UserNotFoundError(user_id=approval.approver_id)
 
-        # Validate hierarchy or MANAGE_LEAVE permission
-        user_permissions = await get_user_permissions(approval.approver_id, db, request_id)
-        is_supervisor = False
-        if approval.approver_id != current_user.user_id:
-            query = select(EmployeeHierarchy).where(
+        # Authorization check
+        user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
+        if not any(p == Permission.MANAGE_LEAVE.value for p in user_permissions) and approval.approver_id != current_user.user_id:
+            query_hierarchy = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == leave_request.user_id,
-                EmployeeHierarchy.supervisor_id == approval.approver_id,
+                EmployeeHierarchy.supervisor_id == current_user.user_id,
                 EmployeeHierarchy.is_active.is_(True),
                 EmployeeHierarchy.deleted_at.is_(None)
             )
-            result = await db.execute(query)
-            is_supervisor = result.scalar_one_or_none() is not None
-            if not is_supervisor and Permission.MANAGE_LEAVE not in user_permissions:
-                raise ValidationError(detail="Approver is not in the employee's hierarchy or lacks MANAGE_LEAVE permission")
-
-        # Validate permissions
-        if Permission.APPROVE_LEAVE not in user_permissions and approval.approver_id != current_user.user_id:
-            raise ValidationError(detail="Approver lacks APPROVE_LEAVE permission")
+            result_hierarchy = await db.execute(query_hierarchy)
+            if not result_hierarchy.scalar_one_or_none():
+                raise ValidationError(detail="Not authorized to approve this leave request")
 
         # Validate workflow progression
         await validate_workflow_progression(db, approval.leave_id, approval.level, request_id)
@@ -158,8 +142,8 @@ async def approve_or_reject_leave(
             )
             result_policy = await db.execute(query_policy)
             leave_policy = result_policy.scalar_one_or_none()
-            if leave_policy and leave_request.days_requested > leave_policy.max_consecutive_days:
-                raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_consecutive_days}) for {str(leave_request.leave_type).capitalize()}")
+            if leave_policy and leave_request.days_requested > leave_policy.max_days:
+                raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_days}) for {leave_request.leave_type.value}")
 
         # Create approval entry
         db_approval = LeaveApprovalWorkflow(
@@ -187,40 +171,20 @@ async def approve_or_reject_leave(
         await db.commit()
         await db.refresh(db_approval)
 
-        # Invalidate cache
-        invalidate_user_cache(leave_request.user_id)
-        await invalidate_cache_prefix("leave_approval_workflow")
-        await invalidate_cache_prefix("leave_requests")
-        logger.info(f"Cache invalidated for leave_approval_workflow, leave_requests, and user_id: {leave_request.user_id}", extra={"request_id": request_id})
-
-        # Log action
-        log = SystemLogCreate(
-            user_id=current_user.user_id,
-            action=SystemAction.APPROVE_LEAVE,
-            table_affected="leave_approval_workflow",
-            record_id=db_approval.workflow_id,
-            old_values=None,
-            new_values=db_approval.__dict__,
-            ip_address=str(request.client.host) if request else None,
-            user_agent=request.headers.get("user-agent") if request else None,
-            request_id=request_id
-        )
-        await create_system_log(log, request, current_user, db, settings, request_id)
-
         # Notify employee, supervisor, and admins
         eat_tz = ZoneInfo("Africa/Nairobi")
         current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
         recipients = []
-        query_user = select(Users).where(
+        query_employee = select(Users).where(
             Users.user_id == leave_request.user_id,
             Users.is_active.is_(True),
             Users.deleted_at.is_(None)
         )
-        result_user = await db.execute(query_user)
-        employee = result_user.scalar_one_or_none()
+        result_employee = await db.execute(query_employee)
+        employee = result_employee.scalar_one_or_none()
         if employee:
             recipients.append((employee.email, employee.first_name))
-        query_supervisor = select(Users).join(
+        query_manager = select(Users).join(
             EmployeeHierarchy,
             and_(
                 EmployeeHierarchy.supervisor_id == Users.user_id,
@@ -232,29 +196,51 @@ async def approve_or_reject_leave(
             Users.is_active.is_(True),
             Users.deleted_at.is_(None)
         )
-        result_supervisor = await db.execute(query_supervisor)
-        supervisor = result_supervisor.scalar_one_or_none()
-        if supervisor:
-            recipients.append((supervisor.email, supervisor.first_name))
-        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
+        result_manager = await db.execute(query_manager)
+        manager = result_manager.scalar_one_or_none()
+        if manager:
+            recipients.append((manager.email, manager.first_name))
+        admins = await get_user_permissions(Permission.MANAGE_LEAVE, db)
         recipients.extend([(admin.email, admin.first_name) for admin in admins])
         for email, first_name in recipients:
             await send_email(
                 to_email=email,
-                subject=f"Leave Request {approval.status.value.capitalize()} (ID: {approval.leave_id})",
+                subject=f"Leave Request {approval.status.value.capitalize()} (ID: {leave_request.leave_id})",
                 body=(
                     f"Dear {first_name},\n\n"
-                    f"The leave request (ID: {approval.leave_id}) from {leave_request.start_date} to {leave_request.end_date} "
-                    f"has been {approval.status.value.lower()}.\n"
-                    f"Leave Type: {str(leave_request.leave_type).capitalize()}\n"
+                    f"The leave request (ID: {leave_request.leave_id}) for user ID {leave_request.user_id} has been {approval.status.value.lower()}.\n"
+                    f"Details:\n"
+                    f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                    f"Start Date: {leave_request.start_date}\n"
+                    f"End Date: {leave_request.end_date}\n"
                     f"Days Requested: {leave_request.days_requested}\n"
                     f"Comments: {approval.comments or 'None'}\n"
-                    f"Action Taken At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
-                    f"Please contact HR for any questions.\n\n"
+                    f"Approved At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
+                    f"Please review in the Employee Management System.\n\n"
                     f"Best regards,\nEmployee Management System"
                 ),
                 request_id=request_id
             )
+
+        # Invalidate cache
+        invalidate_user_cache(leave_request.user_id)
+        await invalidate_cache_prefix("leave_approval_workflow")
+        await invalidate_cache_prefix("leave_requests")
+        logger.info(f"Cache invalidated for leave_approval_workflow, leave_requests, and user_id: {leave_request.user_id}", extra={"request_id": request_id})
+
+        # Log action
+        log = SystemLogCreate(
+            user_id=current_user.user_id,
+            action=SystemAction.APPROVE_LEAVE_REQUEST,
+            table_affected="leave_approval_workflow",
+            record_id=db_approval.workflow_id,
+            old_values=None,
+            new_values=db_approval.__dict__,
+            ip_address=str(request.client.host) if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
+        )
+        await create_system_log(log, request, current_user, db, settings, request_id)
 
         logger.info(
             f"Leave approval processed, workflow_id: {db_approval.workflow_id}, leave_id: {approval.leave_id}, status: {approval.status}",
@@ -268,12 +254,9 @@ async def approve_or_reject_leave(
     except (LeaveRequestNotFoundError, UserNotFoundError, LeaveBalanceNotFoundError) as e:
         logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error processing leave approval: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error processing leave approval: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing leave approval")
 
 async def get_leave_approval(
     workflow_id: int,
@@ -308,15 +291,15 @@ async def get_leave_approval(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
-        if not any(p in [Permission.VIEW_LEAVE_APPROVAL, Permission.MANAGE_LEAVE] for p in user_permissions) and approval.approver_id != current_user.user_id:
-            query = select(LeaveRequests).where(
+        if not any(p in [Permission.VIEW_LEAVE_APPROVAL.value, Permission.MANAGE_LEAVE.value] for p in user_permissions):
+            query_lr = select(LeaveRequests).where(
                 LeaveRequests.leave_id == approval.leave_id,
                 LeaveRequests.is_active.is_(True),
                 LeaveRequests.deleted_at.is_(None)
             )
-            result = await db.execute(query)
-            leave_request = result.scalar_one_or_none()
-            if leave_request.user_id != current_user.user_id:
+            result_lr = await db.execute(query_lr)
+            leave_request = result_lr.scalar_one_or_none()
+            if leave_request.user_id != current_user.user_id and approval.approver_id != current_user.user_id:
                 query_hierarchy = select(EmployeeHierarchy).where(
                     EmployeeHierarchy.employee_id == leave_request.user_id,
                     EmployeeHierarchy.supervisor_id == current_user.user_id,
@@ -349,12 +332,9 @@ async def get_leave_approval(
     except HTTPException as e:
         logger.error(f"Forbidden access to leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error retrieving leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave approval")
 
 async def get_leave_approvals_by_request(
     leave_id: int,
@@ -393,27 +373,28 @@ async def get_leave_approvals_by_request(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
-        if not any(p in [Permission.VIEW_LEAVE_APPROVAL, Permission.MANAGE_LEAVE] for p in user_permissions) and leave_request.user_id != current_user.user_id:
-            query_hierarchy = select(EmployeeHierarchy).where(
-                EmployeeHierarchy.employee_id == leave_request.user_id,
-                EmployeeHierarchy.supervisor_id == current_user.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-            result_hierarchy = await db.execute(query_hierarchy)
-            if not result_hierarchy.scalar_one_or_none():
-                query_approver = select(LeaveApprovalWorkflow).where(
-                    LeaveApprovalWorkflow.leave_id == leave_id,
-                    LeaveApprovalWorkflow.approver_id == current_user.user_id,
-                    LeaveApprovalWorkflow.is_active.is_(True),
-                    LeaveApprovalWorkflow.deleted_at.is_(None)
+        if not any(p in [Permission.VIEW_LEAVE_APPROVAL.value, Permission.MANAGE_LEAVE.value] for p in user_permissions):
+            if leave_request.user_id != current_user.user_id:
+                query_hierarchy = select(EmployeeHierarchy).where(
+                    EmployeeHierarchy.employee_id == leave_request.user_id,
+                    EmployeeHierarchy.supervisor_id == current_user.user_id,
+                    EmployeeHierarchy.is_active.is_(True),
+                    EmployeeHierarchy.deleted_at.is_(None)
                 )
-                result_approver = await db.execute(query_approver)
-                if not result_approver.scalar_one_or_none():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not authorized to view approvals for this leave request"
+                result_hierarchy = await db.execute(query_hierarchy)
+                if not result_hierarchy.scalar_one_or_none():
+                    query_approver = select(LeaveApprovalWorkflow).where(
+                        LeaveApprovalWorkflow.leave_id == leave_id,
+                        LeaveApprovalWorkflow.approver_id == current_user.user_id,
+                        LeaveApprovalWorkflow.is_active.is_(True),
+                        LeaveApprovalWorkflow.deleted_at.is_(None)
                     )
+                    result_approver = await db.execute(query_approver)
+                    if not result_approver.scalar_one_or_none():
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Not authorized to view approvals for this leave request"
+                        )
 
         limit = limit or settings.DEFAULT_PAGE_SIZE
         query = select(LeaveApprovalWorkflow).where(
@@ -443,12 +424,9 @@ async def get_leave_approvals_by_request(
     except HTTPException as e:
         logger.error(f"Forbidden access to leave approvals for leave_id {leave_id}: {str(e)}", extra={"request_id": request_id})
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving leave approvals for leave_id {leave_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error retrieving leave approvals for leave_id {leave_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave approvals")
 
 async def update_leave_approval(
     workflow_id: int,
@@ -479,7 +457,7 @@ async def update_leave_approval(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
-        if not any(p == Permission.MANAGE_LEAVE for p in user_permissions) and approval.approver_id != current_user.user_id:
+        if not any(p == Permission.MANAGE_LEAVE.value for p in user_permissions) and approval.approver_id != current_user.user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to update this leave approval"
@@ -529,8 +507,8 @@ async def update_leave_approval(
                 )
                 result_policy = await db.execute(query_policy)
                 leave_policy = result_policy.scalar_one_or_none()
-                if leave_policy and leave_request.days_requested > leave_policy.max_consecutive_days:
-                    raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_consecutive_days}) for {str(leave_request.leave_type).capitalize()}")
+                if leave_policy and leave_request.days_requested > leave_policy.max_days:
+                    raise ValidationError(detail=f"Requested days ({leave_request.days_requested}) exceed policy limit ({leave_policy.max_days}) for {leave_request.leave_type.value}")
 
         old_values = approval.__dict__.copy()
         for key, value in update_dict.items():
@@ -564,14 +542,67 @@ async def update_leave_approval(
         await db.commit()
         await db.refresh(approval)
 
-        # Invalidate cache
-        query = select(LeaveRequests).where(
+        # Notify employee, manager, and admins if status updated
+        query_lr = select(LeaveRequests).where(
             LeaveRequests.leave_id == approval.leave_id,
             LeaveRequests.is_active.is_(True),
             LeaveRequests.deleted_at.is_(None)
         )
-        result = await db.execute(query)
-        leave_request = result.scalar_one_or_none()
+        result_lr = await db.execute(query_lr)
+        leave_request = result_lr.scalar_one_or_none()
+        if "status" in update_dict:
+            eat_tz = ZoneInfo("Africa/Nairobi")
+            current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
+            recipients = []
+            query_employee = select(Users).where(
+                Users.user_id == leave_request.user_id,
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
+            )
+            result_employee = await db.execute(query_employee)
+            employee = result_employee.scalar_one_or_none()
+            if employee:
+                recipients.append((employee.email, employee.first_name))
+            query_manager = select(Users).join(
+                EmployeeHierarchy,
+                and_(
+                    EmployeeHierarchy.supervisor_id == Users.user_id,
+                    EmployeeHierarchy.is_active.is_(True),
+                    EmployeeHierarchy.deleted_at.is_(None)
+                )
+            ).where(
+                EmployeeHierarchy.employee_id == leave_request.user_id,
+                Users.is_active.is_(True),
+                Users.deleted_at.is_(None)
+            )
+            result_manager = await db.execute(query_manager)
+            manager = result_manager.scalar_one_or_none()
+            if manager:
+                recipients.append((manager.email, manager.first_name))
+            admins = await get_user_permissions(Permission.MANAGE_LEAVE, db)
+            recipients.extend([(admin.email, admin.first_name) for admin in admins])
+            for email, first_name in recipients:
+                await send_email(
+                    to_email=email,
+                    subject=f"Leave Approval Updated (ID: {workflow_id})",
+                    body=(
+                        f"Dear {first_name},\n\n"
+                        f"The leave approval (ID: {workflow_id}) for leave request (ID: {leave_request.leave_id}) has been updated.\n"
+                        f"Details:\n"
+                        f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                        f"Start Date: {leave_request.start_date}\n"
+                        f"End Date: {leave_request.end_date}\n"
+                        f"Days Requested: {leave_request.days_requested}\n"
+                        f"Status: {update_dict['status'].value.capitalize()}\n"
+                        f"Comments: {update_dict.get('comments', approval.comments) or 'None'}\n"
+                        f"Updated At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
+                        f"Please review in the Employee Management System.\n\n"
+                        f"Best regards,\nEmployee Management System"
+                    ),
+                    request_id=request_id
+                )
+
+        # Invalidate cache
         invalidate_user_cache(leave_request.user_id)
         await invalidate_cache_prefix("leave_approval_workflow")
         await invalidate_cache_prefix("leave_requests")
@@ -591,56 +622,6 @@ async def update_leave_approval(
         )
         await create_system_log(log, request, current_user, db, settings, request_id)
 
-        # Notify employee, supervisor, and admins if status updated
-        if "status" in update_dict:
-            eat_tz = ZoneInfo("Africa/Nairobi")
-            current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
-            recipients = []
-            query_user = select(Users).where(
-                Users.user_id == leave_request.user_id,
-                Users.is_active.is_(True),
-                Users.deleted_at.is_(None)
-            )
-            result_user = await db.execute(query_user)
-            employee = result_user.scalar_one_or_none()
-            if employee:
-                recipients.append((employee.email, employee.first_name))
-            query_supervisor = select(Users).join(
-                EmployeeHierarchy,
-                and_(
-                    EmployeeHierarchy.supervisor_id == Users.user_id,
-                    EmployeeHierarchy.is_active.is_(True),
-                    EmployeeHierarchy.deleted_at.is_(None)
-                )
-            ).where(
-                EmployeeHierarchy.employee_id == leave_request.user_id,
-                Users.is_active.is_(True),
-                Users.deleted_at.is_(None)
-            )
-            result_supervisor = await db.execute(query_supervisor)
-            supervisor = result_supervisor.scalar_one_or_none()
-            if supervisor:
-                recipients.append((supervisor.email, supervisor.first_name))
-            admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
-            recipients.extend([(admin.email, admin.first_name) for admin in admins])
-            for email, first_name in recipients:
-                await send_email(
-                    to_email=email,
-                    subject=f"Leave Approval Updated (ID: {workflow_id})",
-                    body=(
-                        f"Dear {first_name},\n\n"
-                        f"The leave approval (ID: {workflow_id}) for leave request (ID: {approval.leave_id}) "
-                        f"has been updated to {update_dict['status'].value.lower()}.\n"
-                        f"Leave Type: {str(leave_request.leave_type).capitalize()}\n"
-                        f"Days Requested: {leave_request.days_requested}\n"
-                        f"Comments: {update_dict.get('comments', 'None')}\n"
-                        f"Updated At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
-                        f"Please contact HR for any questions.\n\n"
-                        f"Best regards,\nEmployee Management System"
-                    ),
-                    request_id=request_id
-                )
-
         logger.info(
             f"Leave approval updated, workflow_id: {workflow_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
@@ -656,12 +637,9 @@ async def update_leave_approval(
     except HTTPException as e:
         logger.error(f"Forbidden access to update leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error updating leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error updating leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating leave approval")
 
 async def delete_leave_approval(
     workflow_id: int,
@@ -695,7 +673,7 @@ async def delete_leave_approval(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
-        if not any(p == Permission.MANAGE_LEAVE for p in user_permissions) and approval.approver_id != current_user.user_id:
+        if not any(p == Permission.MANAGE_LEAVE.value for p in user_permissions) and approval.approver_id != current_user.user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to delete this leave approval"
@@ -730,6 +708,56 @@ async def delete_leave_approval(
 
         await db.commit()
 
+        # Notify employee, manager, and admins
+        eat_tz = ZoneInfo("Africa/Nairobi")
+        current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
+        recipients = []
+        query_employee = select(Users).where(
+            Users.user_id == leave_request.user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_employee = await db.execute(query_employee)
+        employee = result_employee.scalar_one_or_none()
+        if employee:
+            recipients.append((employee.email, employee.first_name))
+        query_manager = select(Users).join(
+            EmployeeHierarchy,
+            and_(
+                EmployeeHierarchy.supervisor_id == Users.user_id,
+                EmployeeHierarchy.is_active.is_(True),
+                EmployeeHierarchy.deleted_at.is_(None)
+            )
+        ).where(
+            EmployeeHierarchy.employee_id == leave_request.user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_manager = await db.execute(query_manager)
+        manager = result_manager.scalar_one_or_none()
+        if manager:
+            recipients.append((manager.email, manager.first_name))
+        admins = await get_user_permissions(Permission.MANAGE_LEAVE, db)
+        recipients.extend([(admin.email, admin.first_name) for admin in admins])
+        for email, first_name in recipients:
+            await send_email(
+                to_email=email,
+                subject=f"Leave Approval Deleted (ID: {workflow_id})",
+                body=(
+                    f"Dear {first_name},\n\n"
+                    f"The leave approval (ID: {workflow_id}) for leave request (ID: {leave_request.leave_id}) has been deleted.\n"
+                    f"Details:\n"
+                    f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                    f"Start Date: {leave_request.start_date}\n"
+                    f"End Date: {leave_request.end_date}\n"
+                    f"Days Requested: {leave_request.days_requested}\n"
+                    f"Deleted At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
+                    f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
+
         # Invalidate cache
         invalidate_user_cache(leave_request.user_id)
         await invalidate_cache_prefix("leave_approval_workflow")
@@ -750,53 +778,6 @@ async def delete_leave_approval(
         )
         await create_system_log(log, request, current_user, db, settings, request_id)
 
-        # Notify employee, supervisor, and admins
-        eat_tz = ZoneInfo("Africa/Nairobi")
-        current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
-        recipients = []
-        query_user = select(Users).where(
-            Users.user_id == leave_request.user_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result_user = await db.execute(query_user)
-        employee = result_user.scalar_one_or_none()
-        if employee:
-            recipients.append((employee.email, employee.first_name))
-        query_supervisor = select(Users).join(
-            EmployeeHierarchy,
-            and_(
-                EmployeeHierarchy.supervisor_id == Users.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-        ).where(
-            EmployeeHierarchy.employee_id == leave_request.user_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result_supervisor = await db.execute(query_supervisor)
-        supervisor = result_supervisor.scalar_one_or_none()
-        if supervisor:
-            recipients.append((supervisor.email, supervisor.first_name))
-        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
-        recipients.extend([(admin.email, admin.first_name) for admin in admins])
-        for email, first_name in recipients:
-            await send_email(
-                to_email=email,
-                subject=f"Leave Approval Deleted (ID: {workflow_id})",
-                body=(
-                    f"Dear {first_name},\n\n"
-                    f"The leave approval (ID: {workflow_id}) for leave request (ID: {approval.leave_id}) has been deleted.\n"
-                    f"Leave Type: {str(leave_request.leave_type).capitalize()}\n"
-                    f"Days Requested: {leave_request.days_requested}\n"
-                    f"Deleted At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
-                    f"Please contact HR for any questions.\n\n"
-                    f"Best regards,\nEmployee Management System"
-                ),
-                request_id=request_id
-            )
-
         logger.info(
             f"Leave approval soft deleted, workflow_id: {workflow_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
@@ -811,12 +792,9 @@ async def delete_leave_approval(
     except HTTPException as e:
         logger.error(f"Forbidden access to delete leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
         raise
-    except DatabaseError as e:
-        logger.error(f"Database error deleting leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error deleting leave approval {workflow_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting leave approval")
 
 async def define_workflow_steps(
     workflow_steps: List[WorkflowStepCreate],
@@ -842,7 +820,8 @@ async def define_workflow_steps(
             LeaveRequests.deleted_at.is_(None)
         )
         result = await db.execute(query)
-        if not result.scalar_one_or_none():
+        leave_request = result.scalar_one_or_none()
+        if not leave_request:
             raise LeaveRequestNotFoundError(leave_id=leave_id)
 
         # Validate approvers and levels
@@ -871,7 +850,7 @@ async def define_workflow_steps(
                 raise ValidationError(detail=f"Duplicate level {step.level} for leave_id {leave_id}")
             levels.add(step.level)
             user_permissions = await get_user_permissions(step.approver_id, db, request_id)
-            if Permission.APPROVE_LEAVE not in user_permissions:
+            if Permission.APPROVE_LEAVE.value not in user_permissions:
                 raise ValidationError(detail=f"Approver {step.approver_id} lacks APPROVE_LEAVE permission")
 
         created_steps = []
@@ -893,11 +872,61 @@ async def define_workflow_steps(
         for step in created_steps:
             await db.refresh(step)
 
+        # Notify employee, manager, approvers, and admins
+        eat_tz = ZoneInfo("Africa/Nairobi")
+        current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
+        recipients = [(users[step.approver_id].email, users[step.approver_id].first_name) for step in workflow_steps]
+        query_employee = select(Users).where(
+            Users.user_id == leave_request.user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_employee = await db.execute(query_employee)
+        employee = result_employee.scalar_one_or_none()
+        if employee:
+            recipients.append((employee.email, employee.first_name))
+        query_manager = select(Users).join(
+            EmployeeHierarchy,
+            and_(
+                EmployeeHierarchy.supervisor_id == Users.user_id,
+                EmployeeHierarchy.is_active.is_(True),
+                EmployeeHierarchy.deleted_at.is_(None)
+            )
+        ).where(
+            EmployeeHierarchy.employee_id == leave_request.user_id,
+            Users.is_active.is_(True),
+            Users.deleted_at.is_(None)
+        )
+        result_manager = await db.execute(query_manager)
+        manager = result_manager.scalar_one_or_none()
+        if manager:
+            recipients.append((manager.email, manager.first_name))
+        admins = await get_user_permissions(Permission.MANAGE_LEAVE, db)
+        recipients.extend([(admin.email, admin.first_name) for admin in admins])
+        for email, first_name in recipients:
+            await send_email(
+                to_email=email,
+                subject=f"New Workflow Steps Defined for Leave Request (ID: {leave_id})",
+                body=(
+                    f"Dear {first_name},\n\n"
+                    f"New workflow steps have been defined for leave request (ID: {leave_id}) for user ID {leave_request.user_id}.\n"
+                    f"Details:\n"
+                    f"Leave Type: {leave_request.leave_type.value.capitalize()}\n"
+                    f"Start Date: {leave_request.start_date}\n"
+                    f"End Date: {leave_request.end_date}\n"
+                    f"Days Requested: {leave_request.days_requested}\n"
+                    f"Created At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
+                    f"Please review in the Employee Management System.\n\n"
+                    f"Best regards,\nEmployee Management System"
+                ),
+                request_id=request_id
+            )
+
         # Invalidate cache
-        invalidate_user_cache(created_steps[0].leave_id)
+        invalidate_user_cache(leave_request.user_id)
         await invalidate_cache_prefix("leave_approval_workflow")
         await invalidate_cache_prefix("leave_requests")
-        logger.info(f"Cache invalidated for leave_approval_workflow, leave_requests, and leave_id: {leave_id}", extra={"request_id": request_id})
+        logger.info(f"Cache invalidated for leave_approval_workflow, leave_requests, and user_id: {leave_request.user_id}", extra={"request_id": request_id})
 
         # Log action
         log = SystemLogCreate(
@@ -913,59 +942,6 @@ async def define_workflow_steps(
         )
         await create_system_log(log, request, current_user, db, settings, request_id)
 
-        # Notify approvers, employee, supervisor, and admins
-        eat_tz = ZoneInfo("Africa/Nairobi")
-        current_time_eat = datetime.now(timezone.utc).astimezone(eat_tz)
-        recipients = [(users[step.approver_id].email, users[step.approver_id].first_name) for step in workflow_steps]
-        query_lr = select(LeaveRequests).where(
-            LeaveRequests.leave_id == leave_id,
-            LeaveRequests.is_active.is_(True),
-            LeaveRequests.deleted_at.is_(None)
-        )
-        result_lr = await db.execute(query_lr)
-        leave_request = result_lr.scalar_one_or_none()
-        query_user = select(Users).where(
-            Users.user_id == leave_request.user_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result_user = await db.execute(query_user)
-        employee = result_user.scalar_one_or_none()
-        if employee:
-            recipients.append((employee.email, employee.first_name))
-        query_supervisor = select(Users).join(
-            EmployeeHierarchy,
-            and_(
-                EmployeeHierarchy.supervisor_id == Users.user_id,
-                EmployeeHierarchy.is_active.is_(True),
-                EmployeeHierarchy.deleted_at.is_(None)
-            )
-        ).where(
-            EmployeeHierarchy.employee_id == leave_request.user_id,
-            Users.is_active.is_(True),
-            Users.deleted_at.is_(None)
-        )
-        result_supervisor = await db.execute(query_supervisor)
-        supervisor = result_supervisor.scalar_one_or_none()
-        if supervisor:
-            recipients.append((supervisor.email, supervisor.first_name))
-        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
-        recipients.extend([(admin.email, admin.first_name) for admin in admins])
-        for email, first_name in recipients:
-            await send_email(
-                to_email=email,
-                subject=f"New Workflow Steps Defined for Leave Request (ID: {leave_id})",
-                body=(
-                    f"Dear {first_name},\n\n"
-                    f"New workflow steps have been defined for leave request (ID: {leave_id}) of type {str(leave_request.leave_type).capitalize()}.\n"
-                    f"Days Requested: {leave_request.days_requested}\n"
-                    f"Created At: {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
-                    f"Please review in the Employee Management System.\n\n"
-                    f"Best regards,\nEmployee Management System"
-                ),
-                request_id=request_id
-            )
-
         logger.info(
             f"Defined {len(created_steps)} workflow steps for leave_id: {leave_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
@@ -978,12 +954,9 @@ async def define_workflow_steps(
     except (UserNotFoundError, LeaveRequestNotFoundError) as e:
         logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error defining workflow steps: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error defining workflow steps: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error defining workflow steps")
 
 async def get_workflow_by_type(
     leave_type: LeaveType,
@@ -1012,10 +985,7 @@ async def get_workflow_by_type(
         result = await db.execute(query)
         leave_requests = result.scalars().all()
         if not leave_requests:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No leave requests found for leave type {leave_type.value}"
-            )
+            return []
 
         leave_ids = [lr.leave_id for lr in leave_requests]
         query = select(LeaveApprovalWorkflow).where(
@@ -1028,7 +998,7 @@ async def get_workflow_by_type(
 
         # Authorization check
         user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
-        if not any(p in [Permission.VIEW_WORKFLOWS, Permission.MANAGE_LEAVE] for p in user_permissions):
+        if not any(p in [Permission.VIEW_WORKFLOWS.value, Permission.MANAGE_LEAVE.value] for p in user_permissions):
             allowed_leave_ids = []
             for lr in leave_requests:
                 if lr.user_id == current_user.user_id:
@@ -1068,12 +1038,6 @@ async def get_workflow_by_type(
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Error retrieving workflow steps for leave_type {leave_type}: {str(e)}", extra={"request_id": request_id})
-        raise
-    except DatabaseError as e:
-        logger.error(f"Database error retrieving workflow steps for leave_type {leave_type}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
     except Exception as e:
         logger.error(f"Unexpected error retrieving workflow steps for leave_type {leave_type}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving workflow steps")
