@@ -77,10 +77,14 @@ async def initialize_engine_and_session():
             class_=AsyncSession,
             expire_on_commit=False
         )
-        await initialize_redis()
-        logger.info("Database engine, session factory, and Redis initialized")
+        try:
+            await initialize_redis()
+            logger.info("Database engine, session factory, and Redis initialized")
+        except Exception as redis_error:
+            logger.warning(f"Redis initialization failed, continuing without caching: {redis_error}")
+            logger.info("Database engine and session factory initialized (Redis disabled)")
     except Exception as e:
-        logger.error(f"Failed to initialize database or Redis: {str(e)}")
+        logger.error(f"Failed to initialize database: {str(e)}")
         raise
 
 # Startup and shutdown helpers
