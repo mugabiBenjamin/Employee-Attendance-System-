@@ -49,6 +49,14 @@ engine = None
 # Create async session factory
 AsyncSessionLocal = None
 
+def ensure_session_factory():
+    """Ensure AsyncSessionLocal is initialized before use."""
+    if AsyncSessionLocal is None:
+        raise RuntimeError(
+            "Database not initialized. Make sure to call startup() before using database operations."
+        )
+    return AsyncSessionLocal
+
 # Redis client
 redis_client = None
 
@@ -293,30 +301,33 @@ async def init_db():
                 logger.error(f"Error creating/updating enum {enum_name}: {str(e)}")
                 raise
 
-        # Ensure required columns exist
+        # Create all tables for registered models BEFORE creating views
+        await conn.run_sync(Base.metadata.create_all)
+
+        # Ensure required columns exist AFTER tables are created
         table_column_updates = [
             ("users", "job_title", "VARCHAR(100)"),
             ("roles", "permissions", "JSONB DEFAULT '{}'::jsonb"),
-            ("users", "employee_type", f"{ENUM_CLASSES['employee_type'].name} DEFAULT 'full_time'")
+            ("users", "employee_type", f"employee_type DEFAULT 'full_time'")
         ]
         
         for table_name, column_name, column_definition in table_column_updates:
-            await conn.execute(text(f"""
-                DO $$ BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1
-                        FROM information_schema.columns
-                        WHERE table_name = '{table_name}' AND column_name = '{column_name}'
-                    ) THEN
-                        ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition};
-                    END IF;
-                END $$;
-            """))
+            try:
+                await conn.execute(text(f"""
+                    DO $$ BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_name = '{table_name}' AND column_name = '{column_name}'
+                        ) THEN
+                            ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition};
+                        END IF;
+                    END $$;
+                """))
+            except Exception as e:
+                logger.warning(f"Error adding column {column_name} to {table_name}: {str(e)}")
 
-        # Create all tables for registered models
-        await conn.run_sync(Base.metadata.create_all)
-
-        # Create materialized views and indexes
+        # Create materialized views and indexes AFTER all tables exist
         for view_sql in MATERIALIZED_VIEW_SQLS:
             try:
                 await conn.execute(text(view_sql))
@@ -354,12 +365,27 @@ async def background_refresh_materialized_views():
     """Refresh all materialized views."""
     materialized_views = ["attendance_summary", "leave_request_summary"]
     
+    if AsyncSessionLocal is None:
+        logger.warning("Database not initialized, skipping materialized view refresh")
+        return
+    
     async with AsyncSessionLocal() as session:
         try:
             for view_name in materialized_views:
                 try:
-                    await session.execute(text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view_name}"))
-                    logger.info(f"Materialized view '{view_name}' refreshed successfully")
+                    # Check if view exists before trying to refresh
+                    view_exists = await session.execute(text(f"""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables 
+                            WHERE table_name = '{view_name}' AND table_type = 'VIEW'
+                        );
+                    """))
+                    
+                    if view_exists.scalar():
+                        await session.execute(text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view_name}"))
+                        logger.info(f"Materialized view '{view_name}' refreshed successfully")
+                    else:
+                        logger.warning(f"Materialized view '{view_name}' does not exist, skipping refresh")
                 except Exception as e:
                     logger.error(f"Error refreshing materialized view {view_name}: {str(e)}")
             

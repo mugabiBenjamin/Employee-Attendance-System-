@@ -37,8 +37,8 @@ class Users(Base):
     )
 
     # Relationships
-    user_roles = relationship("UserRoles", back_populates="user", lazy="selectin")
-    roles = relationship("Roles", secondary="user_roles", lazy="selectin")
+    user_roles = relationship("UserRoles", back_populates="user", foreign_keys="[UserRoles.user_id]", lazy="selectin")
+    roles = relationship("Roles", secondary="user_roles", primaryjoin="Users.user_id == UserRoles.user_id", secondaryjoin="Roles.role_id == UserRoles.role_id", lazy="selectin")
 
     __table_args__ = (
         CheckConstraint("email ~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'", name="email_format"),

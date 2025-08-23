@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from app.core.database import AsyncSessionLocal
+from app.core.database import ensure_session_factory
 from app.core.enums import SystemAction
 from app.models.system_logs import SystemLogs
 from app.core.config import settings
@@ -66,6 +66,7 @@ def setup_middleware(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
+        logger.info(f"Middleware processing: {request.method} {request.url.path}")
         request_id = str(uuid.uuid4())
         
         # Safe way to set request_id on request state
@@ -80,6 +81,13 @@ def setup_middleware(app: FastAPI) -> None:
         action = determine_system_action(path, method)
 
         if action:
+            try:
+                session_factory = ensure_session_factory()
+            except RuntimeError:
+                # Database not initialized yet, skip logging
+                logger.warning("Database not initialized, skipping system logging")
+                return response
+
             # Safe way to get user from request state
             user = getattr(request.state, "user", None)
             user_id = getattr(user, 'user_id', None) if user else None
@@ -90,7 +98,7 @@ def setup_middleware(app: FastAPI) -> None:
             except Exception as e:
                 logger.warning(f"Failed to get client IP: {str(e)}")
 
-            async with AsyncSessionLocal() as session:
+            async with session_factory() as session:
                 try:
                     system_log = SystemLogs(
                         user_id=user_id,
