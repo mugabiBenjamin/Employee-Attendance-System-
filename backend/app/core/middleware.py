@@ -67,6 +67,10 @@ def setup_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
         request_id = str(uuid.uuid4())
+        
+        # Safe way to set request_id on request state
+        if not hasattr(request, 'state'):
+            request.state = type('State', (), {})()
         request.state.request_id = request_id
 
         response = await call_next(request)
@@ -76,8 +80,9 @@ def setup_middleware(app: FastAPI) -> None:
         action = determine_system_action(path, method)
 
         if action:
+            # Safe way to get user from request state
             user = getattr(request.state, "user", None)
-            user_id = user.user_id if user else None
+            user_id = getattr(user, 'user_id', None) if user else None
 
             ip_address = None
             try:

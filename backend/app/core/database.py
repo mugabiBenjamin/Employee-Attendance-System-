@@ -2,7 +2,7 @@ import asyncio
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from app.core.config import settings
 from app.core.enums import (
@@ -13,7 +13,7 @@ from app.core.enums import (
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from sqlalchemy.exc import OperationalError, DatabaseError
-from redis import asyncio as aioredis
+import redis.asyncio as redis
 from redis.exceptions import ConnectionError, RedisError
 import json
 
@@ -50,7 +50,7 @@ engine = None
 AsyncSessionLocal = None
 
 # Redis client
-redis = None
+redis_client = None
 
 # Initialize Redis with retry logic
 @retry(
@@ -62,8 +62,10 @@ redis = None
     )
 )
 async def initialize_redis():
-    global redis
-    redis = await aioredis.create_redis_pool(settings.REDIS_URL)
+    global redis_client
+    redis_client = redis.from_url(settings.REDIS_URL)
+    # Test the connection
+    await redis_client.ping()
     logger.info("Redis client initialized")
 
 async def initialize_engine_and_session():
@@ -90,14 +92,13 @@ async def startup():
 
 async def shutdown():
     """Close database engine and Redis connections on application shutdown."""
-    global engine, redis
+    global engine, redis_client
     try:
         if engine:
             await engine.dispose()
             logger.info("Database engine closed")
-        if redis:
-            redis.close()
-            await redis.wait_closed()
+        if redis_client:
+            await redis_client.aclose()
             logger.info("Redis connection closed")
     except Exception as e:
         logger.error(f"Error during shutdown: {str(e)}")
@@ -116,8 +117,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # Cache utility functions
 async def get_cache(key: str) -> Optional[dict]:
     try:
-        if redis:
-            cached = await redis.get(key)
+        if redis_client:
+            cached = await redis_client.get(key)
             if cached:
                 logger.debug(f"Cache hit for key: {key}")
                 return json.loads(cached)
@@ -128,26 +129,25 @@ async def get_cache(key: str) -> Optional[dict]:
 
 async def set_cache(key: str, value: dict, ttl: int) -> None:
     try:
-        if redis:
-            await redis.set(key, json.dumps(value), expire=ttl)
+        if redis_client:
+            await redis_client.set(key, json.dumps(value), ex=ttl)
             logger.debug(f"Cache set for key: {key} with TTL {ttl}s")
     except RedisError as e:
         logger.error(f"Error setting cache for key {key}: {str(e)}")
 
 async def invalidate_cache_prefix(prefix: str) -> None:
     try:
-        if redis:
-            keys = await redis.keys(f"{prefix}:*")
-            if keys:
-                await redis.delete(*keys)
-                logger.debug(f"Invalidated cache for prefix: {prefix}")
+        if redis_client:
+            async for key in redis_client.scan_iter(f"{prefix}:*"):
+                await redis_client.delete(key)
+            logger.debug(f"Invalidated cache for prefix: {prefix}")
     except RedisError as e:
         logger.error(f"Error invalidating cache for prefix {prefix}: {str(e)}")
 
 async def is_key_cached(key: str) -> bool:
     try:
-        if redis:
-            result = await redis.exists(key)
+        if redis_client:
+            result = await redis_client.exists(key)
             return bool(result)
         return False
     except RedisError as e:

@@ -69,12 +69,12 @@ async def clock_in_out_endpoint(
     description="Retrieve attendance history for a user with optional date range and pagination."
 )
 async def get_attendance_history_endpoint(
+    request: Request,
     user_id: Optional[int] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),

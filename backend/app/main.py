@@ -1,5 +1,5 @@
-from select import select
-from fastapi import Depends, FastAPI, HTTPException, status
+from sqlalchemy import select
+from fastapi import Depends, FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -39,7 +39,7 @@ logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
 # -----------------------
 # Rate Limiter Setup
 # -----------------------
-def get_client_ip(request: FastAPI.Request) -> str:
+def get_client_ip(request: Request) -> str:
     x_forwarded_for = request.headers.get("X-Forwarded-For")
     if x_forwarded_for:
         return x_forwarded_for.split(",")[0].strip()
@@ -62,14 +62,15 @@ async def lifespan(app: FastAPI):
         await init_db()
         await start_background_refresh()
 
+        # Setup Celery periodic tasks if available
         try:
-            celery_app.setup_periodic_tasks()
-        except Exception as e:
-            logger.error(
-                f"Failed to setup Celery periodic tasks: {str(e)}",
+            from app.core.celery import setup_periodic_tasks
+            setup_periodic_tasks()
+        except (ImportError, AttributeError) as e:
+            logger.warning(
+                f"Could not setup Celery periodic tasks: {str(e)}",
                 extra={"request_id": None}
             )
-            raise
 
         logger.info("Startup complete.", extra={"request_id": None})
         yield
@@ -98,7 +99,14 @@ app = FastAPI(
 # -----------------------
 # Middleware Configuration
 # -----------------------
-app.state.limiter = limiter
+# Set limiter on app state
+try:
+    if not hasattr(app, 'state'):
+        app.state = type('State', (), {})()
+    setattr(app.state, 'limiter', limiter)
+except Exception as e:
+    logger.warning(f"Could not set limiter on app state: {e}")
+
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 

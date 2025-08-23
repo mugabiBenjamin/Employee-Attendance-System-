@@ -57,7 +57,16 @@ def sanitize_filename(filename: str) -> str:
 async def fetch_attendance_records(user_id: int, start_date: str, end_date: str, session: AsyncSession) -> list:
     """Fetch attendance records for a user within a date range."""
     try:
-        query = select(AttendanceRecords).where(
+        # Use explicit column selection to ensure proper attribute access
+        query = select(
+            AttendanceRecords.attendance_id,
+            AttendanceRecords.date,
+            AttendanceRecords.clock_in_time,
+            AttendanceRecords.clock_out_time,
+            AttendanceRecords.status,
+            AttendanceRecords.total_hours,
+            AttendanceRecords.overtime_hours
+        ).where(
             AttendanceRecords.user_id == user_id,
             AttendanceRecords.clock_in_time >= start_date,
             AttendanceRecords.clock_in_time <= end_date,
@@ -65,7 +74,7 @@ async def fetch_attendance_records(user_id: int, start_date: str, end_date: str,
         ).order_by(AttendanceRecords.clock_in_time.desc())
         
         result = await session.execute(query)
-        return result.scalars().all()
+        return result.fetchall()
     except Exception as e:
         logger.error(f"Error fetching attendance records for user_id {user_id}: {str(e)}")
         raise
@@ -120,14 +129,15 @@ def generate_attendance_csv_task(user_id: int, start_date: str, end_date: str, f
                 ])
                 
                 for record in records:
+                    # Access Row tuple elements by index
                     writer.writerow([
-                        record.attendance_id,
-                        record.date,
-                        record.clock_in_time,
-                        record.clock_out_time,
-                        record.status,
-                        record.total_hours,
-                        record.overtime_hours
+                        record[0],  # attendance_id
+                        record[1],  # date
+                        record[2],  # clock_in_time
+                        record[3],  # clock_out_time
+                        record[4],  # status
+                        record[5],  # total_hours
+                        record[6]   # overtime_hours
                     ])
 
                 async with aiofiles.open(output_path, "w", encoding='utf-8') as f:
@@ -158,14 +168,15 @@ def generate_attendance_pdf_task(user_id: int, start_date: str, end_date: str, f
                 ]]
                 
                 for record in records:
+                    # Access Row tuple elements by index with safe conversion
                     data.append([
-                        str(record.attendance_id),
-                        str(record.date) if record.date else "",
-                        str(record.clock_in_time),
-                        str(record.clock_out_time) if record.clock_out_time else "",
-                        str(record.status) if record.status else "",
-                        str(record.total_hours) if record.total_hours else "",
-                        str(record.overtime_hours) if record.overtime_hours else ""
+                        str(record[0]) if record[0] is not None else "",  # attendance_id
+                        str(record[1]) if record[1] is not None else "",  # date
+                        str(record[2]) if record[2] is not None else "",  # clock_in_time
+                        str(record[3]) if record[3] is not None else "",  # clock_out_time
+                        str(record[4]) if record[4] is not None else "",  # status
+                        str(record[5]) if record[5] is not None else "",  # total_hours
+                        str(record[6]) if record[6] is not None else ""   # overtime_hours
                     ])
 
                 doc = SimpleDocTemplate(output_path, pagesize=letter)
@@ -193,7 +204,8 @@ def dispatch_csv_report(user_id: int, start_date: date, end_date: date) -> str:
     """Dispatch CSV report generation task and return job ID."""
     filename = f"attendance_{user_id}_{start_date}_to_{end_date}.csv"
     sanitized_filename = sanitize_filename(filename)
-    job = generate_attendance_csv_task.delay(user_id, str(start_date), str(end_date), sanitized_filename)
+    job = app.send_task('app.core.celery.generate_attendance_csv_task', 
+                       args=[user_id, str(start_date), str(end_date), sanitized_filename])
     logger.info(f"Dispatched CSV report task for user_id: {user_id}, job_id: {job.id}")
     return job.id
 
@@ -201,19 +213,34 @@ def dispatch_pdf_report(user_id: int, start_date: date, end_date: date) -> str:
     """Dispatch PDF report generation task and return job ID."""
     filename = f"attendance_{user_id}_{start_date}_to_{end_date}.pdf"
     sanitized_filename = sanitize_filename(filename)
-    job = generate_attendance_pdf_task.delay(user_id, str(start_date), str(end_date), sanitized_filename)
+    job = app.send_task('app.core.celery.generate_attendance_pdf_task',
+                       args=[user_id, str(start_date), str(end_date), sanitized_filename])
     logger.info(f"Dispatched PDF report task for user_id: {user_id}, job_id: {job.id}")
     return job.id
 
 def setup_periodic_tasks():
     """Setup periodic tasks for Celery."""
-    app.conf.beat_schedule = {
-        'refresh-materialized-view': {
-            'task': 'app.core.celery.refresh_materialized_view',
-            'schedule': settings.MATERIALIZED_VIEW_REFRESH_INTERVAL,
-        },
-    }
-    logger.info("Periodic tasks configured for Celery")
+    try:
+        app.conf.update(
+            beat_schedule={
+                'refresh-materialized-view': {
+                    'task': 'app.core.celery.refresh_materialized_view',
+                    'schedule': settings.MATERIALIZED_VIEW_REFRESH_INTERVAL,
+                },
+            }
+        )
+        logger.info("Periodic tasks configured for Celery")
+    except AttributeError as e:
+        logger.warning(f"Could not set up periodic tasks: {e}")
+        # Fallback: set directly on conf object
+        if hasattr(app, 'conf'):
+            setattr(app.conf, 'beat_schedule', {
+                'refresh-materialized-view': {
+                    'task': 'app.core.celery.refresh_materialized_view',
+                    'schedule': settings.MATERIALIZED_VIEW_REFRESH_INTERVAL,
+                },
+            })
+            logger.info("Periodic tasks configured via fallback method")
 
 # Configure periodic tasks on startup
 setup_periodic_tasks()
