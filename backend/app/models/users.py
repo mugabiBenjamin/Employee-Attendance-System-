@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, Index, UniqueConstraint
-from sqlalchemy.sql import func, text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, ForeignKey, CheckConstraint, Index, UniqueConstraint, text
+from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base, ENUM_CLASSES
 from app.core.enums import EmployeeType
@@ -25,7 +25,6 @@ class Users(Base):
     salary = Column(DECIMAL(12, 2), nullable=True)
     supervisor_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     department_id = Column(Integer, ForeignKey("departments.department_id", ondelete="SET NULL"), nullable=True)
-    version = Column(Integer, nullable=False, default=1)
     is_active = Column(Boolean, default=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     last_login = Column(DateTime(timezone=True), nullable=True)
@@ -45,7 +44,6 @@ class Users(Base):
         CheckConstraint("phone IS NULL OR phone ~ '^[\\+]?[0-9\\s\\-\\(\\)]{1,20}$'", name="phone_format"),
         CheckConstraint("hire_date <= CURRENT_DATE", name="hire_date_valid"),
         CheckConstraint("salary IS NULL OR salary >= 0", name="salary_valid"),
-        CheckConstraint("version >= 1", name="version_valid"),
         CheckConstraint("deleted_at IS NULL OR is_active = FALSE", name="soft_delete_check"),
         UniqueConstraint('email', name='unique_email'),
         Index('idx_users_employee_id', 'employee_id'),

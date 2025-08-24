@@ -20,4 +20,5 @@ class ShiftAssignments(Base):
         CheckConstraint("deleted_at IS NULL OR is_active = FALSE", name="soft_delete_check"),
         Index('idx_shift_assignments_user_id', 'user_id'),
         Index('idx_shift_assignments_pattern_id', 'pattern_id'),
+        Index('idx_current_shift_assignments', 'user_id', 'pattern_id', postgresql_where=Column('is_active') == True),
     )

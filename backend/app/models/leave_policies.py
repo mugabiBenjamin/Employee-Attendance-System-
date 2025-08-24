@@ -13,7 +13,7 @@ class LeavePolicies(Base):
     max_consecutive_days = Column(Integer)
     requires_approval = Column(Boolean, default=True)
     approval_levels = Column(Integer, default=1)
-    accrual_rate = Column(DECIMAL(10, 2), default=0)  # days per month
+    accrual_rate = Column(DECIMAL(10, 2), default=0)
     effective_from = Column(Date, nullable=False, server_default=func.current_date())
     effective_to = Column(Date)
     version = Column(Integer, nullable=False, default=1)

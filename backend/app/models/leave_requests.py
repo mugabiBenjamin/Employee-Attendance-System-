@@ -30,4 +30,7 @@ class LeaveRequests(Base):
         Index('idx_leave_requests_user_id', 'user_id'),
         Index('idx_leave_requests_leave_type', 'leave_type'),
         Index('idx_leave_requests_status', 'status'),
+        Index('idx_leave_requests_dates', 'start_date', 'end_date'),
+        Index('idx_leave_requests_user_status', 'user_id', 'status'),
+        Index('idx_pending_leave_requests', 'leave_id', 'user_id', postgresql_where=(status == LeaveRequestStatus.UNDER_REVIEW)),
     )

@@ -30,4 +30,7 @@ class AttendanceRecords(Base):
         CheckConstraint("overtime_hours >= 0", name="overtime_hours_valid"),
         UniqueConstraint('user_id', 'date', name='unique_user_date'),
         Index('idx_attendance_user_clock_in', 'user_id', 'clock_in_time'),
+        Index('idx_attendance_date', 'date'),
+        Index('idx_attendance_user_date', 'user_id', 'date'),
+        Index('idx_attendance_user_status', 'user_id', 'status'),
     )
