@@ -16,9 +16,23 @@ class UserRoles(Base):
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    user = relationship("Users", back_populates="user_roles", foreign_keys=[user_id])
-    role = relationship("Roles", lazy="selectin")
-    assigned_by_user = relationship("Users", foreign_keys=[assigned_by])
+    user = relationship(
+        "Users",
+        back_populates="user_roles",
+        foreign_keys=[user_id],
+        lazy="selectin"
+    )
+    role = relationship(
+        "Roles",
+        back_populates="user_roles",
+        foreign_keys=[role_id],
+        lazy="selectin"
+    )
+    assigned_by_user = relationship(
+        "Users",
+        foreign_keys=[assigned_by],
+        lazy="selectin"
+    )
     
     __table_args__ = (
         UniqueConstraint('user_id', 'role_id', name='unique_user_role'),

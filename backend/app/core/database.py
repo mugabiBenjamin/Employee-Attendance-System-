@@ -180,9 +180,6 @@ ENUM_CLASS_LIST = [
     (PermissionGroup, "permission_group"),
 ]
 
-# Note: Permission enum is not included as a PostgreSQL enum because it has too many values (80+)
-# and is better stored as JSONB in the roles.permissions column
-
 # Enum SQLAlchemy type mapping (for model columns)
 ENUM_CLASSES = {
     name: PG_ENUM(enum_class, name=name, create_type=False)
@@ -193,25 +190,32 @@ ENUM_CLASSES = {
 MATERIALIZED_VIEW_SQLS = [
     """
     CREATE MATERIALIZED VIEW IF NOT EXISTS attendance_summary AS
-    SELECT u.user_id,
+    SELECT 
+        u.user_id,
         u.employee_id,
         CONCAT(u.first_name, ' ', u.last_name) AS full_name,
         d.department_name,
-        ar.date,
+        ar.attendance_summary_date,
         ar.status::attendance_status,
         ar.total_hours,
         ar.overtime_hours,
         ar.clock_in_time,
-        ar.clock_out_time
+        ar.clock_out_time,
+        u.supervisor_id,
+        CONCAT(s.first_name, ' ', s.last_name) AS supervisor_name,
+        ar.is_active,
+        ar.created_at,
+        ar.updated_at
     FROM users u
         JOIN user_departments ud ON u.user_id = ud.user_id AND ud.is_primary = TRUE
         JOIN departments d ON ud.department_id = d.department_id
         LEFT JOIN attendance_records ar ON u.user_id = ar.user_id
+        LEFT JOIN users s ON u.supervisor_id = s.user_id
     WHERE u.is_active = TRUE AND u.deleted_at IS NULL
     WITH DATA;
     """,
     """
-    CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, attendance_summary_date);
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name);
@@ -221,7 +225,8 @@ MATERIALIZED_VIEW_SQLS = [
     """,
     """
     CREATE MATERIALIZED VIEW IF NOT EXISTS leave_request_summary AS
-    SELECT lr.leave_request_id,
+    SELECT 
+        lr.leave_id AS leave_request_id,
         u.user_id,
         u.employee_id,
         CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
@@ -230,7 +235,7 @@ MATERIALIZED_VIEW_SQLS = [
         lr.status::leave_request_status,
         lr.start_date,
         lr.end_date,
-        lr.total_days,
+        lr.days_requested AS total_days,
         lr.reason,
         lr.created_at,
         lr.updated_at
