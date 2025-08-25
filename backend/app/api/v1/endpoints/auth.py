@@ -130,7 +130,6 @@ async def logout_endpoint(
     summary="Get current user profile",
     description="Retrieve profile information for the current user."
 )
-@require_permissions([Permission.VIEW_OWN_PROFILE])
 async def get_profile_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),

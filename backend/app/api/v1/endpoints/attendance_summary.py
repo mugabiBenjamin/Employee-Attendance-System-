@@ -92,13 +92,13 @@ async def get_attendance_summary_endpoint(
 )
 @require_permissions([Permission.VIEW_ALL_ATTENDANCE])
 async def get_all_attendance_summaries_endpoint(
+    request: Request,
     department_id: Optional[int] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     is_active: Optional[bool] = None,
     skip: int = 0,
     limit: Optional[int] = None,
-    request: Request = Depends(),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> List[AttendanceSummaryOut]:

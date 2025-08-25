@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.users import Users
-from app.core.database import get_db, redis
+from app.core.database import get_db, redis_client as redis
+from app.core.enums import EmployeeType
+from app.core.database import validate_enum_value
 import logging
 
 logger = logging.getLogger(__name__)
@@ -113,6 +115,14 @@ async def get_current_user(
     if user is None:
         logger.warning(f"User not found for user_id: {user_id}")
         raise credentials_exception
+
+    # Validate employee_type
+    if user.employee_type and not await validate_enum_value(EmployeeType, user.employee_type):
+        logger.warning(f"Invalid employee_type '{user.employee_type}' for user_id: {user_id}")
+        user.employee_type = EmployeeType.FULL_TIME.value  # Fallback to default
+        db.add(user)
+        await db.commit()
+
     logger.debug(f"User authenticated: {user_id}")
     return user
 

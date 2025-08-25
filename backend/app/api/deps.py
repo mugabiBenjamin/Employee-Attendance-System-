@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import func, select, or_
+from sqlalchemy import func as sql_func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db, get_cache, set_cache
 from app.core.permissions import get_user_permissions
@@ -81,12 +81,6 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
-        user.last_login = func.current_timestamp()
-        user.updated_at = func.current_timestamp()
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-
         logger.info(
             f"User authenticated, user_id: {user.user_id}",
             extra={"request_id": request_id, "user_id": user.user_id}
@@ -119,7 +113,7 @@ async def notify_admins(token: str, db: AsyncSession, settings: Settings, reques
             subject="Authentication Failure Alert",
             body=(
                 f"Dear {admin.first_name},\n\n"
-                f"An authentication failure occurred at {func.current_timestamp()}.\n"
+                f"An authentication failure occurred at {sql_func.current_timestamp()}.\n"
                 f"Error: {error_message}\n"
                 f"Token: {token[:10]}... (truncated for security)\n"
                 f"Please review in the Employee Management System.\n\n"
@@ -344,8 +338,8 @@ async def validate_shift_or_leave(
             LeavePolicies.policy_id == leave_policy.policy_id,
             LeavePolicies.is_active == True,
             LeavePolicies.deleted_at.is_(None),
-            LeavePolicies.effective_from <= func.current_date(),
-            or_(LeavePolicies.effective_to.is_(None), LeavePolicies.effective_to >= func.current_date())
+            LeavePolicies.effective_from <= sql_func.current_date(),
+            or_(LeavePolicies.effective_to.is_(None), LeavePolicies.effective_to >= sql_func.current_date())
         )
         result = await db.execute(query)
         if not result.scalar_one_or_none():

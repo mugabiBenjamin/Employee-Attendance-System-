@@ -42,15 +42,6 @@ class Users(Base):
         foreign_keys="[UserRoles.user_id]",
         lazy="selectin"
     )
-    roles = relationship(
-        "Roles",
-        secondary="user_roles",
-        primaryjoin="Users.user_id == UserRoles.user_id",
-        secondaryjoin="Roles.role_id == UserRoles.role_id",
-        back_populates="users",
-        overlaps="user_roles",
-        lazy="selectin"
-    )
 
     __table_args__ = (
         CheckConstraint("email ~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'", name="email_format"),

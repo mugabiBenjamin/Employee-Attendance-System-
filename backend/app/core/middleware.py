@@ -66,6 +66,9 @@ def setup_middleware(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
+        print(f"Request query params: {dict(request.query_params)}")
+        print(f"Request path params: {request.path_params}")
+        
         logger.info(f"Middleware processing: {request.method} {request.url.path}")
         request_id = str(uuid.uuid4())
         
@@ -78,6 +81,12 @@ def setup_middleware(app: FastAPI) -> None:
 
         path = request.url.path
         method = request.method
+
+        # Skip logging for /api/v1/auth/token to prevent duplicate SystemLogs entries
+        if path.endswith(f"{settings.API_V1_STR}/auth/token"):
+            logger.debug(f"Skipping system log for endpoint: {path}", extra={"request_id": request_id})
+            return response
+
         action = determine_system_action(path, method)
 
         if action:
@@ -85,7 +94,7 @@ def setup_middleware(app: FastAPI) -> None:
                 session_factory = ensure_session_factory()
             except RuntimeError:
                 # Database not initialized yet, skip logging
-                logger.warning("Database not initialized, skipping system logging")
+                logger.warning("Database not initialized, skipping system logging", extra={"request_id": request_id})
                 return response
 
             # Safe way to get user from request state
@@ -96,7 +105,7 @@ def setup_middleware(app: FastAPI) -> None:
             try:
                 ip_address = str(request.client.host) if request.client else None
             except Exception as e:
-                logger.warning(f"Failed to get client IP: {str(e)}")
+                logger.warning(f"Failed to get client IP: {str(e)}", extra={"request_id": request_id})
 
             async with session_factory() as session:
                 try:

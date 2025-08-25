@@ -20,17 +20,20 @@ class UserRoles(Base):
         "Users",
         back_populates="user_roles",
         foreign_keys=[user_id],
+        overlaps="user_roles",
         lazy="selectin"
     )
     role = relationship(
         "Roles",
         back_populates="user_roles",
         foreign_keys=[role_id],
+        overlaps="user_roles",
         lazy="selectin"
     )
     assigned_by_user = relationship(
         "Users",
         foreign_keys=[assigned_by],
+        overlaps="user_roles",
         lazy="selectin"
     )
     

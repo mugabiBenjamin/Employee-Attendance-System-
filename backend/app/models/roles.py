@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, DateTime, Text, CheckConstraint, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 from app.core.database import Base, ENUM_CLASSES
 
 class Roles(Base):
@@ -14,6 +15,14 @@ class Roles(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp())
     updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     deleted_at = Column(DateTime(timezone=True), nullable=True)  
+    
+    # Relationships
+    user_roles = relationship(
+        "UserRoles",
+        back_populates="role",
+        foreign_keys="[UserRoles.role_id]",
+        lazy="selectin"
+    )
     
     __table_args__ = (
         CheckConstraint("permissions::text ~ '^{.*}$'", name="permissions_json_format"),

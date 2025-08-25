@@ -95,7 +95,28 @@ async def create_system_log(
         )
         db.add(db_log)
         await db.commit()
-        await db.refresh(db_log)
+        logger.debug(f"db_log after commit: {db_log.__dict__}", extra={"request_id": request_id})
+
+        if db_log is not None and hasattr(db_log, 'log_id'):
+            try:
+                await db.refresh(db_log)
+                logger.debug(f"db_log after refresh: {db_log.__dict__}", extra={"request_id": request_id})
+            except Exception as refresh_error:
+                logger.warning(f"Failed to refresh db_log, but continuing: {str(refresh_error)}", extra={"request_id": request_id})
+        else:
+            logger.error(f"db_log is None or missing log_id after commit", extra={"request_id": request_id})
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create system log: Invalid log object"
+            )
+
+        # Check if db_log is valid
+        if db_log.log_id is None:
+            logger.error(f"System log creation failed, log_id is None", extra={"request_id": request_id})
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create system log: No log_id assigned"
+            )
 
         # Invalidate cache
         await invalidate_cache_prefix("system_log")
@@ -109,12 +130,15 @@ async def create_system_log(
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except UserNotFoundError as e:
         logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error creating system log: {str(e)}", extra={"request_id": request_id})
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating system log")
 
 async def read_system_log(
@@ -457,7 +481,7 @@ async def delete_system_log(
 
         # Invalidate cache
         if db_log.user_id:
-            invalidate_user_cache(db_log.user_id)
+            await invalidate_user_cache(db_log.user_id)
         await invalidate_cache_prefix("system_log")
         logger.info(f"Cache invalidated for system_log and user:{db_log.user_id or 'none'}", extra={"request_id": request_id})
 
