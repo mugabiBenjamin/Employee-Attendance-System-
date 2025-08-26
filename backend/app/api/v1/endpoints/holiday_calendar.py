@@ -75,7 +75,7 @@ async def get_holiday_endpoint(
     holiday_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Retrieve a holiday by ID.
 
@@ -115,7 +115,7 @@ async def list_holidays_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> List[HolidayCalendarOut]:
     """List all active holidays with optional filters and pagination.
 

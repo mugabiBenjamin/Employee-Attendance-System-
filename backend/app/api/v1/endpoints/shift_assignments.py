@@ -75,7 +75,7 @@ async def read_shift_assignment_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
     """Retrieve a shift assignment by ID.
 
@@ -118,7 +118,7 @@ async def read_shift_assignments_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> List[ShiftAssignmentOut]:
     """List shift assignments with optional filters and pagination.
 

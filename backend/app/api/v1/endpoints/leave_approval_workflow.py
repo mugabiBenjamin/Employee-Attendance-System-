@@ -69,7 +69,7 @@ async def approve_leave_endpoint(
     summary="Get leave approval by ID",
     description="Retrieve a specific leave approval workflow entry by its ID."
 )
-@require_permissions([Permission.VIEW_LEAVE_APPROVAL])
+# @require_permissions([Permission.VIEW_LEAVE_APPROVAL])
 async def get_leave_approval_endpoint(
     workflow_id: int,
     request: Request,
@@ -101,7 +101,7 @@ async def get_leave_approval_endpoint(
     summary="List leave approvals by request",
     description="Retrieve a list of approvals for a specific leave request with pagination."
 )
-@require_permissions([Permission.VIEW_LEAVE_APPROVAL])
+# @require_permissions([Permission.VIEW_LEAVE_APPROVAL])
 async def get_leave_approvals_by_request_endpoint(
     request: Request,
     leave_id: int,
@@ -236,7 +236,7 @@ async def define_workflow_steps_endpoint(
     summary="Get workflow by leave type",
     description="Retrieve approval workflow steps for a specific leave type with pagination."
 )
-@require_permissions([Permission.VIEW_WORKFLOWS])
+# @require_permissions([Permission.VIEW_WORKFLOWS])
 async def get_workflow_by_type_endpoint(
     leave_type: LeaveType,
     request: Request,

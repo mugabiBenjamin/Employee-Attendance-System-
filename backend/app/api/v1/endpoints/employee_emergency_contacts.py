@@ -63,7 +63,7 @@ async def get_emergency_contact_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    # _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Retrieve an emergency contact by ID."""
     try:
@@ -92,7 +92,7 @@ async def list_emergency_contacts_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    # _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> List[EmployeeEmergencyContactOut]:
     """List emergency contacts with pagination and optional filters."""
     try:

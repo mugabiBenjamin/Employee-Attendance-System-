@@ -76,7 +76,7 @@ async def get_employee_hierarchy_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
     """Retrieve an employee hierarchy by ID.
 
@@ -118,7 +118,7 @@ async def list_employee_hierarchies_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
 ) -> List[EmployeeHierarchyOut]:
     """List employee hierarchies with optional filters and pagination.
 

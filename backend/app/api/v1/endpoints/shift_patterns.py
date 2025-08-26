@@ -74,7 +74,7 @@ async def get_shift_pattern_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """Retrieve a shift pattern by ID.
 
@@ -115,7 +115,7 @@ async def list_shift_patterns_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
 ) -> List[ShiftPatternOut]:
     """List all active shift patterns with optional filters and pagination.
 

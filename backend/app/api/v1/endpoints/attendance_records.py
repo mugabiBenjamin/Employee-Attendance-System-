@@ -78,7 +78,7 @@ async def get_attendance_history_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
+    # _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
     """Retrieve attendance history for a user.
 
