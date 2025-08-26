@@ -27,7 +27,7 @@ router = APIRouter(prefix="/attendance-summary", tags=["Attendance Summary"])
     summary="Get attendance summary by user and date range",
     description="Retrieve attendance summaries for a specific user within a date range, with optional department and active status filters."
 )
-# @require_attendance_view()
+@require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE])
 async def get_attendance_summary_endpoint(
     request: Request,
     user_id: int,
@@ -90,7 +90,7 @@ async def get_attendance_summary_endpoint(
     summary="Get all attendance summaries",
     description="Retrieve all attendance summaries with optional date range, department, and active status filters."
 )
-# @require_permissions([Permission.VIEW_ALL_ATTENDANCE])
+@require_permissions([Permission.VIEW_ALL_ATTENDANCE])
 async def get_all_attendance_summaries_endpoint(
     request: Request,
     department_id: Optional[int] = None,

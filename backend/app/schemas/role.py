@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from app.core.enums import RoleName, Permission
 from app.core.exceptions import ValidationError
@@ -7,14 +7,14 @@ from app.core.exceptions import ValidationError
 class RoleBase(BaseModel):
     role_name: str = Field(..., max_length=50)
     description: Optional[str] = None
-    permissions: dict = {}
+    permissions: Dict[str, bool] = Field(default_factory=dict)
 
     @field_validator('role_name')
     @classmethod
     def validate_role_name(cls, value: str) -> str:
         valid_roles = {role.value for role in RoleName}
         if value not in valid_roles:
-            raise ValidationError(detail=f"Invalid role name. Must be one of: {', '.join(sorted(valid_roles))}")
+            raise ValueError(f"Invalid role name. Must be one of: {', '.join(sorted(valid_roles))}")
         return value
 
     @field_validator('permissions')
@@ -29,12 +29,12 @@ class RoleBase(BaseModel):
 class RoleCreate(RoleBase):
     role_name: str
     description: Optional[str] = None
-    permissions: dict = {}
+    permissions: Dict[str, bool] = Field(default_factory=dict)
 
 class RoleUpdate(BaseModel):
     role_name: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = None
-    permissions: Optional[dict] = None
+    permissions: Optional[Dict[str, bool]] = None
 
     @field_validator('role_name')
     @classmethod

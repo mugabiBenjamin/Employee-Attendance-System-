@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, datetime, timedelta, timezone
 from celery import Celery
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.sql import text, select
@@ -57,6 +57,14 @@ def sanitize_filename(filename: str) -> str:
 async def fetch_attendance_records(user_id: int, start_date: str, end_date: str, session: AsyncSession) -> list:
     """Fetch attendance records for a user within a date range."""
     try:
+        # Normalize YYYY-MM-DD inputs to [start, end) datetimes in UTC (or your default TZ)
+        def to_dt_bounds(s: str, e: str):
+            # Treat inputs as dates; include full end day by advancing one day and using < upper bound
+            sd = datetime.fromisoformat(s).replace(hour=0, minute=0, second=0, microsecond=0)
+            ed = (datetime.fromisoformat(e).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
+            return sd, ed
+        start_dt, end_dt = to_dt_bounds(start_date, end_date)
+
         # Use explicit column selection to ensure proper attribute access
         query = select(
             AttendanceRecords.attendance_id,
@@ -68,11 +76,11 @@ async def fetch_attendance_records(user_id: int, start_date: str, end_date: str,
             AttendanceRecords.overtime_hours
         ).where(
             AttendanceRecords.user_id == user_id,
-            AttendanceRecords.clock_in_time >= start_date,
-            AttendanceRecords.clock_in_time <= end_date,
-            AttendanceRecords.is_active == True
+            AttendanceRecords.clock_in_time >= start_dt,
+            AttendanceRecords.clock_in_time < end_dt,
+            AttendanceRecords.is_active.is_(True)
         ).order_by(AttendanceRecords.clock_in_time.desc())
-        
+
         result = await session.execute(query)
         return result.fetchall()
     except Exception as e:

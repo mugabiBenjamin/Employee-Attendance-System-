@@ -36,20 +36,20 @@ async def get_leave_balances_endpoint(
     # _: bool = Depends(require_any_permissions([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
 ) -> List[LeaveBalanceOut]:
     """Retrieve leave balances for a user."""
+    request_id = get_request_id(request)
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user_id")
-        request_id = get_request_id(request)
         return await get_leave_balances_by_user_and_type(user_id, leave_type, current_user, db, settings, request_id)
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
     except HTTPException as e:
         logger.error(f"Error retrieving leave balances for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
         logger.error(f"Unexpected error retrieving leave balances for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e
 
 @router.put(
     "/{user_id}/{leave_type}/{balance_change}/{version}",
@@ -69,6 +69,7 @@ async def update_leave_balance_endpoint(
     _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_BALANCE]))
 ) -> LeaveBalanceOut:
     """Update a leave balance."""
+    request_id = get_request_id(request)
     try:
         if user_id <= 0:
             raise ValidationError(detail="Invalid user_id")
@@ -76,14 +77,13 @@ async def update_leave_balance_endpoint(
             raise ValidationError(detail="Invalid version")
         if leave_type not in LeaveType:
             raise ValidationError(detail=f"Invalid leave type: {leave_type}")
-        request_id = get_request_id(request)
         return await update_leave_balance(user_id, leave_type, balance_change, version, request, current_user, db, settings, request_id)
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
     except HTTPException as e:
         logger.error(f"Error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
         raise
     except Exception as e:
         logger.error(f"Unexpected error updating leave balance for user_id {user_id}, leave_type {leave_type}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e

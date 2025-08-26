@@ -74,8 +74,9 @@ async def create_holiday_endpoint(
 async def get_holiday_endpoint(
     holiday_id: int,
     request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
+    _: bool = Depends(require_permissions([Permission.VIEW_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Retrieve a holiday by ID.
 
@@ -92,13 +93,13 @@ async def get_holiday_endpoint(
     """
     try:
         request_id = getattr(request.state, "request_id", None)
-        return await get_holiday(holiday_id, db, request_id)
+        return await get_holiday(holiday_id, current_user, db, request_id)
     except HTTPException as e:
         logger.error(f"Error retrieving holiday {holiday_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
         logger.error(f"Unexpected error retrieving holiday {holiday_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e
 
 @router.get(
     "/",

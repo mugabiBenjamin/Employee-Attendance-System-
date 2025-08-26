@@ -184,10 +184,9 @@ async def logout_user(
 async def refresh_token(
     request: Request,
     token_request: dict,
-    db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.REFRESH_TOKEN]))
+    db: AsyncSession,
+    settings: Settings,
+    request_id: Optional[str],
 ) -> dict:
     """Refresh access token using a valid refresh token."""
     try:

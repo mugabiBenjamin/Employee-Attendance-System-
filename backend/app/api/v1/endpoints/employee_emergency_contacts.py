@@ -42,6 +42,7 @@ async def create_emergency_contact_endpoint(
     _: bool = Depends(require_permissions([Permission.CREATE_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Create an emergency contact for the current user."""
+    request_id = None
     try:
         request_id = get_request_id(request)
         return await create_emergency_contact(contact, request, current_user, db, settings, request_id)
@@ -50,7 +51,7 @@ async def create_emergency_contact_endpoint(
         raise
     except Exception as e:
         logger.error(f"Unexpected error creating emergency contact for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e
 
 @router.get(
     "/{contact_id}",

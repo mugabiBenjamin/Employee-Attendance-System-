@@ -60,7 +60,7 @@ async def clock_in_out_endpoint(
         raise
     except Exception as e:
         logger.error(f"Unexpected error processing clock action {clock_data.action}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e
 
 @router.get(
     "/history",
@@ -78,7 +78,7 @@ async def get_attendance_history_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
     """Retrieve attendance history for a user.
 
@@ -107,4 +107,4 @@ async def get_attendance_history_endpoint(
         raise
     except Exception as e:
         logger.error(f"Unexpected error retrieving attendance history for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error retrieving attendance history")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error retrieving attendance history") from e

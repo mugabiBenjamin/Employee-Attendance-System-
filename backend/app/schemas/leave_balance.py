@@ -47,11 +47,12 @@ class LeaveBalanceUpdate(BaseModel):
     carried_forward: Optional[float] = Field(None, ge=0)
     version: Optional[int] = Field(None, ge=1)
     is_active: Optional[bool] = None
+    deleted_at: Optional[datetime] = None
 
     @field_validator('is_active')
     @classmethod
-    def validate_is_active(cls, value: Optional[bool], values: dict) -> Optional[bool]:
-        if value is False and 'deleted_at' not in values:
+    def validate_is_active(cls, value: Optional[bool], info) -> Optional[bool]:
+        if value is False and not (info.data.get('deleted_at')):
             raise ValidationError(detail="Cannot set is_active to False without setting deleted_at")
         return value
 
@@ -59,7 +60,7 @@ class LeaveBalanceOut(LeaveBalanceBase):
     balance_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
-    policy_details: LeavePolicyDetails = {}
+    policy_details: LeavePolicyDetails = Field(default_factory=LeavePolicyDetails)
     pending_days: float = Field(0, ge=0)
 
     @field_validator('balance_id', 'version')

@@ -29,6 +29,9 @@ class EmployeeEmergencyContactCreate(BaseModel):
     email: Optional[str] = Field(None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$', description="Email address")
     address: Optional[str] = Field(None, description="Physical address")
     is_primary: bool = Field(False, description="Whether this is the primary contact")
+    
+    # Prevent clients from submitting unexpected fields like `user_id` or `is_active`
+    model_config = ConfigDict(extra="forbid")
 
 class EmployeeEmergencyContactUpdate(BaseModel):
     contact_name: Optional[str] = Field(None, max_length=255, description="Updated name of the emergency contact")
