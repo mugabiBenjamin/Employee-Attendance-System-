@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
-import { shiftsApi } from "@/api/shifts";
+import { holidaysApi } from "@/api/holidays";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useNavigate } from "react-router-dom";
 import GenericTable from "@/components/common/GenericTable";
@@ -13,7 +13,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-import type { PaginatedResponse, ShiftPattern } from "@/api/types";
+import type { PaginatedResponse, Holiday } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
 import {
@@ -28,12 +28,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { format } from "date-fns";
 
-function ShiftPatternsList() {
+function HolidaysList() {
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [shiftPatterns, setShiftPatterns] =
-    useState<PaginatedResponse<ShiftPattern> | null>(null);
+  const [holidays, setHolidays] = useState<PaginatedResponse<Holiday> | null>(
+    null
+  );
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [error, setError] = useState<string | null>(null);
@@ -41,14 +43,14 @@ function ShiftPatternsList() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState<string>("");
 
-  const fetchShiftPatterns = async () => {
+  const fetchHolidays = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await shiftsApi.getShiftPatterns({ page, limit });
-      setShiftPatterns(data);
+      const data = await holidaysApi.getHolidays({ page, limit, search });
+      setHolidays(data);
     } catch {
-      setError("Failed to load shift patterns");
+      setError("Failed to load holidays");
     } finally {
       setLoading(false);
     }
@@ -56,38 +58,35 @@ function ShiftPatternsList() {
 
   useEffect(() => {
     if (user?.permissions.includes("manage_employees")) {
-      fetchShiftPatterns();
+      fetchHolidays();
     }
-  }, [user, page, limit]);
+  }, [user, page, limit, search]);
 
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      await shiftsApi.deleteShiftPattern(deleteId);
-      await fetchShiftPatterns();
+      await holidaysApi.deleteHoliday(deleteId);
+      await fetchHolidays();
       setDeleteId(null);
     } catch {
-      setError("Failed to delete shift pattern");
+      setError("Failed to delete holiday");
     }
   };
 
-  const columns: ColumnDef<ShiftPattern>[] = [
+  const columns: ColumnDef<Holiday>[] = [
     {
       accessorKey: "name",
       header: "Name",
     },
     {
-      accessorKey: "start_time",
-      header: "Start Time",
+      accessorKey: "date",
+      header: "Date",
+      cell: ({ row }) => format(new Date(row.getValue("date")), "MMM d, yyyy"),
     },
     {
-      accessorKey: "end_time",
-      header: "End Time",
-    },
-    {
-      accessorKey: "days",
-      header: "Days",
-      cell: ({ row }) => (row.getValue("days") as string[]).join(", "),
+      accessorKey: "description",
+      header: "Description",
+      cell: ({ row }) => row.getValue("description") || "-",
     },
     {
       id: "actions",
@@ -97,7 +96,7 @@ function ShiftPatternsList() {
             variant="outline"
             size="sm"
             onClick={() =>
-              navigate(`/shift-patterns/edit/${row.original.shift_pattern_id}`)
+              navigate(`/holidays/edit/${row.original.holiday_id}`)
             }
           >
             Edit
@@ -105,7 +104,7 @@ function ShiftPatternsList() {
           <Button
             variant="destructive"
             size="sm"
-            onClick={() => setDeleteId(row.original.shift_pattern_id)}
+            onClick={() => setDeleteId(row.original.holiday_id)}
           >
             Delete
           </Button>
@@ -125,10 +124,10 @@ function ShiftPatternsList() {
       )}
       <div className="flex gap-4">
         <Button
-          onClick={() => navigate("/shift-patterns/edit")}
+          onClick={() => navigate("/holidays/edit")}
           className="self-start"
         >
-          Add Shift Pattern
+          Add Holiday
         </Button>
         <Input
           placeholder="Search by name..."
@@ -143,13 +142,16 @@ function ShiftPatternsList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : holidays?.items.length === 0 ? (
+        <div className="text-center text-sm text-muted-foreground">
+          No holidays found
+        </div>
       ) : (
         <>
           <GenericTable
-            data={shiftPatterns?.items || []}
+            data={holidays?.items || []}
             columns={columns}
             filterColumn="name"
-            globalFilter={search}
           />
           <Pagination>
             <PaginationContent>
@@ -162,10 +164,7 @@ function ShiftPatternsList() {
               <PaginationItem>
                 <PaginationNext
                   onClick={() => setPage((p) => p + 1)}
-                  disabled={
-                    !shiftPatterns ||
-                    (shiftPatterns?.total ?? 0) <= page * limit
-                  }
+                  disabled={!holidays || (holidays?.total ?? 0) <= page * limit}
                 />
               </PaginationItem>
             </PaginationContent>
@@ -177,8 +176,8 @@ function ShiftPatternsList() {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this shift pattern? This action
-              cannot be undone.
+              Are you sure you want to delete this holiday? This action cannot
+              be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -191,4 +190,4 @@ function ShiftPatternsList() {
   );
 }
 
-export default ShiftPatternsList;
+export default HolidaysList;

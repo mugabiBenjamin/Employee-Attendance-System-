@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState } from "@/store";
-import { attendanceApi } from "@/api/attendance";
+import { leaveApi } from "@/api/leave";
 import { setHistory } from "@/store/slices/attendanceSlice";
 import type { ColumnDef } from "@tanstack/react-table";
 import { format, isValid } from "date-fns";
@@ -16,11 +16,13 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircleIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AlertCircleIcon, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
+import type { LeaveRequest, LeaveRequestStatus } from "@/api/types";
+import { useLeaveRequestStatusOptions } from "@/hooks/useEnums";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AttendanceRecord } from "@/api/types";
 
-// Zod schema for date validation
 const dateSchema = z
   .string()
   .refine((val) => !val || isValid(new Date(val)), {
@@ -28,12 +30,13 @@ const dateSchema = z
   })
   .optional();
 
-function AttendanceHistory() {
+function LeaveRequests() {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
-  const { history } = useSelector((state: RootState) => state.attendance);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
+  const [statusFilter, setStatusFilter] = useState<LeaveRequestStatus | "">("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,6 +44,7 @@ function AttendanceHistory() {
   const [dateError, setDateError] = useState<{ start?: string; end?: string }>(
     {}
   );
+  const statusOptions = useLeaveRequestStatusOptions();
 
   const validateDates = (start: string, end: string) => {
     setDateError({});
@@ -64,47 +68,81 @@ function AttendanceHistory() {
     }
   };
 
-  useEffect(() => {
-    if (user && validateDates(startDate, endDate)) {
-      setLoading(true);
-      attendanceApi
-        .getHistory({
-          user_id: user.id,
-          page,
-          limit,
-          start_date: startDate || undefined,
-          end_date: endDate || undefined,
-        })
-        .then((data) => {
-          dispatch(setHistory(data));
-          setError(null);
-        })
-        .catch(() => {
-          setError("Failed to load attendance history");
-        })
-        .finally(() => setLoading(false));
+  const fetchLeaveRequests = async () => {
+    if (!user || !validateDates(startDate, endDate)) return;
+    setLoading(true);
+    try {
+      const data = await leaveApi.getLeaveRequests({
+        user_id: user.permissions.includes("manage_employees")
+          ? undefined
+          : user.id,
+        page,
+        limit,
+        status: statusFilter || undefined,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+      });
+      setLeaveRequests(data.items);
+      dispatch(setHistory(data));
+      setError(null);
+    } catch {
+      setError("Failed to load leave requests");
+    } finally {
+      setLoading(false);
     }
-  }, [user, page, startDate, endDate, limit, dispatch]);
+  };
 
-  const columns: ColumnDef<AttendanceRecord>[] = [
+  useEffect(() => {
+    fetchLeaveRequests();
+  }, [user, page, statusFilter, startDate, endDate, limit, dispatch]);
+
+  const handleApprove = async (leaveRequest: LeaveRequest) => {
+    try {
+      await leaveApi.approveLeave({
+        leave_request_id: leaveRequest.leave_request_id,
+        status: "approved",
+        comments: "Approved via LeaveRequests page",
+      });
+      toast("Leave Approved", {
+        description: `Leave request for ${leaveRequest.start_date} to ${leaveRequest.end_date} approved.`,
+        style: {
+          background: "var(--green-100)",
+          color: "var(--green-800)",
+        },
+        duration: 3000,
+      });
+      fetchLeaveRequests();
+    } catch {
+      setError("Failed to approve leave request");
+    }
+  };
+
+  const columns: ColumnDef<LeaveRequest>[] = [
     {
-      accessorKey: "created_at",
-      header: "Date",
-      cell: ({ row }) =>
-        format(new Date(row.getValue("created_at")), "MMM d, yyyy"),
+      accessorKey: "user_id",
+      header: "User ID",
+      cell: ({ row }) => row.getValue("user_id") || "-",
     },
     {
-      accessorKey: "clock_in",
-      header: "Clock In",
-      cell: ({ row }) => format(new Date(row.getValue("clock_in")), "h:mm a"),
+      accessorKey: "start_date",
+      header: "Start Date",
+      cell: ({ row }) =>
+        format(new Date(row.getValue("start_date")), "MMM d, yyyy"),
     },
     {
-      accessorKey: "clock_out",
-      header: "Clock Out",
+      accessorKey: "end_date",
+      header: "End Date",
       cell: ({ row }) =>
-        row.getValue("clock_out")
-          ? format(new Date(row.getValue("clock_out")), "h:mm a")
-          : "-",
+        format(new Date(row.getValue("end_date")), "MMM d, yyyy"),
+    },
+    {
+      accessorKey: "leave_type",
+      header: "Leave Type",
+      cell: ({ row }) =>
+        row
+          .getValue("leave_type")
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (l) => l.toUpperCase()),
     },
     {
       accessorKey: "status",
@@ -112,9 +150,9 @@ function AttendanceHistory() {
       cell: ({ row }) => (
         <span
           className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-            row.getValue("status") === "present"
+            row.getValue("status") === "approved"
               ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-              : row.getValue("status") === "late"
+              : row.getValue("status") === "under_review"
               ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
               : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
           }`}
@@ -122,6 +160,22 @@ function AttendanceHistory() {
           {row.getValue("status")}
         </span>
       ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: ({ row }) =>
+        row.original.status === "under_review" &&
+        user?.permissions.includes("approve_leave") ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleApprove(row.original)}
+          >
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Approve
+          </Button>
+        ) : null,
     },
   ];
 
@@ -159,6 +213,22 @@ function AttendanceHistory() {
             <p className="text-sm text-destructive mt-1">{dateError.end}</p>
           )}
         </div>
+        <div className="flex-1">
+          <select
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as LeaveRequestStatus)
+            }
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="">All Statuses</option>
+            {statusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       {loading ? (
         <div className="space-y-2">
@@ -169,7 +239,7 @@ function AttendanceHistory() {
       ) : (
         <>
           <GenericTable
-            data={history?.items || []}
+            data={leaveRequests}
             columns={columns}
             filterColumn="status"
           />
@@ -184,7 +254,7 @@ function AttendanceHistory() {
               <PaginationItem>
                 <PaginationNext
                   onClick={() => setPage((p) => p + 1)}
-                  disabled={!history || (history?.total ?? 0) <= page * limit}
+                  disabled={leaveRequests.length < limit}
                 />
               </PaginationItem>
             </PaginationContent>
@@ -195,4 +265,4 @@ function AttendanceHistory() {
   );
 }
 
-export default AttendanceHistory;
+export default LeaveRequests;

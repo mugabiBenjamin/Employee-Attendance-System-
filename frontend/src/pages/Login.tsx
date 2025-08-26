@@ -22,7 +22,6 @@ import { useState } from "react";
 import { ModeToggle } from "@/components/mode-toggle";
 import type { AuthResponse, User } from "@/api/types";
 
-// Define schema for form values
 const loginSchema = z.object({
   email: z.string().email({ message: "Invalid email address" }),
   password: z
@@ -30,10 +29,8 @@ const loginSchema = z.object({
     .min(6, { message: "Password must be at least 6 characters" }),
 });
 
-// Define type for form values
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-// Define type for login response
 interface LoginResponse extends AuthResponse {
   user: User;
 }
@@ -43,6 +40,7 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -53,22 +51,28 @@ const Login: React.FC = () => {
   });
 
   const onSubmit = async (data: LoginFormValues): Promise<void> => {
+    setLoading(true);
+    setError(null);
     try {
       const response: LoginResponse = await authApi.login(data);
       dispatch(setAuth(response));
       navigate("/");
-    } catch {
-      setError("Invalid email or password");
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message.includes("401")
+          ? "Invalid email or password"
+          : "An error occurred during login. Please try again."
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="bg-foreground/10 flex min-h-svh flex-col items-center justify-center md:p-10 relative">
-      {/* Theme toggle positioned at top-right */}
       <div className="absolute top-4 right-4 z-10">
         <ModeToggle />
       </div>
-
       <div className="w-full max-w-sm md:max-w-3xl">
         <Card className="overflow-hidden p-0">
           <CardContent className="grid p-0 md:grid-cols-2">
@@ -86,7 +90,7 @@ const Login: React.FC = () => {
                   </div>
                   {error && (
                     <Alert variant="destructive">
-                      <AlertCircleIcon />
+                      <AlertCircleIcon className="h-4 w-4" />
                       <AlertTitle>Error</AlertTitle>
                       <AlertDescription>{error}</AlertDescription>
                     </Alert>
@@ -101,6 +105,7 @@ const Login: React.FC = () => {
                           <Input
                             type="email"
                             placeholder="email@example.com"
+                            disabled={loading}
                             {...field}
                           />
                         </FormControl>
@@ -120,12 +125,14 @@ const Login: React.FC = () => {
                               <Input
                                 type={showPassword ? "text" : "password"}
                                 placeholder="Type your password here"
+                                disabled={loading}
                                 {...field}
                               />
                               <button
                                 type="button"
                                 className="absolute inset-y-0 right-0 flex items-center pr-3"
                                 onClick={() => setShowPassword(!showPassword)}
+                                disabled={loading}
                               >
                                 {showPassword ? (
                                   <EyeOff className="h-4 w-4 text-muted-foreground" />
@@ -136,7 +143,7 @@ const Login: React.FC = () => {
                             </div>
                           </FormControl>
                           <a
-                            href="#"
+                            href="/forgot-password"
                             className="mt-2 text-sm underline-offset-2 hover:underline hover:text-primary transition-ease-in-out flex self-end"
                           >
                             Forgot your password?
@@ -146,8 +153,12 @@ const Login: React.FC = () => {
                       </FormItem>
                     )}
                   />
-                  <Button type="submit" className="w-full dark:text-white">
-                    Login
+                  <Button
+                    type="submit"
+                    className="w-full dark:text-white"
+                    disabled={loading}
+                  >
+                    {loading ? "Logging in..." : "Login"}
                   </Button>
                   <div className="after:border-border relative text-center text-sm font-medium after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">
                     <span className="bg-card text-muted-foreground relative z-10 px-2">
@@ -157,7 +168,7 @@ const Login: React.FC = () => {
                   <div className="text-muted-foreground text-center text-sm text-balance dark:text-white">
                     Don&apos;t have an account?{" "}
                     <a
-                      href="#"
+                      href="/signup"
                       className="underline underline-offset-4 hover:text-primary"
                     >
                       Sign up
