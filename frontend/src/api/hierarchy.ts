@@ -4,6 +4,10 @@ import type { EmployeeHierarchy } from './types';
 interface HierarchyData {
   employee_id: number;
   manager_id: number;
+  level?: number;
+  effective_from: string;
+  effective_to?: string;
+  is_active?: boolean;
 }
 
 export const hierarchyApi = {

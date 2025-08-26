@@ -4,11 +4,17 @@ import type { Department, PaginatedResponse } from './types';
 interface DepartmentQuery {
   page?: number;
   limit?: number;
+  is_active?: boolean;
+  supervisor_id?: number;
 }
 
 interface DepartmentData {
   name: string;
   description?: string;
+  supervisor_id?: number;
+  budget?: number;
+  location?: string;
+  is_active?: boolean;
 }
 
 export const departmentsApi = {

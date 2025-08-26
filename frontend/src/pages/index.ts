@@ -5,7 +5,7 @@ export { default as AttendanceHistory } from "./AttendanceHistory";
 export { default as TimeCorrection } from "./TimeCorrection";
 export { default as AttendanceSummary } from "./AttendanceSummary";
 export { default as DepartmentsList } from "./DepartmentsList";
-export { default as EmployeeHierarchy } from "./EmployeeHierarchy";
+export type { default as EmployeeHierarchy } from "./EmployeeHierarchy";
 export { default as DepartmentForm } from "./DepartmentForm";
 export { default as EmergencyContactsList } from "./EmergencyContactsList";
 export { default as EmergencyContactForm } from "./EmergencyContactForm";

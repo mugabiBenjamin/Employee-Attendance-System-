@@ -13,6 +13,7 @@ interface EmergencyContactData {
   phone: string;
   email?: string;
   address?: string;
+  is_primary?: boolean;
 }
 
 export const emergencyApi = {

@@ -1,6 +1,5 @@
-import type { Permission } from './enums';
 import { api } from './index';
-import type { User } from './types';
+import type { Permission, User } from './types';
 
 // Define request payload interfaces
 interface LoginCredentials {

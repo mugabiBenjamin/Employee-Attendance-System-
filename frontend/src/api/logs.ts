@@ -9,6 +9,7 @@ interface LogQuery {
   table_name?: string;
   start_date?: string;
   end_date?: string;
+  record_id?: number;
 }
 
 export const logsApi = {

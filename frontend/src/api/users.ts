@@ -12,6 +12,10 @@ interface CreateUserData {
   last_name: string;
   password?: string;
   department_id?: number;
+  employee_type?: string;
+  hire_date?: string;
+  salary?: number;
+  supervisor_id?: number;
 }
 
 interface UpdateUserData {
@@ -20,6 +24,10 @@ interface UpdateUserData {
   last_name?: string;
   department_id?: number;
   is_active?: boolean;
+  employee_type?: string;
+  hire_date?: string;
+  salary?: number;
+  supervisor_id?: number;
 }
 
 export const usersApi = {
