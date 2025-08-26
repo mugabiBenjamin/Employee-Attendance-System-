@@ -1,13 +1,21 @@
 import asyncio
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from app.core.config import settings
+from app.core.enums import (
+    AttendanceStatus, LeaveRequestStatus, LeaveType,
+    CorrectionStatus, OvertimeStatus, EmployeeType, ShiftType, SystemAction,
+    RoleName, PermissionGroup, Permission
+)
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from sqlalchemy.exc import OperationalError, DatabaseError
+import redis.asyncio as redis
+from redis.exceptions import ConnectionError, RedisError
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +49,33 @@ engine = None
 # Create async session factory
 AsyncSessionLocal = None
 
+def ensure_session_factory():
+    """Ensure AsyncSessionLocal is initialized before use."""
+    if AsyncSessionLocal is None:
+        raise RuntimeError(
+            "Database not initialized. Make sure to call startup() before using database operations."
+        )
+    return AsyncSessionLocal
+
+# Redis client
+redis_client = None
+
+# Initialize Redis with retry logic
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((ConnectionError, RedisError)),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Redis connection attempt {retry_state.attempt_number} failed, retrying..."
+    )
+)
+async def initialize_redis():
+    global redis_client
+    redis_client = redis.from_url(settings.REDIS_URL)
+    # Test the connection
+    await redis_client.ping()
+    logger.info("Redis client initialized")
+
 async def initialize_engine_and_session():
     global engine, AsyncSessionLocal
     try:
@@ -50,109 +85,180 @@ async def initialize_engine_and_session():
             class_=AsyncSession,
             expire_on_commit=False
         )
-        logger.info("Database engine and session factory initialized")
+        try:
+            await initialize_redis()
+            logger.info("Database engine, session factory, and Redis initialized")
+        except Exception as redis_error:
+            logger.warning(f"Redis initialization failed, continuing without caching: {redis_error}")
+            logger.info("Database engine and session factory initialized (Redis disabled)")
     except Exception as e:
-        logger.error(f"Failed to create database engine after retries: {str(e)}")
+        logger.error(f"Failed to initialize database: {str(e)}")
         raise
+
+# Startup and shutdown helpers
+async def startup():
+    """Initialize database engine, session factory, and Redis on application startup."""
+    await initialize_engine_and_session()
+    await init_db()
+    logger.info("Application startup completed: database and Redis initialized")
+
+async def shutdown():
+    """Close database engine and Redis connections on application shutdown."""
+    global engine, redis_client
+    try:
+        if engine:
+            await engine.dispose()
+            logger.info("Database engine closed")
+        if redis_client:
+            await redis_client.aclose()
+            logger.info("Redis connection closed")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}")
 
 # Database dependency for FastAPI
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
+        logger.debug(f"New database session created: {id(session)}")
         try:
             yield session
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error in session {id(session)}: {str(e)}")
             await session.rollback()
             raise
         finally:
+            logger.debug(f"Closing session {id(session)}")
             await session.close()
 
-# Individual enum creation SQL statements
-ENUM_CREATION_SQLS = [
-    """
-    DO $$ BEGIN
-        CREATE TYPE attendance_status AS ENUM (
-            'present', 'absent', 'late', 'early_departure', 'on_leave', 'half_day', 'sick'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE leave_request_status AS ENUM (
-            'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE leave_type AS ENUM (
-            'annual', 'sick', 'maternity', 'paternity', 'emergency', 'unpaid',
-            'casual', 'compensatory', 'bereavement', 'leave_of_absence', 'public_holiday'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE correction_status AS ENUM (
-            'draft', 'under_review', 'approved', 'rejected', 'cancelled', 'completed'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE system_action AS ENUM (
-            'INSERT', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT', 'CLOCK_IN', 'CLOCK_OUT',
-            'password_change', 'profile_update', 'data_export', 'data_import',
-            'assign_role', 'revoke_role', 'view_report', 'approve_leave',
-            'reject_leave', 'create_department', 'delete_department'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE employee_type AS ENUM (
-            'full_time', 'part_time', 'contract', 'intern', 'temporary'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """,
-    """
-    DO $$ BEGIN
-        CREATE TYPE shift_type AS ENUM (
-            'morning', 'afternoon', 'night', 'flexible', 'split'
-        );
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    """
+# Cache utility functions
+async def get_cache(key: str) -> Optional[dict]:
+    try:
+        if redis_client:
+            cached = await redis_client.get(key)
+            if cached:
+                logger.debug(f"Cache hit for key: {key}")
+                return json.loads(cached)
+        return None
+    except RedisError as e:
+        logger.error(f"Error retrieving cache for key {key}: {str(e)}")
+        return None
+
+async def set_cache(key: str, value: dict, ttl: int) -> None:
+    try:
+        if redis_client:
+            await redis_client.set(key, json.dumps(value), ex=ttl)
+            logger.debug(f"Cache set for key: {key} with TTL {ttl}s")
+    except RedisError as e:
+        logger.error(f"Error setting cache for key {key}: {str(e)}")
+
+async def invalidate_cache_prefix(prefix: str) -> None:
+    try:
+        if redis_client:
+            async for key in redis_client.scan_iter(f"{prefix}:*"):
+                await redis_client.delete(key)
+            logger.debug(f"Invalidated cache for prefix: {prefix}")
+    except RedisError as e:
+        logger.error(f"Error invalidating cache for prefix {prefix}: {str(e)}")
+
+async def is_key_cached(key: str) -> bool:
+    try:
+        if redis_client:
+            result = await redis_client.exists(key)
+            return bool(result)
+        return False
+    except RedisError as e:
+        logger.error(f"Error checking cache existence for key {key}: {str(e)}")
+        return False
+
+# Complete enum types list (including all enums from the enums file)
+ENUM_CLASS_LIST = [
+    (AttendanceStatus, "attendance_status"),
+    (LeaveRequestStatus, "leave_request_status"),
+    (LeaveType, "leave_type"),
+    (CorrectionStatus, "correction_status"),
+    (OvertimeStatus, "overtime_status"),
+    (EmployeeType, "employee_type"),
+    (ShiftType, "shift_type"),
+    (SystemAction, "system_action"),
+    (RoleName, "role_name"),
+    (PermissionGroup, "permission_group"),
+    (Permission, "permission"),
 ]
 
-# Materialized view and index creation SQL statements
+# Enum SQLAlchemy type mapping (for model columns)
+ENUM_CLASSES = {
+    name: PG_ENUM(
+        *[member.value for member in enum_class],
+        name=name,
+        create_type=False
+    )
+    for (enum_class, name) in ENUM_CLASS_LIST
+}
+
+# Materialized view and index creation SQL statements - split into individual commands
 MATERIALIZED_VIEW_SQLS = [
+    # Drop and create attendance_summary view
+    "DROP MATERIALIZED VIEW IF EXISTS attendance_summary;",
     """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS attendance_summary AS
-    SELECT u.user_id,
+    CREATE MATERIALIZED VIEW attendance_summary AS
+    SELECT 
+        u.user_id,
         u.employee_id,
         CONCAT(u.first_name, ' ', u.last_name) AS full_name,
         d.department_name,
-        ar.date,
-        ar.status,
+        ar.date AS attendance_summary_date,
+        ar.status::attendance_status,
         ar.total_hours,
         ar.overtime_hours,
         ar.clock_in_time,
-        ar.clock_out_time
+        ar.clock_out_time,
+        u.supervisor_id,
+        CONCAT(s.first_name, ' ', s.last_name) AS supervisor_name,
+        ar.is_active,
+        ar.created_at,
+        ar.updated_at
     FROM users u
         JOIN user_departments ud ON u.user_id = ud.user_id AND ud.is_primary = TRUE
         JOIN departments d ON ud.department_id = d.department_id
         LEFT JOIN attendance_records ar ON u.user_id = ar.user_id
+        LEFT JOIN users s ON u.supervisor_id = s.user_id
     WHERE u.is_active = TRUE AND u.deleted_at IS NULL
     WITH DATA;
     """,
+    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, attendance_summary_date);",
+    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name);",
+    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_status ON attendance_summary(status);",
+    
+    # Drop and create leave_request_summary view
+    "DROP MATERIALIZED VIEW IF EXISTS leave_request_summary;",
     """
-    CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, date)
+    CREATE MATERIALIZED VIEW leave_request_summary AS
+    SELECT 
+        lr.leave_id AS leave_request_id,
+        u.user_id,
+        u.employee_id,
+        CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
+        d.department_name,
+        lr.leave_type::leave_type,
+        lr.status::leave_request_status,
+        lr.start_date,
+        lr.end_date,
+        lr.days_requested AS total_days,
+        lr.reason,
+        lr.created_at,
+        lr.updated_at
+    FROM leave_requests lr
+        JOIN users u ON lr.user_id = u.user_id
+        JOIN user_departments ud ON u.user_id = ud.user_id AND ud.is_primary = TRUE
+        JOIN departments d ON ud.department_id = d.department_id
+    WHERE lr.deleted_at IS NULL
+    WITH DATA;
     """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name)
-    """
+    "CREATE INDEX IF NOT EXISTS idx_leave_request_summary_user ON leave_request_summary(user_id);",
+    "CREATE INDEX IF NOT EXISTS idx_leave_request_summary_status ON leave_request_summary(status);",
+    "CREATE INDEX IF NOT EXISTS idx_leave_request_summary_dates ON leave_request_summary(start_date, end_date);"
 ]
 
-# Initialize database tables and enums with retry logic
+# Initialize database tables, enums, and views
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -163,33 +269,116 @@ MATERIALIZED_VIEW_SQLS = [
 )
 async def init_db():
     async with engine.begin() as conn:
-        # Create enums
-        for enum_sql in ENUM_CREATION_SQLS:
-            await conn.execute(text(enum_sql))
-        
-        # Ensure job_title column in users table
-        await conn.execute(text("""
-            DO $$ BEGIN
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_name = 'users' AND column_name = 'job_title'
-                ) THEN
-                    ALTER TABLE users ADD COLUMN job_title VARCHAR(100);
-                END IF;
-            END $$;
-        """))
-        
-        # Create tables
-        await conn.run_sync(Base.metadata.create_all)
-        
-        # Create materialized views
-        for view_sql in MATERIALIZED_VIEW_SQLS:
-            await conn.execute(text(view_sql))
-        
-        logger.info("Database initialized with enums, tables, and materialized view")
+        # Create enums from Python Enum classes
+        for enum_class, enum_name in ENUM_CLASS_LIST:
+            try:
+                # Handle both standard Enum and string-based enums
+                if hasattr(enum_class, '__members__'):
+                    # Standard Python Enum
+                    values = [member.value for member in enum_class]
+                else:
+                    # Handle other enum-like structures
+                    values = list(enum_class) if hasattr(enum_class, '__iter__') else []
+                
+                if not values:
+                    logger.warning(f"No values found for enum {enum_name}, skipping")
+                    continue
+                    
+                # Check if enum exists
+                enum_exists = await conn.execute(text(f"""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_type WHERE typname = '{enum_name}'
+                    );
+                """))
+                
+                if not enum_exists.scalar():
+                    await conn.execute(text(f"""
+                        CREATE TYPE {enum_name} AS ENUM ({', '.join(f"'{v}'" for v in values)});
+                    """))
+                    logger.info(f"Created enum type: {enum_name} with values: {values}")
+                else:
+                    # Verify existing enum values
+                    existing_values = await conn.execute(text(f"""
+                        SELECT unnest(enum_range(NULL::{enum_name}))::text as enum_value;
+                    """))
+                    existing_set = set(row[0] for row in existing_values)
+                    required_set = set(values)
+                    
+                    missing_values = required_set - existing_set
+                    extra_values = existing_set - required_set
+                    
+                    if missing_values:
+                        logger.warning(f"Enum {enum_name} is missing values: {missing_values}")
+                        for value in missing_values:
+                            await conn.execute(text(f"""
+                                ALTER TYPE {enum_name} ADD VALUE '{value}';
+                            """))
+                            logger.info(f"Added value '{value}' to enum {enum_name}")
+                    
+                    if extra_values:
+                        logger.warning(f"Enum {enum_name} has unexpected values: {extra_values}")
+                        # Note: PostgreSQL does not support dropping enum values; log for manual intervention
+            except Exception as e:
+                logger.error(f"Error creating/updating enum {enum_name}: {str(e)}")
+                raise
 
-# Periodically refresh materialized view with retry logic
+        # Create all tables for registered models BEFORE creating views
+        await conn.run_sync(Base.metadata.create_all)
+
+        # Ensure required columns exist AFTER tables are created
+        table_column_updates = [
+            ("users", "job_title", "VARCHAR(100)"),
+            ("roles", "permissions", "JSONB DEFAULT '{}'::jsonb"),
+            ("users", "employee_type", f"employee_type DEFAULT 'full_time'")
+        ]
+        
+        for table_name, column_name, column_definition in table_column_updates:
+            try:
+                await conn.execute(text(f"""
+                    DO $$ BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_name = '{table_name}' AND column_name = '{column_name}'
+                        ) THEN
+                            ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition};
+                        END IF;
+                    END $$;
+                """))
+                logger.info(f"Ensured column {column_name} exists in table {table_name}")
+            except Exception as e:
+                logger.error(f"Error adding column {column_name} to {table_name}: {str(e)}")
+                raise
+
+        # Create materialized views and indexes AFTER all tables exist
+        for view_sql in MATERIALIZED_VIEW_SQLS:
+            try:
+                await conn.execute(text(view_sql))
+                logger.info(f"Successfully executed: {view_sql.splitlines()[0]}")
+            except Exception as e:
+                logger.error(f"Error creating materialized view/index: {str(e)}")
+                raise
+
+        # Create indexes for better performance
+        performance_indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active) WHERE deleted_at IS NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_user_roles_active ON user_roles(user_id, is_active);",
+            "CREATE INDEX IF NOT EXISTS idx_roles_active ON roles(is_active) WHERE deleted_at IS NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_attendance_records_date ON attendance_records(date, user_id);",
+            "CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status, user_id);",
+        ]
+        
+        for index_sql in performance_indexes:
+            try:
+                await conn.execute(text(index_sql))
+                logger.info(f"Successfully created index: {index_sql.splitlines()[0]}")
+            except Exception as e:
+                logger.error(f"Error creating index: {str(e)}")
+                raise
+
+        logger.info("Database initialized with enums, tables, materialized views, and indexes")
+
+# Background task for refreshing materialized views
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -198,20 +387,71 @@ async def init_db():
         f"Materialized view refresh attempt {retry_state.attempt_number} failed, retrying..."
     )
 )
-async def refresh_materialized_view():
-    while True:
+async def background_refresh_materialized_views():
+    """Refresh all materialized views."""
+    materialized_views = ["attendance_summary", "leave_request_summary"]
+    
+    if AsyncSessionLocal is None:
+        logger.warning("Database not initialized, skipping materialized view refresh")
+        return
+    
+    async with AsyncSessionLocal() as session:
         try:
-            async with AsyncSessionLocal() as session:
-                await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY attendance_summary"))
-                await session.commit()
-                logger.info("Materialized view 'attendance_summary' refreshed successfully")
+            for view_name in materialized_views:
+                try:
+                    # Check if view exists before trying to refresh
+                    view_exists = await session.execute(text(f"""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables 
+                            WHERE table_name = '{view_name}' AND table_type = 'VIEW'
+                        );
+                    """))
+                    
+                    if view_exists.scalar():
+                        await session.execute(text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view_name}"))
+                        logger.info(f"Materialized view '{view_name}' refreshed successfully")
+                    else:
+                        logger.warning(f"Materialized view '{view_name}' does not exist, skipping refresh")
+                except Exception as e:
+                    logger.error(f"Error refreshing materialized view {view_name}: {str(e)}")
+                    raise
+            
+            await session.commit()
         except Exception as e:
-            logger.error(f"Error refreshing materialized view: {str(e)}")
+            logger.error(f"Error in materialized view refresh task: {str(e)}")
+            await session.rollback()
             raise
-        # Wait for the configured interval
-        await asyncio.sleep(settings.MATERIALIZED_VIEW_REFRESH_INTERVAL)
 
-# Start the materialized view refresh task
-async def start_materialized_view_refresh():
+async def start_background_refresh():
+    """Start background task for refreshing materialized views."""
     logger.info("Starting materialized view refresh task")
-    asyncio.create_task(refresh_materialized_view())
+    asyncio.create_task(background_refresh_materialized_views())
+
+# Utility functions for enum validation
+async def validate_enum_value(enum_class, value: str) -> bool:
+    """Validate that a value exists in the given enum class."""
+    try:
+        if hasattr(enum_class, '__members__'):
+            # Standard Python Enum
+            return value in [member.value for member in enum_class]
+        else:
+            # Handle other enum-like structures
+            return value in enum_class if hasattr(enum_class, '__contains__') else False
+    except Exception:
+        logger.error(f"Error validating enum value {value} for {enum_class.__name__}")
+        return False
+
+async def get_enum_values(enum_class) -> list[str]:
+    """Get all values from an enum class."""
+    try:
+        if hasattr(enum_class, '__members__'):
+            # Standard Python Enum
+            return [member.value for member in enum_class]
+        elif hasattr(enum_class, '__iter__'):
+            # Handle other iterable enum-like structures
+            return list(enum_class)
+        else:
+            return []
+    except Exception:
+        logger.error(f"Error retrieving values for enum {enum_class.__name__}")
+        return []

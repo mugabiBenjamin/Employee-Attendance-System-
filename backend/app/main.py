@@ -1,56 +1,94 @@
-from fastapi import FastAPI, Request
+from sqlalchemy import select
+from fastapi import Depends, FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 import logging
-from app.core.config import settings
-from app.core.database import init_db, start_materialized_view_refresh, AsyncSessionLocal, initialize_engine_and_session
-from app.api.v1.api import api_router
-from app.models.system_logs import SystemLogs
-from app.core.enums import SystemAction
-from ipaddress import ip_address
-from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
-
-# Configure logging
-logging.basicConfig(
-    filename=settings.LOG_FILE,
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+from pythonjsonlogger import jsonlogger
+from app.core.config import get_settings
+from app.core.database import (
+    get_db,
+    initialize_engine_and_session,
+    init_db,
+    start_background_refresh,
+    shutdown
 )
+from app.core.middleware import setup_middleware
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.v1.api import api_router
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
+from app.core.celery import app as celery_app
+
+settings = get_settings()
+
+# -----------------------
+# Logging Configuration
+# -----------------------
 logger = logging.getLogger(__name__)
+log_handler = logging.FileHandler(settings.LOG_FILE)
+formatter = jsonlogger.JsonFormatter(
+    fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
+    json_ensure_ascii=False
+)
+log_handler.setFormatter(formatter)
+logger.handlers = [log_handler]
+logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
 
-# Action mapping: (path_suffix, method) -> SystemAction
-ACTION_MAPPING = {
-    ("/auth/token", "POST"): SystemAction.LOGIN,
-    ("/auth/logout", "POST"): SystemAction.LOGOUT,
-    ("/attendance-records/clock", "POST"): SystemAction.CLOCK_IN,
-    ("/leave-requests/approve", "POST"): SystemAction.APPROVE_LEAVE,
-    ("/leave-requests/reject", "POST"): SystemAction.REJECT_LEAVE,
-}
+# -----------------------
+# Rate Limiter Setup
+# -----------------------
+def get_client_ip(request: Request) -> str:
+    x_forwarded_for = request.headers.get("X-Forwarded-For")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    return get_remote_address(request)
 
-METHOD_FALLBACK = {
-    "POST": SystemAction.INSERT,
-    "PUT": SystemAction.UPDATE,
-    "DELETE": SystemAction.DELETE,
-}
+limiter = Limiter(key_func=get_client_ip)
 
-def determine_system_action(path: str, method: str) -> str | None:
-    for (path_suffix, mapped_method), action in ACTION_MAPPING.items():
-        if path.endswith(path_suffix) and method == mapped_method:
-            return action
-    return METHOD_FALLBACK.get(method)
-
+# -----------------------
+# Lifespan Events
+# -----------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🔄 Application startup: initializing database and views...")
-    await initialize_engine_and_session()  # Initialize engine and session
-    await init_db()
-    await start_materialized_view_refresh()
-    logger.info("✅ Startup complete.")
-    yield
-    logger.info("🛑 Application shutdown...")
+    logger.info(
+        f"Application startup: initializing database, Redis, and views... "
+        f"Version: {settings.APP_VERSION}, Environment: {settings.ENVIRONMENT}",
+        extra={"request_id": None}
+    )
+    try:
+        await initialize_engine_and_session()
+        await init_db()
+        await start_background_refresh()
 
+        # Setup Celery periodic tasks if available
+        try:
+            from app.core.celery import setup_periodic_tasks
+            setup_periodic_tasks()
+        except (ImportError, AttributeError) as e:
+            logger.warning(
+                f"Could not setup Celery periodic tasks: {str(e)}",
+                extra={"request_id": None}
+            )
+
+        logger.info("Startup complete.", extra={"request_id": None})
+        yield
+    except Exception as e:
+        logger.error(f"Startup failed: {str(e)}", extra={"request_id": None})
+        raise
+    finally:
+        logger.info(
+            f"Application shutdown... Version: {settings.APP_VERSION}, "
+            f"Environment: {settings.ENVIRONMENT}",
+            extra={"request_id": None}
+        )
+        await shutdown()
+        logger.info("Shutdown complete.", extra={"request_id": None})
+
+# -----------------------
+# FastAPI App Instance
+# -----------------------
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
@@ -58,7 +96,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# -----------------------
+# Middleware Configuration
+# -----------------------
+# Set limiter on app state
+try:
+    if not hasattr(app, 'state'):
+        app.state = type('State', (), {})()
+    setattr(app.state, 'limiter', limiter)
+except Exception as e:
+    logger.warning(f"Could not set limiter on app state: {e}")
+
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,48 +118,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def log_system_actions(request: Request, call_next):
-    response = await call_next(request)
-    user = getattr(request.state, "user", None)
-    user_id = getattr(user, "user_id", None)
+setup_middleware(app)
 
-    path = request.url.path
-    method = request.method
-    action = determine_system_action(path, method)
-
-    if action:
-        try:
-            async with AsyncSessionLocal() as session:
-                ip_addr = None
-                if request.client and request.client.host:
-                    try:
-                        ip_addr = str(ip_address(request.client.host))
-                    except ValueError:
-                        logger.warning(f"Invalid IP address: {request.client.host}")
-                        ip_addr = None
-
-                system_log = SystemLogs(
-                    user_id=user_id,
-                    action=action,
-                    table_affected=path.strip("/").split("/")[0],
-                    record_id=None,
-                    old_values=None,
-                    new_values=None,
-                    ip_address=ip_addr,
-                    user_agent=request.headers.get("user-agent"),
-                    timestamp=datetime.now(timezone.utc)
-                )
-                session.add(system_log)
-                await session.commit()
-                logger.info(f"📋 Logged action: {action} by user_id={user_id}")
-        except Exception as e:
-            logger.error(f"⚠️ Failed to log action: {str(e)}")
-
-    return response
-
+# -----------------------
+# API Routes
+# -----------------------
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# -----------------------
+# Root Endpoint
+# -----------------------
 @app.get("/")
 async def root():
     return {"message": f"Welcome to {settings.APP_NAME} API"}
+
+# -----------------------
+# Health Check Endpoint
+# -----------------------
+@app.get("/health", status_code=status.HTTP_200_OK)
+async def health_check(db: AsyncSession = Depends(get_db)) -> dict:
+    try:
+        await db.execute(select(1))
+        return {
+            "status": "healthy",
+            "app_name": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "environment": settings.ENVIRONMENT
+        }
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failed"
+        )

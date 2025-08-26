@@ -1,237 +1,253 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List
-from datetime import datetime, timezone
+from typing import List, Optional
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.security import get_password_hash, get_current_active_user
-from app.core.permissions import check_permissions
-from app.core.config import settings
-from app.core.enums import Permission
+from app.core.security import get_current_user
+from app.core.config import Settings, get_settings
+from app.services.user_service import (
+    create_user as service_create_user,
+    read_user as service_read_user,
+    read_users as service_read_users,
+    update_user as service_update_user,
+    delete_user as service_delete_user,
+    get_current_user_profile as service_get_current_user_profile
+)
 from app.schemas.user import UserCreate, UserUpdate, UserOut
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
+
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-@router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED, summary="Create new user")
-async def create_new_user(
+@router.post(
+    "/",
+    response_model=UserOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create new user",
+    description="Create a new user."
+)
+async def create_new_user_endpoint(
     user: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_USER]))
 ) -> UserOut:
-    """Create a new user. Requires MANAGE_USERS permission."""
+    """Create a new user.
+
+    Args:
+        user: The user data to create.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        current_user: The authenticated user performing the action.
+        settings: Application settings.
+
+    Returns:
+        UserOut: The created user.
+
+    Raises:
+        HTTPException: For validation errors (422), conflict (409), not found (404), or server errors (500).
+    """
     try:
-        # Check permissions using the existing system
-        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-
-        # Check if email already exists
-        query = select(Users).where(Users.email == user.email, Users.is_active == True)
-        result = await db.execute(query)
-        if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
-
-        # Create new user
-        db_user = Users(
-            email=user.email,
-            password_hash=get_password_hash(user.password_hash),
-            first_name=user.first_name,
-            last_name=user.last_name,
-            phone=user.phone,
-            job_title=user.job_title,
-            hire_date=user.hire_date,
-            employee_type=user.employee_type,
-            salary=user.salary,
-            manager_id=user.manager_id,
-            is_active=user.is_active,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
-        )
-        db.add(db_user)
-        await db.commit()
-        await db.refresh(db_user)
-
-        logger.info(f"User created, user_id: {db_user.user_id}, email: {db_user.email}")
-        return UserOut.model_validate(db_user)
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        return await service_create_user(user, request, current_user, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error creating user: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error creating user: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating user")
+        logger.error(f"Unexpected error creating user: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/{user_id}", response_model=UserOut, summary="Get user by ID")
-async def read_user(
+@router.get(
+    "/{user_id}",
+    response_model=UserOut,
+    summary="Get user by ID",
+    description="Retrieve a user by their ID."
+)
+async def read_user_endpoint(
     user_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    # _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> UserOut:
-    """Get a user by ID. Requires MANAGE_USERS permission or viewing own profile."""
+    """Retrieve a user by ID.
+
+    Args:
+        user_id: The ID of the user to retrieve.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+
+    Returns:
+        UserOut: The retrieved user.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
-        # Allow users to view their own profile, otherwise require MANAGE_USERS permission
-        if current_user.user_id != user_id:
-            await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-
-        query = select(Users).where(
-            Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
-
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        logger.info(f"Retrieved user, user_id: {user_id}")
-        return UserOut.model_validate(user)
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        return await service_read_user(user_id, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving user {user_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving user {user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving user")
+        logger.error(f"Unexpected error retrieving user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/", response_model=List[UserOut], summary="List all users")
-async def read_users(
+@router.get(
+    "/",
+    response_model=List[UserOut],
+    summary="List all users",
+    description="List all active users with pagination."
+)
+async def read_users_endpoint(
+    request: Request,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    settings: Settings = Depends(get_settings),
+    # _: bool = Depends(require_permissions([Permission.VIEW_USER]))
 ) -> List[UserOut]:
-    """List all users. Requires MANAGE_USERS permission."""
+    """List all active users with pagination.
+
+    Args:
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[UserOut]: List of active users.
+
+    Raises:
+        HTTPException: For validation errors (422) or server errors (500).
+    """
     try:
-        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-
-        query = select(Users).where(
-            Users.is_active == True,
-            Users.deleted_at == None
-        ).offset(skip).limit(limit)
-        result = await db.execute(query)
-        users = result.scalars().all()
-
-        logger.info(f"Retrieved {len(users)} users")
-        return [UserOut.model_validate(user) for user in users]
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        return await service_read_users(skip, limit, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error listing users: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving users: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving users")
+        logger.error(f"Unexpected error listing users: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.put("/{user_id}", response_model=UserOut, summary="Update user")
-async def update_existing_user(
+@router.put(
+    "/{user_id}",
+    response_model=UserOut,
+    summary="Update user",
+    description="Update a user's details."
+)
+async def update_existing_user_endpoint(
     user_id: int,
     user_update: UserUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_USER]))
 ) -> UserOut:
-    """Update a user. Requires MANAGE_USERS permission or updating own profile (limited fields)."""
+    """Update a user's details.
+
+    Args:
+        user_id: The ID of the user to update.
+        user_update: The updated user data.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        current_user: The authenticated user performing the action.
+        settings: Application settings.
+
+    Returns:
+        UserOut: The updated user.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), conflict (409), or server errors (500).
+    """
     try:
-        # Check if user is updating their own profile
-        is_self_update = current_user.user_id == user_id
-        
-        if not is_self_update:
-            # Require MANAGE_USERS permission for updating other users
-            await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-        else:
-            # For self-updates, restrict which fields can be modified
-            restricted_fields = {'salary', 'employee_type', 'manager_id', 'is_active', 'hire_date'}
-            update_data = user_update.model_dump(exclude_none=True)
-            forbidden_fields = restricted_fields.intersection(update_data.keys())
-            if forbidden_fields:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, 
-                    detail=f"Cannot modify restricted fields: {', '.join(forbidden_fields)}"
-                )
-
-        # Get the user to update
-        query = select(Users).where(
-            Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
-
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        # Check email uniqueness if email is being updated
-        update_data = user_update.model_dump(exclude_none=True)
-        if "email" in update_data and update_data["email"] != user.email:
-            query = select(Users).where(Users.email == update_data["email"], Users.is_active == True)
-            result = await db.execute(query)
-            if result.scalar_one_or_none():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
-
-        # Apply updates
-        for key, value in update_data.items():
-            setattr(user, key, value)
-
-        user.updated_at = datetime.now(timezone.utc)
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-
-        logger.info(f"User updated, user_id: {user_id}")
-        return UserOut.model_validate(user)
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        return await service_update_user(user_id, user_update, request, current_user, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error updating user {user_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error updating user {user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating user")
+        logger.error(f"Unexpected error updating user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete user")
-async def delete_existing_user(
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete user",
+    description="Soft delete a user."
+)
+async def delete_existing_user_endpoint(
     user_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    current_user: Users = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_USER]))
 ) -> None:
-    """Soft delete a user. Requires MANAGE_USERS permission."""
+    """Soft delete a user.
+
+    Args:
+        user_id: The ID of the user to delete.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        current_user: The authenticated user performing the action.
+        settings: Application settings.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), business logic errors (422), or server errors (500).
+    """
     try:
-        await check_permissions([Permission.MANAGE_USERS.value], current_user, db)
-
-        # Prevent self-deletion
-        if current_user.user_id == user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Cannot delete your own account"
-            )
-
-        query = select(Users).where(
-            Users.user_id == user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
-
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        # Soft delete
-        user.is_active = False
-        user.deleted_at = datetime.now(timezone.utc)
-        user.updated_at = datetime.now(timezone.utc)
-        
-        await db.commit()
-
-        logger.info(f"User soft deleted, user_id: {user_id}")
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        await service_delete_user(user_id, request, current_user, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error deleting user {user_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error deleting user {user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting user")
+        logger.error(f"Unexpected error deleting user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-# Additional endpoint for user profile (self-view)
-@router.get("/me/profile", response_model=UserOut, summary="Get current user profile")
-async def get_current_user_profile(
-    current_user: Users = Depends(get_current_active_user)
+@router.get(
+    "/me/profile",
+    response_model=UserOut,
+    summary="Get current user profile",
+    description="Retrieve the current authenticated user's profile."
+)
+async def get_current_user_profile_endpoint(
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    # _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
 ) -> UserOut:
-    """Get the current authenticated user's profile."""
-    return UserOut.model_validate(current_user)
+    """Retrieve the current user's profile.
+
+    Args:
+        current_user: The authenticated user.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+
+    Returns:
+        UserOut: The current user's profile.
+
+    Raises:
+        HTTPException: For not found (404) or server errors (500).
+    """
+    try:
+        request_id = getattr(request.state, "request_id", None)
+        return await service_get_current_user_profile(current_user, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving profile for user {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving profile for user {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

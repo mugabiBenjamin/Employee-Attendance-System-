@@ -1,225 +1,210 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List
-from datetime import datetime, timezone
+from typing import List, Optional
 from app.core.database import get_db
-from app.models.departments import Departments
 from app.models.users import Users
-from app.core.permissions import require_permissions
-from app.core.security import get_current_active_user
-from app.core.enums import Permission
-from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentOut
+from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
+from app.services.department_service import (
+    create_department,
+    get_department,
+    list_departments,
+    update_department,
+    delete_department
+)
+from app.schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentOut
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/departments", tags=["Departments"])
 
-@router.post("/", response_model=DepartmentOut, status_code=status.HTTP_201_CREATED)
-@require_permissions([Permission.MANAGE_DEPARTMENTS])
-async def create_department(
+@router.post(
+    "/",
+    response_model=DepartmentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new department",
+    description="Create a new department with provided details."
+)
+async def create_department_endpoint(
     department: DepartmentCreate,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    _: bool = Depends(require_permissions([Permission.CREATE_DEPARTMENT]))
 ) -> DepartmentOut:
-    """Create a new department."""
+    """Create a new department.
+
+    Args:
+        department: The department data to create.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+
+    Returns:
+        DepartmentOut: The created department.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
-        # Check if department name already exists
-        query = select(Departments).where(
-            Departments.department_name == department.department_name,
-            Departments.is_active == True
-        )
-        result = await db.execute(query)
-        if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Department name already exists"
-            )
-
-        db_department = Departments(
-            **department.model_dump(),
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-            is_active=True
-        )
-        
-        db.add(db_department)
-        await db.commit()
-        await db.refresh(db_department)
-
-        logger.info(f"Created department: {db_department.department_id}")
-        return DepartmentOut.model_validate(db_department)
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        return await create_department(department, request, current_user, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error creating department: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error creating department: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating department"
-        )
+        logger.error(f"Unexpected error creating department: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/{department_id}", response_model=DepartmentOut)
-@require_permissions([Permission.MANAGE_DEPARTMENTS])
-async def get_department(
+@router.get(
+    "/{department_id}",
+    response_model=DepartmentOut,
+    summary="Get department by ID",
+    description="Retrieve a department by its ID."
+)
+async def get_department_endpoint(
     department_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    # _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> DepartmentOut:
-    """Get department by ID."""
+    """Retrieve a department by ID.
+
+    Args:
+        department_id: The ID of the department to retrieve.
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+
+    Returns:
+        DepartmentOut: The retrieved department.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
-        query = select(Departments).where(
-            Departments.department_id == department_id,
-            Departments.is_active == True,
-            Departments.deleted_at == None
-        )
-        result = await db.execute(query)
-        department = result.scalar_one_or_none()
-
-        if not department:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Department not found"
-            )
-
-        return DepartmentOut.model_validate(department)
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        return await get_department(department_id, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving department {department_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving department {department_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving department"
-        )
+        logger.error(f"Unexpected error retrieving department {department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/", response_model=List[DepartmentOut])
-@require_permissions([Permission.MANAGE_DEPARTMENTS])
-async def list_departments(
+@router.get(
+    "/",
+    response_model=List[DepartmentOut],
+    summary="List all departments",
+    description="Retrieve a list of active departments with pagination."
+)
+async def list_departments_endpoint(
+    request: Request,
     skip: int = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    # _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> List[DepartmentOut]:
-    """List all active departments."""
+    """List all active departments with pagination.
+
+    Args:
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[DepartmentOut]: List of active departments.
+
+    Raises:
+        HTTPException: For validation errors (422) or server errors (500).
+    """
     try:
-        query = select(Departments).where(
-            Departments.is_active == True,
-            Departments.deleted_at == None
-        ).offset(skip).limit(limit or settings.DEFAULT_PAGE_SIZE)
-        
-        result = await db.execute(query)
-        departments = result.scalars().all()
-
-        return [DepartmentOut.model_validate(dept) for dept in departments]
-
+        request_id = getattr(request.state, "request_id", None)
+        return await list_departments(skip, limit, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error listing departments: {str(e)}", extra={"request_id": request_id})
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving departments: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving departments"
-        )
+        logger.error(f"Unexpected error listing departments: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.put("/{department_id}", response_model=DepartmentOut)
-@require_permissions([Permission.MANAGE_DEPARTMENTS])
-async def update_department(
+@router.put(
+    "/{department_id}",
+    response_model=DepartmentOut,
+    summary="Update a department",
+    description="Update an existing department with provided details."
+)
+async def update_department_endpoint(
     department_id: int,
     department_update: DepartmentUpdate,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    _: bool = Depends(require_permissions([Permission.UPDATE_DEPARTMENT]))
 ) -> DepartmentOut:
-    """Update an existing department."""
+    """Update a department.
+
+    Args:
+        department_id: The ID of the department to update.
+        department_update: The updated department data.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+
+    Returns:
+        DepartmentOut: The updated department.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), or server errors (500).
+    """
     try:
-        query = select(Departments).where(
-            Departments.department_id == department_id,
-            Departments.is_active == True,
-            Departments.deleted_at == None
-        )
-        result = await db.execute(query)
-        department = result.scalar_one_or_none()
-
-        if not department:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Department not found"
-            )
-
-        update_data = department_update.model_dump(exclude_none=True)
-        
-        # Check for name conflicts if updating department_name
-        if "department_name" in update_data and update_data["department_name"] != department.department_name:
-            query = select(Departments).where(
-                Departments.department_name == update_data["department_name"],
-                Departments.is_active == True
-            )
-            result = await db.execute(query)
-            if result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Department name already exists"
-                )
-
-        # Update fields
-        for key, value in update_data.items():
-            setattr(department, key, value)
-
-        department.updated_at = datetime.now(timezone.utc)
-        await db.commit()
-        await db.refresh(department)
-
-        logger.info(f"Updated department: {department_id}")
-        return DepartmentOut.model_validate(department)
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        return await update_department(department_id, department_update, request, current_user, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error updating department {department_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error updating department {department_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error updating department"
-        )
+        logger.error(f"Unexpected error updating department {department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.delete("/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
-@require_permissions([Permission.MANAGE_DEPARTMENTS])
-async def delete_department(
+@router.delete(
+    "/{department_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a department",
+    description="Soft delete a department by its ID."
+)
+async def delete_department_endpoint(
     department_id: int,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user),
-    settings: Settings = Depends(get_settings)
+    _: bool = Depends(require_permissions([Permission.DELETE_DEPARTMENT]))
 ) -> None:
-    """Soft delete a department."""
+    """Soft delete a department.
+
+    Args:
+        department_id: The ID of the department to delete.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), business logic errors (422), or server errors (500).
+    """
     try:
-        query = select(Departments).where(
-            Departments.department_id == department_id,
-            Departments.is_active == True,
-            Departments.deleted_at == None
-        )
-        result = await db.execute(query)
-        department = result.scalar_one_or_none()
-
-        if not department:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Department not found"
-            )
-
-        department.is_active = False
-        department.deleted_at = datetime.now(timezone.utc)
-        await db.commit()
-
-        logger.info(f"Deleted department: {department_id}")
-
-    except HTTPException:
+        request_id = getattr(request.state, "request_id", None)
+        await delete_department(department_id, request, current_user, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error deleting department {department_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error deleting department {department_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error deleting department"
-        )
+        logger.error(f"Unexpected error deleting department {department_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

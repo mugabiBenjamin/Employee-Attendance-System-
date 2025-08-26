@@ -1,162 +1,187 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
-from app.models.system_logs import SystemLogs
 from app.models.users import Users
-from app.core.config import settings
-from app.core.permissions import check_permissions
-from app.core.security import get_current_active_user
+from app.core.security import get_current_user
+from app.core.config import Settings, get_settings
+from app.core.utils import get_request_id
+from app.services.system_log_service import (
+    create_system_log as service_create_system_log,
+    read_system_log as service_read_system_log,
+    read_system_logs as service_read_system_logs,
+    get_user_logs as service_get_user_logs,
+    get_log_actions_summary as service_get_log_actions_summary,
+    delete_system_log as service_delete_system_log
+)
+from app.schemas.system_log import SystemLogCreate, SystemLogOut, SystemLogActionSummary
 from app.core.enums import Permission
-from app.schemas.system_log import SystemLogOut
+from app.core.permissions import require_permissions
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system-logs", tags=["System Logs"])
 
-@router.get("/", response_model=List[SystemLogOut], summary="List system logs")
-async def read_system_logs(
+@router.post(
+    "/",
+    response_model=SystemLogOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create system log",
+    description="Create a new system log entry."
+)
+async def create_system_log_endpoint(
+    log: SystemLogCreate,
+    request: Request,
+    current_user: Optional[Users] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_LOGS]))
+) -> SystemLogOut:
+    """Create a new system log entry."""
+    try:
+        request_id = get_request_id(request)
+        return await service_create_system_log(log, request, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error creating system log: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error creating system log: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+
+@router.get(
+    "/{log_id}",
+    response_model=SystemLogOut,
+    summary="Get system log by ID",
+    description="Retrieve a specific system log by its ID."
+)
+async def read_system_log_endpoint(
+    log_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+) -> SystemLogOut:
+    """Retrieve a system log by ID."""
+    try:
+        request_id = get_request_id(request)
+        return await service_read_system_log(log_id, db, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving system log {log_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving system log {log_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+
+@router.get(
+    "/",
+    response_model=List[SystemLogOut],
+    summary="List system logs",
+    description="List system logs with optional filters for user, action, table affected, department, date range, and active status."
+)
+async def read_system_logs_endpoint(
     user_id: Optional[int] = None,
     action: Optional[str] = None,
+    table_affected: Optional[str] = None,
+    department_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    is_active: Optional[bool] = None,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: Optional[int] = None,
+    request: Request = None,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    settings: Settings = Depends(get_settings),
+    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
-    """List system logs with optional filters. Requires VIEW_LOGS permission."""
+    """List system logs with optional filters and pagination."""
     try:
-        await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
-
-        query = select(SystemLogs).where(SystemLogs.is_active == True)
-        
-        # Apply filters
-        if user_id:
-            query = query.where(SystemLogs.user_id == user_id)
-        if action:
-            query = query.where(SystemLogs.action == action)
-        if start_date:
-            query = query.where(SystemLogs.timestamp >= start_date)
-        if end_date:
-            query = query.where(SystemLogs.timestamp <= end_date)
-        
-        # Order by most recent first
-        query = query.order_by(desc(SystemLogs.timestamp)).offset(skip).limit(limit)
-        result = await db.execute(query)
-        logs = result.scalars().all()
-
-        logger.info(f"Retrieved {len(logs)} system logs")
-        return [SystemLogOut.model_validate(log) for log in logs]
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        return await service_read_system_logs(user_id, action, table_affected, department_id, start_date, end_date, is_active, skip, limit, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error listing system logs: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving system logs: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving system logs")
+        logger.error(f"Unexpected error listing system logs: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/{log_id}", response_model=SystemLogOut, summary="Get system log by ID")
-async def read_system_log(
-    log_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
-) -> SystemLogOut:
-    """Get a specific system log by ID. Requires VIEW_LOGS permission."""
-    try:
-        await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
-
-        query = select(SystemLogs).where(SystemLogs.log_id == log_id, SystemLogs.is_active == True)
-        result = await db.execute(query)
-        log = result.scalar_one_or_none()
-
-        if not log:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System log not found")
-
-        logger.info(f"Retrieved system log, log_id: {log_id}")
-        return SystemLogOut.model_validate(log)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving system log {log_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving system log")
-
-# Additional endpoints for log analysis
-@router.get("/user/{user_id}/logs", response_model=List[SystemLogOut], summary="Get logs for specific user")
-async def get_user_logs(
+@router.get(
+    "/user/{user_id}/logs",
+    response_model=List[SystemLogOut],
+    summary="Get logs for specific user",
+    description="Retrieve system logs for a specific user, optionally filtered by action and table affected."
+)
+async def get_user_logs_endpoint(
     user_id: int,
     action: Optional[str] = None,
-    limit: int = 100,
+    table_affected: Optional[str] = None,
+    limit: Optional[int] = None,
+    request: Request = None,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
+    settings: Settings = Depends(get_settings),
+    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
-    """Get system logs for a specific user. Requires VIEW_LOGS permission or viewing own logs."""
+    """Retrieve logs for a specific user."""
     try:
-        # Allow users to view their own logs
-        if current_user.user_id != user_id:
-            await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
-
-        query = select(SystemLogs).where(
-            SystemLogs.user_id == user_id,
-            SystemLogs.is_active == True
-        )
-        
-        if action:
-            query = query.where(SystemLogs.action == action)
-        
-        query = query.order_by(desc(SystemLogs.timestamp)).limit(limit)
-        result = await db.execute(query)
-        logs = result.scalars().all()
-
-        return [SystemLogOut.model_validate(log) for log in logs]
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        return await service_get_user_logs(user_id, action, table_affected, limit, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving logs for user {user_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving logs for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving user logs")
+        logger.error(f"Unexpected error retrieving logs for user {user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/actions/summary", summary="Get log action summary")
-async def get_log_actions_summary(
+@router.get(
+    "/actions/summary",
+    response_model=List[SystemLogActionSummary],
+    summary="Get log action summary",
+    description="Retrieve a summary of system actions with occurrence counts, optionally filtered by user, department, and date range."
+)
+async def get_log_actions_summary_endpoint(
+    user_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_active_user)
-):
-    """Get summary of system actions. Requires VIEW_LOGS permission."""
+    settings: Settings = Depends(get_settings),
+    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+) -> List[SystemLogActionSummary]:
+    """Retrieve a summary of system actions with occurrence counts."""
     try:
-        await check_permissions([Permission.VIEW_LOGS.value], current_user, db)
-
-        query = select(SystemLogs.action, SystemLogs.log_id).where(SystemLogs.is_active == True)
-        
-        if start_date:
-            query = query.where(SystemLogs.timestamp >= start_date)
-        if end_date:
-            query = query.where(SystemLogs.timestamp <= end_date)
-            
-        result = await db.execute(query)
-        logs = result.all()
-        
-        # Count actions
-        action_counts = {}
-        for log in logs:
-            action = log.action
-            action_counts[action] = action_counts.get(action, 0) + 1
-        
-        return {
-            "total_logs": len(logs),
-            "action_summary": action_counts,
-            "period": {
-                "start_date": start_date,
-                "end_date": end_date
-            }
-        }
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        return await service_get_log_actions_summary(user_id, department_id, start_date, end_date, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving log actions summary: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error generating log summary: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error generating log summary")
+        logger.error(f"Unexpected error retrieving log actions summary: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+
+@router.delete(
+    "/{log_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete system log",
+    description="Soft delete a system log by its ID."
+)
+async def delete_system_log_endpoint(
+    log_id: int,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_LOGS]))
+) -> None:
+    """Soft delete a system log."""
+    try:
+        request_id = get_request_id(request)
+        await service_delete_system_log(log_id, request, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error deleting system log {log_id}: {str(e)}", extra={"request_id": request_id})
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting system log {log_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

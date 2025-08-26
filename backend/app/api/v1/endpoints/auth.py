@@ -1,252 +1,182 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel, ConfigDict
-from datetime import datetime, timezone, timedelta
 from app.core.database import get_db
 from app.models.users import Users
-from app.models.system_logs import SystemLogs
-from app.core.security import (
-    create_access_token, 
-    create_refresh_token, 
-    verify_password, 
-    decode_refresh_token,
-    get_current_active_user
+from app.core.security import get_current_user, oauth2_scheme
+from app.core.config import Settings, get_settings
+from app.core.permissions import require_permissions
+from app.core.enums import Permission
+from app.services.auth_service import (
+    login_user,
+    logout_user,
+    refresh_token,
+    get_current_user_profile,
+    validate_token
 )
-from app.core.enums import SystemAction
-from app.core.permissions import get_user_permissions
-from app.models.roles import Roles
-from app.models.user_roles import UserRoles
-from app.schemas.user_role import UserProfile
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from app.schemas.auth_schema import Token, RefreshTokenRequest, UserProfile
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
-
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-class Token(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int = 1800  # Access token expiry reduced to 30 minutes
-    model_config = ConfigDict(from_attributes=True)
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-    model_config = ConfigDict(from_attributes=True)
-
-async def log_system_action(db: AsyncSession, user_id: int, action: SystemAction, details: str = None):
-    """Helper to log system actions"""
-    try:
-        log_entry = SystemLogs(
-            user_id=user_id,
-            action=action.value,
-            details=details,
-            timestamp=datetime.now(timezone.utc),
-            is_active=True
-        )
-        db.add(log_entry)
-    except Exception as e:
-        logger.error(f"Failed to log system action: {str(e)}")
-
-@router.post("/token", response_model=Token, status_code=status.HTTP_200_OK, summary="User login")
-@limiter.limit("5/minute")
-async def login_for_access_token(
+@router.post(
+    "/token",
+    response_model=Token,
+    status_code=status.HTTP_200_OK,
+    summary="User login",
+    description="Authenticate user with email and password to get JWT tokens."
+)
+async def login_endpoint(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> Token:
-    """Authenticate user with email and password to get JWT tokens."""
-    try:
-        if not form_data.username or not form_data.password:
-            logger.warning("Missing credentials in login attempt")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email and password are required"
-            )
+    """Handle user login.
 
-        # Find active user by email
-        query = select(Users).where(
-            Users.email == form_data.username,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
+    Args:
+        request: The incoming HTTP request.
+        form_data: OAuth2 form data with username (email) and password.
+        db: Database session dependency.
+        settings: Application settings.
 
-        if not user or not verify_password(form_data.password, user.password_hash):
-            logger.warning(f"Failed login attempt for email: {form_data.username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-            
-        access_token = create_access_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=1800)  # 30 minutes
-        )
-        refresh_token = create_refresh_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=604800)  # 7 days
-        )
+    Returns:
+        Token: JWT access and refresh tokens.
+    """
+    request_id = request.state.request_id
+    return await login_user(
+        request=request,
+        credentials={"username": form_data.username, "password": form_data.password},
+        db=db,
+        settings=settings,
+        request_id=request_id
+    )
 
-        await log_system_action(db, user.user_id, SystemAction.LOGIN, f"Successful login from {form_data.username}")
-
-        logger.info(f"Successful login for user_id: {user.user_id}")
-        return Token(access_token=access_token, refresh_token=refresh_token)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error during login for email {form_data.username}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication failed"
-        )
-
-@router.post("/refresh", response_model=Token, status_code=status.HTTP_200_OK, summary="Refresh access token")
-async def refresh_access_token(
+@router.post(
+    "/refresh",
+    response_model=Token,
+    status_code=status.HTTP_200_OK,
+    summary="Refresh access token",
+    description="Generate new access token using a valid refresh token."
+)
+@require_permissions([Permission.REFRESH_TOKEN])
+async def refresh_token_endpoint(
+    request: Request,
     token_request: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
 ) -> Token:
-    """Generate new access token using a valid refresh token."""
-    try:
-        payload = decode_refresh_token(token_request.refresh_token)
-        user_id = payload.get("sub")
-        if not user_id:
-            logger.warning("Invalid refresh token provided")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid refresh token",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
+    """Handle token refresh.
 
-        # Verify token issuance time to prevent reuse of old tokens
-        issued_at = payload.get("iat")
-        if not issued_at or (datetime.now(timezone.utc).timestamp() - issued_at > 604800):  # 7 days expiry
-            logger.warning(f"Expired refresh token for user_id: {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token expired",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
+    Args:
+        request: The incoming HTTP request.
+        token_request: Refresh token data.
+        db: Database session dependency.
+        settings: Application settings.
 
-        # Verify user still exists and is active
-        query = select(Users).where(
-            Users.user_id == int(user_id),
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
+    Returns:
+        Token: New JWT access and refresh tokens.
+    """
+    request_id = request.state.request_id
+    return await refresh_token(
+        request=request,
+        token_request=token_request.dict(),
+        db=db,
+        settings=settings,
+        request_id=request_id
+    )
 
-        if not user:
-            logger.warning(f"Refresh token used for inactive/deleted user_id: {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User account not found or inactive",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
+@router.post(
+    "/logout",
+    status_code=status.HTTP_200_OK,
+    summary="User logout",
+    description="Log out current user."
+)
+async def logout_endpoint(
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings)
+) -> dict:
+    """Handle user logout.
 
-        access_token = create_access_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=1800)  # 30 minutes
-        )
-        new_refresh_token = create_refresh_token(
-            {"sub": str(user.user_id)}, 
-            expires_delta=timedelta(seconds=604800)  # 7 days
-        )
+    Args:
+        request: The incoming HTTP request.
+        current_user: The authenticated user.
+        token: The JWT token.
+        db: Database session dependency.
+        settings: Application settings.
 
-        logger.info(f"Token refreshed for user_id: {user.user_id}")
-        return Token(access_token=access_token, refresh_token=new_refresh_token)
+    Returns:
+        dict: Logout confirmation message.
+    """
+    request_id = request.state.request_id
+    await logout_user(
+        request=request,
+        user=current_user,
+        token=token,
+        db=db,
+        settings=settings,
+        request_id=request_id
+    )
+    return {"message": "Successfully logged out"}
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error refreshing token: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token refresh failed"
-        )
-
-@router.post("/logout", status_code=status.HTTP_200_OK, summary="User logout")
-async def logout(
-    current_user: Users = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Log out current user and record logout action."""
-    try:
-        # Log logout action
-        await log_system_action(db, current_user.user_id, SystemAction.LOGOUT, "User logged out")
-        await db.commit()
-        
-        logger.info(f"User logged out, user_id: {current_user.user_id}")
-        return {"message": "Successfully logged out"}
-
-    except Exception as e:
-        logger.error(f"Error during logout for user_id {current_user.user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Logout failed"
-        )
-
-@router.get("/me", response_model=UserProfile, summary="Get current user profile")
-async def get_current_user_profile(
-    current_user: Users = Depends(get_current_active_user),
+@router.get(
+    "/me",
+    response_model=UserProfile,
+    summary="Get current user profile",
+    description="Retrieve profile information for the current user."
+)
+async def get_profile_endpoint(
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
-    """Retrieve profile information for the current user."""
-    try:
-        # Get user permissions
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        permissions_list = user_permissions
-        
-        # Get user roles
-        roles_query = select(Roles.role_name).join(UserRoles).where(
-            UserRoles.user_id == current_user.user_id,
-            UserRoles.is_active == True
-        )
-        roles_result = await db.execute(roles_query)
-        roles_list = [role[0] for role in roles_result.fetchall()]
-        
-        return UserProfile(
-            user_id=current_user.user_id,
-            email=current_user.email,
-            first_name=current_user.first_name,
-            last_name=current_user.last_name,
-            job_title=current_user.job_title,
-            roles=roles_list,
-            permissions=permissions_list
-        )
+    """Retrieve current user profile.
 
-    except Exception as e:
-        logger.error(f"Error retrieving user profile for user_id {current_user.user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve user profile"
-        )
+    Args:
+        request: The incoming HTTP request.
+        current_user: The authenticated user.
+        db: Database session dependency.
 
-@router.post("/validate-token", status_code=status.HTTP_200_OK, summary="Validate access token")
-async def validate_token(
-    current_user: Users = Depends(get_current_active_user)
-):
-    """Validate if the current access token is valid and user is active."""
-    try:
-        return {
-            "valid": True,
-            "user_id": current_user.user_id,
-            "email": current_user.email
-        }
-    except Exception as e:
-        logger.error(f"Error validating token for user_id {current_user.user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token validation failed"
-        )
+    Returns:
+        UserProfile: User profile data.
+    """
+    request_id = request.state.request_id
+    return await get_current_user_profile(
+        user=current_user,
+        db=db,
+        request_id=request_id
+    )
+
+@router.post(
+    "/validate-token",
+    status_code=status.HTTP_200_OK,
+    summary="Validate access token",
+    description="Validate if the current access token is valid and user is active."
+)
+@require_permissions([Permission.VIEW_OWN_PROFILE])
+async def validate_token_endpoint(
+    request: Request,
+    current_user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Validate access token.
+
+    Args:
+        request: The incoming HTTP request.
+        current_user: The authenticated user.
+        db: Database session dependency.
+
+    Returns:
+        dict: Token validation result.
+    """
+    request_id = request.state.request_id
+    return await validate_token(
+        user=current_user,
+        db=db,
+        request_id=request_id
+    )

@@ -1,350 +1,271 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from typing import List, Optional
-from datetime import datetime, timezone
 from app.core.database import get_db
-from app.models.shift_assignments import ShiftAssignments
-from app.models.shift_patterns import ShiftPatterns
 from app.models.users import Users
-from app.core.permissions import (
-    check_permissions,
-    require_permissions
-)
 from app.core.security import get_current_user
-from app.core.config import settings
-from app.core.enums import Permission
+from app.core.config import Settings, get_settings
+from app.services.shift_assignment_service import (
+    create_shift_assignment,
+    read_shift_assignment,
+    read_shift_assignments,
+    update_shift_assignment,
+    delete_shift_assignment,
+    get_my_shift_assignments
+)
 from app.schemas.shift_assignment import ShiftAssignmentCreate, ShiftAssignmentUpdate, ShiftAssignmentOut
+from app.core.permissions import require_permissions
+from app.core.utils import get_request_id
+from app.core.enums import Permission
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/shift-assignments", tags=["Shift Assignments"])
 
-@router.post("/", 
-             response_model=ShiftAssignmentOut, 
-             status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(require_permissions([Permission.MANAGE_USERS]))],
-             summary="Create new shift assignment")
-async def create_shift_assignment(
+@router.post(
+    "/",
+    response_model=ShiftAssignmentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new shift assignment",
+    description="Create a new shift assignment for a user with specified shift pattern and effective dates."
+)
+async def create_shift_assignment_endpoint(
     shift_assignment: ShiftAssignmentCreate,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.CREATE_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
+    """Create a new shift assignment.
+
+    Args:
+        shift_assignment: The shift assignment data to create.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        ShiftAssignmentOut: The created shift assignment.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), database errors (500), or unexpected errors (500).
+    """
     try:
-        # Verify user exists and is active
-        query = select(Users).where(
-            Users.user_id == shift_assignment.user_id,
-            Users.is_active == True,
-            Users.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="User not found"
-            )
-
-        # Verify shift pattern exists and is active
-        query = select(ShiftPatterns).where(
-            ShiftPatterns.pattern_id == shift_assignment.pattern_id,
-            ShiftPatterns.is_active == True,
-            ShiftPatterns.deleted_at == None
-        )
-        result = await db.execute(query)
-        if not result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Shift pattern not found"
-            )
-
-        # Check for conflicting assignments
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.user_id == shift_assignment.user_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.effective_from <= (shift_assignment.effective_to or shift_assignment.effective_from),
-            (ShiftAssignments.effective_to >= shift_assignment.effective_from) | (ShiftAssignments.effective_to == None)
-        )
-        result = await db.execute(query)
-        if result.scalars().first():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Conflicting shift assignment exists for this period"
-            )
-
-        db_assignment = ShiftAssignments(
-            user_id=shift_assignment.user_id,
-            pattern_id=shift_assignment.pattern_id,
-            effective_from=shift_assignment.effective_from,
-            effective_to=shift_assignment.effective_to,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-            is_active=True
-        )
-        db.add(db_assignment)
-        await db.commit()
-        await db.refresh(db_assignment)
-
-        logger.info(f"Shift assignment created: {db_assignment.assignment_id}")
-        return ShiftAssignmentOut.model_validate(db_assignment)
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        return await create_shift_assignment(shift_assignment, request, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error creating shift assignment: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error creating shift assignment: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error creating shift assignment"
-        )
+        logger.error(f"Unexpected error creating shift assignment: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/{assignment_id}", 
-            response_model=ShiftAssignmentOut,
-            summary="Get shift assignment by ID")
-async def read_shift_assignment(
+@router.get(
+    "/{assignment_id}",
+    response_model=ShiftAssignmentOut,
+    summary="Get shift assignment by ID",
+    description="Retrieve a specific shift assignment by its ID."
+)
+async def read_shift_assignment_endpoint(
     assignment_id: int,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    settings: Settings = Depends(get_settings),
+    # _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
+    """Retrieve a shift assignment by ID.
+
+    Args:
+        assignment_id: The ID of the shift assignment to retrieve.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        ShiftAssignmentOut: The retrieved shift assignment.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
+    """
     try:
-        # Check if user can view shift assignments
-        await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
-
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.assignment_id == assignment_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
-        result = await db.execute(query)
-        assignment = result.scalar_one_or_none()
-
-        if not assignment:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Shift assignment not found"
-            )
-
-        logger.info(f"Retrieved shift assignment: {assignment_id}")
-        return ShiftAssignmentOut.model_validate(assignment)
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        return await read_shift_assignment(assignment_id, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving shift assignment {assignment_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error retrieving shift assignment"
-        )
+        logger.error(f"Unexpected error retrieving shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/", 
-            response_model=List[ShiftAssignmentOut],
-            summary="List shift assignments")
-async def read_shift_assignments(
+@router.get(
+    "/",
+    response_model=List[ShiftAssignmentOut],
+    summary="List shift assignments",
+    description="List shift assignments with optional filtering by user ID, pattern ID, or department ID, and pagination."
+)
+async def read_shift_assignments_endpoint(
+    request: Request,
     user_id: Optional[int] = None,
+    pattern_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: Optional[int] = None,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    settings: Settings = Depends(get_settings),
+    # _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> List[ShiftAssignmentOut]:
+    """List shift assignments with optional filters and pagination.
+
+    Args:
+        user_id: Optional user ID to filter assignments.
+        pattern_id: Optional shift pattern ID to filter assignments.
+        department_id: Optional department ID to filter assignments by user department.
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[ShiftAssignmentOut]: List of shift assignments.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), database errors (500), or unexpected errors (500).
+    """
     try:
-        # Check permissions for viewing assignments
-        if user_id and user_id != current_user.user_id:
-            await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db)
-        else:
-            # Users can view their own assignments
-            await check_permissions([Permission.VIEW_OWN_ATTENDANCE], current_user, db)
-
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
-        
-        if user_id:
-            query = query.where(ShiftAssignments.user_id == user_id)
-        elif not await check_permissions([Permission.VIEW_TEAM_ATTENDANCE], current_user, db):
-            # If user can't view team data, only show their own
-            query = query.where(ShiftAssignments.user_id == current_user.user_id)
-            
-        query = query.order_by(ShiftAssignments.effective_from.desc()).offset(skip).limit(limit)
-        result = await db.execute(query)
-        assignments = result.scalars().all()
-
-        logger.info(f"Retrieved {len(assignments)} shift assignments")
-        return [ShiftAssignmentOut.model_validate(assignment) for assignment in assignments]
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        return await read_shift_assignments(user_id, pattern_id, department_id, skip, limit, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error listing shift assignments: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error retrieving shift assignments: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error retrieving shift assignments"
-        )
+        logger.error(f"Unexpected error listing shift assignments: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.put("/{assignment_id}", 
-            response_model=ShiftAssignmentOut,
-            dependencies=[Depends(require_permissions([Permission.MANAGE_USERS]))],
-            summary="Update shift assignment")
-async def update_shift_assignment(
+@router.put(
+    "/{assignment_id}",
+    response_model=ShiftAssignmentOut,
+    summary="Update a shift assignment",
+    description="Update an existing shift assignment with new details."
+)
+async def update_shift_assignment_endpoint(
     assignment_id: int,
     shift_assignment_update: ShiftAssignmentUpdate,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.UPDATE_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
+    """Update a shift assignment.
+
+    Args:
+        assignment_id: The ID of the shift assignment to update.
+        shift_assignment_update: The updated shift assignment data.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        ShiftAssignmentOut: The updated shift assignment.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), database errors (500), or unexpected errors (500).
+    """
     try:
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.assignment_id == assignment_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
-        result = await db.execute(query)
-        assignment = result.scalar_one_or_none()
-
-        if not assignment:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Shift assignment not found"
-            )
-
-        update_data = shift_assignment_update.model_dump(exclude_none=True)
-        
-        # Validate user if being updated
-        if "user_id" in update_data:
-            query = select(Users).where(
-                Users.user_id == update_data["user_id"],
-                Users.is_active == True,
-                Users.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, 
-                    detail="User not found"
-                )
-
-        # Validate shift pattern if being updated
-        if "pattern_id" in update_data:
-            query = select(ShiftPatterns).where(
-                ShiftPatterns.pattern_id == update_data["pattern_id"],
-                ShiftPatterns.is_active == True,
-                ShiftPatterns.deleted_at == None
-            )
-            result = await db.execute(query)
-            if not result.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, 
-                    detail="Shift pattern not found"
-                )
-
-        # Check for conflicts if dates or user are being updated
-        if any(key in update_data for key in ["user_id", "effective_from", "effective_to"]):
-            new_user_id = update_data.get("user_id", assignment.user_id)
-            new_from = update_data.get("effective_from", assignment.effective_from)
-            new_to = update_data.get("effective_to", assignment.effective_to)
-            
-            query = select(ShiftAssignments).where(
-                ShiftAssignments.user_id == new_user_id,
-                ShiftAssignments.is_active == True,
-                ShiftAssignments.assignment_id != assignment_id,
-                ShiftAssignments.effective_from <= (new_to or new_from),
-                (ShiftAssignments.effective_to >= new_from) | (ShiftAssignments.effective_to == None)
-            )
-            result = await db.execute(query)
-            if result.scalars().first():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, 
-                    detail="Conflicting shift assignment exists for this period"
-                )
-
-        # Apply updates
-        for key, value in update_data.items():
-            setattr(assignment, key, value)
-
-        assignment.updated_at = datetime.now(timezone.utc)
-        db.add(assignment)
-        await db.commit()
-        await db.refresh(assignment)
-
-        logger.info(f"Shift assignment updated: {assignment_id}")
-        return ShiftAssignmentOut.model_validate(assignment)
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        return await update_shift_assignment(assignment_id, shift_assignment_update, request, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error updating shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error updating shift assignment {assignment_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error updating shift assignment"
-        )
+        logger.error(f"Unexpected error updating shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.delete("/{assignment_id}", 
-               status_code=status.HTTP_204_NO_CONTENT,
-               dependencies=[Depends(require_permissions([Permission.MANAGE_USERS]))],
-               summary="Delete shift assignment")
-async def delete_shift_assignment(
+@router.delete(
+    "/{assignment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a shift assignment",
+    description="Soft delete a shift assignment."
+)
+async def delete_shift_assignment_endpoint(
     assignment_id: int,
+    request: Request,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.DELETE_SHIFT_ASSIGNMENT]))
 ) -> None:
+    """Soft delete a shift assignment.
+
+    Args:
+        assignment_id: The ID of the shift assignment to delete.
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        None: No content returned on successful deletion.
+
+    Raises:
+        HTTPException: For validation errors (422), not found (404), business logic errors (422), database errors (500), or unexpected errors (500).
+    """
     try:
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.assignment_id == assignment_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        )
-        result = await db.execute(query)
-        assignment = result.scalar_one_or_none()
-
-        if not assignment:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Shift assignment not found"
-            )
-
-        # Soft delete
-        assignment.is_active = False
-        assignment.deleted_at = datetime.now(timezone.utc)
-        assignment.updated_at = datetime.now(timezone.utc)
-        
-        db.add(assignment)
-        await db.commit()
-
-        logger.info(f"Shift assignment deleted: {assignment_id}")
-
-    except HTTPException:
+        request_id = get_request_id(request)
+        await delete_shift_assignment(assignment_id, request, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error deleting shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Error deleting shift assignment {assignment_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error deleting shift assignment"
-        )
+        logger.error(f"Unexpected error deleting shift assignment {assignment_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
-@router.get("/my-shifts", 
-            response_model=List[ShiftAssignmentOut],
-            dependencies=[Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE]))],
-            summary="Get current user's shift assignments")
-async def get_my_shift_assignments(
+@router.get(
+    "/my-shifts",
+    response_model=List[ShiftAssignmentOut],
+    summary="Get current user's shift assignments",
+    description="Retrieve the current user's shift assignments with pagination."
+)
+async def get_my_shift_assignments_endpoint(
+    request: Request,
     skip: int = 0,
-    limit: int = settings.DEFAULT_PAGE_SIZE,
+    limit: Optional[int] = None,
+    current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    current_user: Users = Depends(get_current_user)
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_permissions([Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> List[ShiftAssignmentOut]:
+    """Retrieve the current user's shift assignments.
+
+    Args:
+        skip: Number of records to skip for pagination (default: 0).
+        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
+        request: The incoming HTTP request for logging client details.
+        current_user: The authenticated user performing the action.
+        db: Database session dependency.
+        settings: Application settings.
+
+    Returns:
+        List[ShiftAssignmentOut]: List of the user's shift assignments.
+
+    Raises:
+        HTTPException: For validation errors (422), database errors (500), or unexpected errors (500).
+    """
     try:
-        query = select(ShiftAssignments).where(
-            ShiftAssignments.user_id == current_user.user_id,
-            ShiftAssignments.is_active == True,
-            ShiftAssignments.deleted_at == None
-        ).order_by(ShiftAssignments.effective_from.desc()).offset(skip).limit(limit)
-        
-        result = await db.execute(query)
-        assignments = result.scalars().all()
-
-        logger.info(f"Retrieved {len(assignments)} shift assignments for user: {current_user.user_id}")
-        return [ShiftAssignmentOut.model_validate(assignment) for assignment in assignments]
-
+        request_id = get_request_id(request)
+        return await get_my_shift_assignments(skip, limit, current_user, db, settings, request_id)
+    except HTTPException as e:
+        logger.error(f"Error retrieving shift assignments for user {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving user shift assignments: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Error retrieving shift assignments"
-        )
+        logger.error(f"Unexpected error retrieving shift assignments for user {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")

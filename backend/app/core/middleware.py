@@ -1,95 +1,136 @@
 from fastapi import FastAPI, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import ensure_session_factory
 from app.core.enums import SystemAction
 from app.models.system_logs import SystemLogs
+from app.core.config import settings
 import logging
+import uuid
+import re
 
 logger = logging.getLogger(__name__)
 
-# Action mapping: (path_suffix, method) -> SystemAction
-ACTION_MAPPING = {
-    ("/auth/token", "POST"): SystemAction.LOGIN,
-    ("/auth/logout", "POST"): SystemAction.LOGOUT,
-    ("/attendance/clock_in", "POST"): SystemAction.CLOCK_IN,
-    ("/attendance/clock_out", "POST"): SystemAction.CLOCK_OUT,
-    ("/users/password", "PUT"): SystemAction.PASSWORD_CHANGE,
-    ("/users/me", "PUT"): SystemAction.PROFILE_UPDATE,
-    ("/users/export", "GET"): SystemAction.DATA_EXPORT,
-    ("/users/import", "POST"): SystemAction.DATA_IMPORT,
-    ("/users/roles", "POST"): SystemAction.ASSIGN_ROLE,
-    ("/users/roles", "DELETE"): SystemAction.REVOKE_ROLE,
-    ("/reports", "GET"): SystemAction.VIEW_REPORT,
-    ("/leave/approve", "POST"): SystemAction.APPROVE_LEAVE,
-    ("/leave/reject", "POST"): SystemAction.REJECT_LEAVE,
-    ("/departments", "POST"): SystemAction.CREATE_DEPARTMENT,
-    ("/departments", "DELETE"): SystemAction.DELETE_DEPARTMENT,
-}
-
-# Method-based fallback mapping for generic CRUD operations
-METHOD_FALLBACK = {
-    "POST": SystemAction.INSERT,
-    "PUT": SystemAction.UPDATE,
-    "DELETE": SystemAction.DELETE,
-}
-
 def determine_system_action(path: str, method: str) -> str | None:
-    """Determine the system action based on request path and method.
-    
-    Args:
-        path: The request path
-        method: The HTTP method
-        
-    Returns:
-        SystemAction value or None if no action should be logged
-    """
-    # Check for exact path matches first
-    for (path_suffix, mapped_method), action in ACTION_MAPPING.items():
+    """Determine the system action based on request path and method."""
+    path = re.sub(f"^{settings.API_V1_STR}", "", path)
+
+    for (path_suffix, mapped_method), action in settings.ACTION_MAPPING.items():
         if path.endswith(path_suffix) and method == mapped_method:
             return action
-    
-    # Fallback to generic method-based actions for POST/PUT/DELETE
-    if method in METHOD_FALLBACK:
-        return METHOD_FALLBACK[method]
-    
+
+    METHOD_FALLBACK = {
+        "POST": SystemAction.INSERT.value,
+        "PUT": SystemAction.UPDATE.value,
+        "DELETE": SystemAction.DELETE.value,
+    }
+    return METHOD_FALLBACK.get(method)
+
+
+def get_table_affected(path: str) -> str | None:
+    """Determine the affected table based on the route path."""
+    path = re.sub(f"^{settings.API_V1_STR}", "", path)
+
+    for route, table in settings.ROUTE_TABLE_MAPPING.items():
+        if path.endswith(route):
+            return table
+
+    path_parts = path.strip("/").split("/")
+    if len(path_parts) >= 2:
+        potential_table = path_parts[-2]
+        table_name_map = {
+            "users": "users",
+            "attendance": "attendance_records",
+            "leave": "leave_requests",
+            "leave_requests": "leave_requests",
+            "departments": "departments",
+            "holidays": "holiday_calendar",
+            "overtime": "overtime_records",
+            "roles": "roles",
+            "emergency_contacts": "employee_emergency_contacts",
+            "hierarchy": "employee_hierarchy",
+            "workflows": "leave_approval_workflow",
+            "leave_balances": "leave_balances",
+            "leave_policies": "leave_policies",
+            "shift_patterns": "shift_patterns",
+            "shift_assignments": "shift_assignments",
+            "user_roles": "user_roles",
+            "user_departments": "user_departments",
+            "time_corrections": "time_corrections",
+        }
+        return table_name_map.get(potential_table, potential_table)
+
     return None
+
 
 def setup_middleware(app: FastAPI) -> None:
     """Setup middleware for logging system actions."""
-    
+
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
-        response = await call_next(request)
+        print(f"Request query params: {dict(request.query_params)}")
+        print(f"Request path params: {request.path_params}")
         
-        # Determine the action based on request method and path
+        logger.info(f"Middleware processing: {request.method} {request.url.path}")
+        request_id = str(uuid.uuid4())
+        
+        # Safe way to set request_id on request state
+        if not hasattr(request, 'state'):
+            request.state = type('State', (), {})()
+        request.state.request_id = request_id
+
+        response = await call_next(request)
+
         path = request.url.path
         method = request.method
+
+        # Skip logging for /api/v1/auth/token to prevent duplicate SystemLogs entries
+        if path.endswith(f"{settings.API_V1_STR}/auth/token"):
+            logger.debug(f"Skipping system log for endpoint: {path}", extra={"request_id": request_id})
+            return response
+
         action = determine_system_action(path, method)
 
         if action:
-            # Get user_id from request state if available
+            try:
+                session_factory = ensure_session_factory()
+            except RuntimeError:
+                # Database not initialized yet, skip logging
+                logger.warning("Database not initialized, skipping system logging", extra={"request_id": request_id})
+                return response
+
+            # Safe way to get user from request state
             user = getattr(request.state, "user", None)
-            user_id = user.user_id if user else None
-            
-            # Log to system_logs table
-            async with AsyncSessionLocal() as session:
+            user_id = getattr(user, 'user_id', None) if user else None
+
+            ip_address = None
+            try:
+                ip_address = str(request.client.host) if request.client else None
+            except Exception as e:
+                logger.warning(f"Failed to get client IP: {str(e)}", extra={"request_id": request_id})
+
+            async with session_factory() as session:
                 try:
                     system_log = SystemLogs(
                         user_id=user_id,
                         action=action,
-                        table_affected=path.split("/")[-2] if len(path.split("/")) > 2 else None,
-                        record_id=None,  # Could be extracted from path for specific endpoints
+                        table_affected=get_table_affected(path),
+                        record_id=None,
                         old_values=None,
                         new_values=None,
-                        ip_address=str(request.client.host),
-                        user_agent=request.headers.get("user-agent")
+                        ip_address=ip_address,
+                        user_agent=request.headers.get("user-agent"),
+                        request_id=request_id
                     )
                     session.add(system_log)
                     await session.commit()
-                    logger.info(f"Logged system action: {action} for user_id: {user_id}")
+                    logger.info(
+                        f"Logged system action: {action} for user_id: {user_id}",
+                        extra={"request_id": request_id}
+                    )
                 except Exception as e:
-                    logger.error(f"Failed to log system action: {str(e)}")
+                    logger.error(
+                        f"Failed to log system action: {str(e)}",
+                        extra={"request_id": request_id}
+                    )
                     await session.rollback()
 
         return response
