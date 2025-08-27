@@ -27,10 +27,13 @@ const ShiftPatternForm = lazy(() => import("./pages/ShiftPatternForm"));
 const SystemLogs = lazy(() => import("./pages/SystemLogs"));
 const UserManagement = lazy(() => import("./pages/UserManagement"));
 const OvertimeRecords = lazy(() => import("./pages/OvertimeRecords"));
+const OvertimeForm = lazy(() => import("./pages/OvertimeForm"));
 const LeaveRequestForm = lazy(() => import("./pages/LeaveRequestForm"));
+const LeaveRequests = lazy(() => import("./pages/LeaveRequests"));
 const LeaveBalances = lazy(() => import("./pages/LeaveBalances"));
 const LeavePolicies = lazy(() => import("./pages/LeavePolicies"));
 const HolidayList = lazy(() => import("./pages/HolidayList"));
+const HolidayForm = lazy(() => import("./pages/HolidayForm"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function App() {
@@ -229,12 +232,37 @@ function App() {
                   }
                 />
                 <Route
+                  path={ROUTES.OVERTIME_FORM}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["manage_overtime"] as Permission[]}
+                    >
+                      <OvertimeForm />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path={ROUTES.LEAVE_REQUEST}
                   element={
                     <ProtectedRoute
                       requiredPermissions={["request_leave"] as Permission[]}
                     >
                       <LeaveRequestForm />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_REQUESTS}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        [
+                          "manage_employees",
+                          "manage_leave_policies",
+                        ] as Permission[]
+                      }
+                    >
+                      <LeaveRequests />
                     </ProtectedRoute>
                   }
                 />
@@ -272,6 +300,16 @@ function App() {
                       requiredPermissions={["manage_employees"] as Permission[]}
                     >
                       <HolidayList />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.HOLIDAY_FORM}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["manage_employees"] as Permission[]}
+                    >
+                      <HolidayForm />
                     </ProtectedRoute>
                   }
                 />

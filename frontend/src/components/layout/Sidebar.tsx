@@ -89,6 +89,10 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             title: "Holidays",
             url: "/holidays",
             icon: CalendarCheck,
+            items: [
+              { title: "List", url: "/holidays" },
+              { title: "Add/Edit", url: "/holidays/edit" },
+            ],
           },
         ]
       : []),
@@ -96,37 +100,40 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     user?.permissions.includes("manage_overtime")
       ? [
           {
-            title: "Overtime Records",
+            title: "Overtime",
             url: "/overtime-records",
             icon: FileClock,
+            items: [
+              { title: "Records", url: "/overtime-records" },
+              { title: "Add/Edit", url: "/overtime-records/edit" },
+            ],
           },
         ]
       : []),
-    ...(user?.permissions.includes("request_leave")
+    ...(user?.permissions.includes("request_leave") ||
+    user?.permissions.includes("manage_employees") ||
+    user?.permissions.includes("manage_leave_policies")
       ? [
           {
-            title: "Leave Request",
+            title: "Leaves",
             url: "/leave-request",
             icon: Calendar,
-          },
-        ]
-      : []),
-    ...(user?.permissions.includes("view_own_attendance") ||
-    user?.permissions.includes("manage_employees")
-      ? [
-          {
-            title: "Leave Balances",
-            url: "/leave-balances",
-            icon: FileText,
-          },
-        ]
-      : []),
-    ...(user?.permissions.includes("manage_leave_policies")
-      ? [
-          {
-            title: "Leave Policies",
-            url: "/leave-policies",
-            icon: FileText,
+            items: [
+              ...(user?.permissions.includes("request_leave")
+                ? [{ title: "Request Leave", url: "/leave-request" }]
+                : []),
+              ...(user?.permissions.includes("manage_employees") ||
+              user?.permissions.includes("manage_leave_policies")
+                ? [{ title: "Leave Requests", url: "/leave-requests" }]
+                : []),
+              ...(user?.permissions.includes("view_own_attendance") ||
+              user?.permissions.includes("manage_employees")
+                ? [{ title: "Leave Balances", url: "/leave-balances" }]
+                : []),
+              ...(user?.permissions.includes("manage_leave_policies")
+                ? [{ title: "Leave Policies", url: "/leave-policies" }]
+                : []),
+            ],
           },
         ]
       : []),

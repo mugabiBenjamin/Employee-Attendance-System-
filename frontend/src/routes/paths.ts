@@ -16,9 +16,12 @@ export const ROUTES = {
   SYSTEM_LOGS: "/system-logs",
   USER_MANAGEMENT: "/user-management",
   OVERTIME_RECORDS: "/overtime-records",
+  OVERTIME_FORM: "/overtime-records/edit/:id?",
   LEAVE_REQUEST: "/leave-request",
+  LEAVE_REQUESTS: "/leave-requests",
   LEAVE_BALANCES: "/leave-balances",
   LEAVE_POLICIES: "/leave-policies",
   HOLIDAYS: "/holidays",
+  HOLIDAY_FORM: "/holidays/edit/:id?",
   NOT_FOUND: "*",
 };
