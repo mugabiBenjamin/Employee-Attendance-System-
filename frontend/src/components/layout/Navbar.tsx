@@ -1,4 +1,4 @@
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import type { RootState } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { clearAuth } from "@/store/slices/authSlice";
-import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -35,6 +34,13 @@ function Navbar() {
     return `${firstName?.[0] || ""}${lastName?.[0] || ""}`.toUpperCase() || "U";
   };
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning";
+    if (hour < 18) return "Good Afternoon";
+    return "Good Evening";
+  };
+
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 px-4 bg-background border-b">
       <div className="flex items-center gap-2">
@@ -43,15 +49,24 @@ function Navbar() {
       </div>
 
       <div className="flex-1 flex items-center justify-between">
-        {/* Search - responsive */}
-        <div className="relative">
-          <div className="hidden sm:block">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input type="text" placeholder="Search..." className="pl-8 w-64" />
+        <div className="flex items-center gap-4">
+          {/* Greeting */}
+          {user && (
+            <span className="hidden sm:inline text-sm font-medium">
+              {getGreeting()}, {user.first_name}
+            </span>
+          )}
+
+          {/* Search - responsive */}
+          <div className="relative">
+            <div className="hidden sm:block">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input type="text" placeholder="Search..." className="pl-8 w-64" />
+            </div>
+            <Button variant="ghost" size="icon" className="sm:hidden">
+              <Search className="h-4 w-4" />
+            </Button>
           </div>
-          <Button variant="ghost" size="icon" className="sm:hidden">
-            <Search className="h-4 w-4" />
-          </Button>
         </div>
 
         {user && (

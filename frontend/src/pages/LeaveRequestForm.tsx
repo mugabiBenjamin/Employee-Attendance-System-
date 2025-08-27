@@ -13,34 +13,37 @@ import { format, parseISO } from "date-fns";
 import { useLeaveTypeOptions } from "@/hooks/useEnums";
 import type { LeaveType } from "@/api/types";
 
-const leaveRequestSchema = z.object({
-  start_date: z.string().min(1, "Start date is required"),
-  end_date: z
-    .string()
-    .min(1, "End date is required")
-    .refine(
-      (data) => {
-        const start = new Date(data.start_date);
-        const end = new Date(data.end_date);
-        return end >= start;
-      },
-      { message: "End date must be after start date", path: ["end_date"] }
-    ),
-  leave_type: z.enum([
-    "annual",
-    "sick",
-    "maternity",
-    "paternity",
-    "emergency",
-    "unpaid",
-    "casual",
-    "compensatory",
-    "bereavement",
-    "leave_of_absence",
-    "public_holiday",
-  ] as const satisfies LeaveType[]),
-  reason: z.string().min(1, "Reason is required"),
-});
+const leaveRequestSchema = z
+  .object({
+    start_date: z.string().min(1, "Start date is required"),
+    end_date: z.string().min(1, "End date is required"),
+    leave_type: z.enum([
+      "annual",
+      "sick",
+      "maternity",
+      "paternity",
+      "emergency",
+      "unpaid",
+      "casual",
+      "compensatory",
+      "bereavement",
+      "leave_of_absence",
+      "public_holiday",
+    ] as const satisfies LeaveType[]),
+    reason: z.string().min(1, "Reason is required"),
+  })
+
+  .refine(
+    (data) => {
+      const start = new Date(data.start_date);
+      const end = new Date(data.end_date);
+      return end >= start;
+    },
+    {
+      message: "End date must be after or equal to start date",
+      path: ["end_date"], // Error shows on end_date field
+    }
+  );
 
 type LeaveRequestFormData = z.infer<typeof leaveRequestSchema>;
 
