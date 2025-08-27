@@ -14,7 +14,7 @@ const hierarchySlice = createSlice({
     initialState,
     reducers: {
         setHierarchy: (state, action: PayloadAction<EmployeeHierarchy[]>) => {
-            state.hierarchy = action.payload;
+            state.hierarchy = action.payload ?? []; // ✅ safe fallback
         },
     },
 });

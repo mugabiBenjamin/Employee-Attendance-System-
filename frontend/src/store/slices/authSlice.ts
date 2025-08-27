@@ -21,10 +21,15 @@ const authSlice = createSlice({
   initialState,
   reducers: {
     setAuth: (state, action: PayloadAction<AuthResponse & { user: User }>) => {
-      state.user = action.payload.user;
+      state.user = {
+        ...action.payload.user,
+        // ✅ Ensure permissions always exists
+        permissions: action.payload.user.permissions ?? [],
+      };
       state.accessToken = action.payload.access_token;
       state.refreshToken = action.payload.refresh_token;
       state.isAuthenticated = true;
+
       localStorage.setItem('access_token', action.payload.access_token);
       localStorage.setItem('refresh_token', action.payload.refresh_token);
     },
@@ -33,6 +38,7 @@ const authSlice = createSlice({
       state.accessToken = null;
       state.refreshToken = null;
       state.isAuthenticated = false;
+
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
     },
