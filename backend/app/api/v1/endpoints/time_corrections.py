@@ -62,7 +62,7 @@ async def get_time_correction(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_any_permissions([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
+    _: bool = Depends(require_any_permissions([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Retrieve a specific time correction request."""
     try:
@@ -91,7 +91,7 @@ async def list_time_corrections(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_any_permissions([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
+    _: bool = Depends(require_any_permissions([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
 ) -> List[TimeCorrectionOut]:
     """Retrieve time correction requests for current user, specified user, or department."""
     try:

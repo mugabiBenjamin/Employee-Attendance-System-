@@ -71,7 +71,7 @@ async def read_user_role_endpoint(
     user_role_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> UserRoleOut:
     """Retrieve a user role assignment by ID.
 
@@ -110,7 +110,7 @@ async def read_user_roles_endpoint(
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """List user role assignments with optional filters and pagination.
 
@@ -228,7 +228,7 @@ async def get_user_roles_endpoint(
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """Retrieve all roles for a specific user with pagination.
 
@@ -266,7 +266,7 @@ async def get_user_permissions_endpoint(
     user_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
 ) -> dict:
     """Retrieve all permissions for a specific user.
 

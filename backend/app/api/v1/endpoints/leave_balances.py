@@ -33,7 +33,7 @@ async def get_leave_balances_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_any_permissions([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
+    _: bool = Depends(require_any_permissions([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
 ) -> List[LeaveBalanceOut]:
     """Retrieve leave balances for a user."""
     request_id = get_request_id(request)

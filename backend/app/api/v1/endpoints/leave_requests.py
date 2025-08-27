@@ -77,7 +77,7 @@ async def get_leave_request_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
+    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """Retrieve a leave request by ID.
 
@@ -120,7 +120,7 @@ async def get_leave_requests_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
+    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
 ) -> List[LeaveRequestOut]:
     """List leave requests with pagination and optional filters.
 
@@ -168,7 +168,7 @@ async def get_team_leave_requests_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_TEAM_LEAVE_REQUESTS]))
+    _: bool = Depends(require_permissions([Permission.VIEW_TEAM_LEAVE_REQUESTS]))
 ) -> List[LeaveRequestOut]:
     """List leave requests for a manager's team.
 

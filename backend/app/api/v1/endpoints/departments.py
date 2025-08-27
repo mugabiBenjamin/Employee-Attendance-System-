@@ -69,7 +69,7 @@ async def get_department_endpoint(
     department_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
+    _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
 ) -> DepartmentOut:
     """Retrieve a department by ID.
 

@@ -70,7 +70,7 @@ async def get_role_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
+    _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
 ) -> RoleOut:
     """Retrieve a role by ID.
 
@@ -109,7 +109,7 @@ async def list_roles_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
+    _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
 ) -> List[RoleOut]:
     """List all active roles with pagination.
 

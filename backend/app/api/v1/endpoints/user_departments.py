@@ -72,7 +72,7 @@ async def read_user_department_endpoint(
     user_department_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Retrieve a user-department assignment by ID.
 
@@ -112,7 +112,7 @@ async def read_user_departments_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """List user-department assignments with optional filters and pagination.
 
