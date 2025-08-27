@@ -31,7 +31,8 @@ function Navbar() {
   };
 
   const getUserInitials = (firstName?: string, lastName?: string) => {
-    return `${firstName?.[0] || ""}${lastName?.[0] || ""}`.toUpperCase() || "U";
+    if (!firstName && !lastName) return "U";
+    return `${firstName?.[0] || ""}${lastName?.[0] || ""}`.toUpperCase();
   };
 
   const getGreeting = () => {
@@ -53,7 +54,7 @@ function Navbar() {
           {/* Greeting */}
           {user && (
             <span className="hidden sm:inline text-sm font-medium">
-              {getGreeting()}, {user.first_name}
+              {getGreeting()}, {user?.first_name}
             </span>
           )}
 
@@ -61,7 +62,11 @@ function Navbar() {
           <div className="relative">
             <div className="hidden sm:block">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input type="text" placeholder="Search..." className="pl-8 w-64" />
+              <Input
+                type="text"
+                placeholder="Search..."
+                className="pl-8 w-64"
+              />
             </div>
             <Button variant="ghost" size="icon" className="sm:hidden">
               <Search className="h-4 w-4" />
@@ -94,13 +99,13 @@ function Navbar() {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="px-2" size="lg">
                   <Avatar className="h-8 w-8 rounded-full">
-                    <AvatarImage src="" alt={user.first_name} />
+                    <AvatarImage src="" alt={user?.first_name || "User"} />
                     <AvatarFallback className="text-sm">
-                      {getUserInitials(user.first_name)}
+                      {getUserInitials(user?.first_name, user?.last_name)}
                     </AvatarFallback>
                   </Avatar>
                   <span className="hidden sm:inline text-sm">
-                    {user.first_name}
+                    {user?.first_name}
                   </span>
                 </Button>
               </DropdownMenuTrigger>

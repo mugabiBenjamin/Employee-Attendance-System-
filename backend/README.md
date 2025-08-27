@@ -14,12 +14,14 @@ uv sync
 ## Usage
 
 ```bash
+cd backend/
+
 source .venv/bin/activate
 
-uv run uvicorn main:app --reload
+uv run uvicorn app.main:app --reload
 
 # OR traditional
-uvicorn main:app --reload
+uvicorn app.main:app --reload
 ```
 
 ## Project Structure
