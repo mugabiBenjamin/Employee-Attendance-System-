@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { logsApi } from "@/api/logs";
@@ -42,7 +42,7 @@ function SystemLogs() {
     setPage(1); // Reset to first page on filter change
   }, 300);
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -58,13 +58,13 @@ function SystemLogs() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, limit, actionFilter, tableFilter]);
 
   useEffect(() => {
     if (user?.permissions.includes("view_logs")) {
       fetchLogs();
     }
-  }, [user, page, limit, actionFilter, tableFilter]);
+  }, [user, fetchLogs]);
 
   const handleExportCSV = async () => {
     try {

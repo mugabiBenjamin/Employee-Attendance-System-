@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useSelector, useDispatch } from "react-redux";
+import { useEffect, useState, useCallback } from "react";
+import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { leaveApi } from "@/api/leave";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -53,7 +53,6 @@ const leavePolicySchema = z.object({
 type LeavePolicyFormData = z.infer<typeof leavePolicySchema>;
 
 function LeavePolicies() {
-  const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const [policies, setPolicies] = useState<LeavePolicy[]>([]);
   const [page, setPage] = useState(1);
@@ -63,7 +62,7 @@ function LeavePolicies() {
   const [editPolicy, setEditPolicy] = useState<LeavePolicy | null>(null);
   const leaveTypeOptions = useLeaveTypeOptions();
 
-  const fetchPolicies = async () => {
+  const fetchPolicies = useCallback(async () => {
     if (!user?.permissions.includes("manage_leave_policies")) return;
     setLoading(true);
     try {
@@ -75,11 +74,11 @@ function LeavePolicies() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, page, limit]);
 
   useEffect(() => {
     fetchPolicies();
-  }, [user, page, limit]);
+  }, [fetchPolicies]);
 
   const handleSubmit = async (data: LeavePolicyFormData, isEdit: boolean) => {
     try {
@@ -134,15 +133,14 @@ function LeavePolicies() {
       accessorKey: "leave_type",
       header: "Leave Type",
       cell: ({ row }) =>
-        row
-          .getValue("leave_type")
+        (row.getValue("leave_type") as string)
           .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase()),
+          .replace(/\b\w/g, (l: string) => l.toUpperCase()),
     },
     {
       accessorKey: "max_days",
       header: "Max Days",
-      cell: ({ row }) => `${row.getValue("max_days")} days`,
+      cell: ({ row }) => `${row.getValue("max_days") as number} days`,
     },
     {
       id: "actions",

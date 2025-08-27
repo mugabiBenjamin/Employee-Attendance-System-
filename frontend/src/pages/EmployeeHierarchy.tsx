@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState } from "@/store";
 import { hierarchyApi } from "@/api/hierarchy";
@@ -9,19 +9,18 @@ import { AlertCircleIcon } from "lucide-react";
 import { Tree } from "react-d3-tree";
 import type { User, EmployeeHierarchy } from "@/api/types";
 import { z } from "zod";
-import GenericForm from "@/components/common/GenericForm";
+import GenericForm, {
+  type FormFieldConfig,
+} from "@/components/common/GenericForm";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCenteredTree } from "@/hooks/use-centered-tree"; // Assume a custom hook for centering tree
+import { useCenteredTree } from "@/hooks/use-centered-tree";
+import { setHierarchy } from "@/store/slices/hierarchySlice";
 
 interface TreeNode {
   name: string;
   children?: TreeNode[];
   id?: number;
 }
-
-// Assume a hierarchySlice with setHierarchy action
-// In store/slices/hierarchySlice.ts (not provided, but for integration)
-import { setHierarchy } from "@/store/slices/hierarchySlice"; // Hypothetical
 
 const assignSchema = z.object({
   employee_id: z.number().min(1, "Employee required"),
@@ -41,16 +40,7 @@ function EmployeeHierarchy() {
   const [loading, setLoading] = useState<boolean>(false);
   const [containerRef, translate, separation] = useCenteredTree();
 
-  useEffect(() => {
-    if (
-      user?.permissions.includes("view_team_attendance") ||
-      user?.permissions.includes("manage_employees")
-    ) {
-      fetchData();
-    }
-  }, [user]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -59,14 +49,23 @@ function EmployeeHierarchy() {
         usersApi.getUsers({}),
       ]);
       setLocalHierarchy(hierData);
-      dispatch(setHierarchy(hierData)); // Integrate with Redux
+      dispatch(setHierarchy(hierData));
       setUsers(usersData.items);
     } catch {
       setError("Failed to load hierarchy data");
     } finally {
       setLoading(false);
     }
-  };
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (
+      user?.permissions.includes("view_team_attendance") ||
+      user?.permissions.includes("manage_employees")
+    ) {
+      fetchData();
+    }
+  }, [user, fetchData]);
 
   const buildTreeData = (): TreeNode => {
     const tree: TreeNode = { name: "Organization", children: [] };
@@ -112,7 +111,10 @@ function EmployeeHierarchy() {
 
   const handleAssign = async (data: z.infer<typeof assignSchema>) => {
     try {
-      await hierarchyApi.assignManager(data);
+      await hierarchyApi.assignManager({
+        ...data,
+        effective_from: new Date().toISOString().split("T")[0], // Add required effective_from
+      });
       await fetchData(); // Refresh
     } catch {
       setError("Failed to assign manager");
@@ -133,27 +135,40 @@ function EmployeeHierarchy() {
     label: `${u.first_name} ${u.last_name} (${u.email})`,
   }));
 
-  const assignFields = [
+  // Explicit typing fixes the TS error + transform to number
+  const assignFields: FormFieldConfig<z.infer<typeof assignSchema>>[] = [
     {
       name: "employee_id",
       label: "Employee",
       type: "select",
       options: userOptions,
+      transform: {
+        fromInput: (v) => Number(v),
+        toInput: (v) => String(v ?? ""),
+      },
     },
     {
       name: "manager_id",
       label: "Manager",
       type: "select",
       options: userOptions,
+      transform: {
+        fromInput: (v) => Number(v),
+        toInput: (v) => String(v ?? ""),
+      },
     },
   ];
 
-  const removeFields = [
+  const removeFields: FormFieldConfig<z.infer<typeof removeSchema>>[] = [
     {
       name: "employee_id",
       label: "Employee",
       type: "select",
       options: userOptions,
+      transform: {
+        fromInput: (v) => Number(v),
+        toInput: (v) => String(v ?? ""),
+      },
     },
   ];
 

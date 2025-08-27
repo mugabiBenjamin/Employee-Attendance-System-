@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { overtimeApi } from "@/api/overtime";
@@ -43,61 +43,66 @@ function OvertimeForm({ editRecord, onSuccess }: OvertimeFormProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const onSubmit = async (data: OvertimeFormData) => {
-    if (!user) {
-      setError("User not authenticated");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      if (editRecord) {
-        await overtimeApi.updateOvertimeRecord(editRecord.overtime_id, {
-          ...data,
-          user_id: user.id,
-        });
-        toast("Overtime Updated", {
-          description: `Overtime record for ${format(
-            new Date(data.date),
-            "MMM d, yyyy"
-          )} updated successfully.`,
-          style: {
-            background: "var(--green-100)",
-            color: "var(--green-800)",
-          },
-          duration: 3000,
-        });
-      } else {
-        await overtimeApi.createOvertimeRecord({
-          ...data,
-          user_id: user.id,
-        });
-        toast("Overtime Created", {
-          description: `Overtime record for ${format(
-            new Date(data.date),
-            "MMM d, yyyy"
-          )} created successfully.`,
-          style: {
-            background: "var(--green-100)",
-            color: "var(--green-800)",
-          },
-          duration: 3000,
-        });
+  const onSubmit = useCallback(
+    async (data: OvertimeFormData) => {
+      if (!user) {
+        setError("User not authenticated");
+        return;
       }
-      setSuccess("Overtime request submitted successfully");
-      if (onSuccess) onSuccess();
-    } catch {
-      setError(`Failed to ${editRecord ? "update" : "create"} overtime record`);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      try {
+        if (editRecord) {
+          await overtimeApi.updateOvertimeRecord(editRecord.overtime_id, {
+            ...data,
+            user_id: user.id,
+          });
+          toast("Overtime Updated", {
+            description: `Overtime record for ${format(
+              new Date(data.date),
+              "MMM d, yyyy"
+            )} updated successfully.`,
+            style: {
+              background: "var(--green-100)",
+              color: "var(--green-800)",
+            },
+            duration: 3000,
+          });
+        } else {
+          await overtimeApi.createOvertimeRecord({
+            ...data,
+            user_id: user.id,
+          });
+          toast("Overtime Created", {
+            description: `Overtime record for ${format(
+              new Date(data.date),
+              "MMM d, yyyy"
+            )} created successfully.`,
+            style: {
+              background: "var(--green-100)",
+              color: "var(--green-800)",
+            },
+            duration: 3000,
+          });
+        }
+        setSuccess("Overtime request submitted successfully");
+        if (onSuccess) onSuccess();
+      } catch {
+        setError(
+          `Failed to ${editRecord ? "update" : "create"} overtime record`
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user, editRecord, onSuccess]
+  );
 
-  const formatDate = (date: string) => {
-    if (!date) return "";
+  const formatDate = (value: unknown): string => {
+    if (!value || typeof value !== "string") return "";
     try {
-      return format(parseISO(date), "yyyy-MM-dd");
+      return format(parseISO(value), "yyyy-MM-dd");
     } catch {
       return "";
     }
@@ -112,8 +117,10 @@ function OvertimeForm({ editRecord, onSuccess }: OvertimeFormProps) {
       description: "Date of the overtime work",
       transform: {
         toInput: formatDate,
-        fromInput: (value: string) =>
-          value ? new Date(value).toISOString() : "",
+        fromInput: (value: string | string[]) =>
+          typeof value === "string" && value
+            ? new Date(value).toISOString()
+            : "",
       },
     },
     {
@@ -123,8 +130,10 @@ function OvertimeForm({ editRecord, onSuccess }: OvertimeFormProps) {
       placeholder: "Enter hours",
       description: "Number of overtime hours (0.5 to 24)",
       transform: {
-        toInput: (value: number) => value?.toString() || "",
-        fromInput: (value: string) => (value ? parseFloat(value) : 0),
+        toInput: (value: unknown) =>
+          typeof value === "number" ? value.toString() : "",
+        fromInput: (value: string | string[]) =>
+          typeof value === "string" && value ? parseFloat(value) : 0,
       },
     },
     {

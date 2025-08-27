@@ -31,11 +31,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useEnums } from "@/hooks/useEnums";
 import { toast } from "sonner";
 
 const userSchema = z.object({
-  email: z.string().email("Invalid email address").optional(),
+  email: z.string().email("Invalid email address"),
   first_name: z.string().min(1, "First name is required"),
   last_name: z.string().min(1, "Last name is required"),
   password: z
@@ -59,7 +58,6 @@ function UserManagement() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
-  const { permissions } = useEnums();
 
   useEffect(() => {
     if (user?.permissions.includes("manage_users")) {
@@ -109,7 +107,7 @@ function UserManagement() {
 
       if (data.roles) {
         for (const roleId of data.roles) {
-          await usersApi.assignRole({ user_id: userId, role_id });
+          await usersApi.assignRole({ user_id: userId, role_id: roleId });
         }
       }
 

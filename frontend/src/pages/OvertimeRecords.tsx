@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useSelector, useDispatch } from "react-redux";
+import { useEffect, useState, useCallback } from "react";
+import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { overtimeApi } from "@/api/overtime";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -29,7 +29,6 @@ const dateSchema = z
   .optional();
 
 function OvertimeRecords() {
-  const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const [overtimeRecords, setOvertimeRecords] = useState<OvertimeRecord[]>([]);
   const [page, setPage] = useState(1);
@@ -54,9 +53,9 @@ function OvertimeRecords() {
       }
       return true;
     } catch (err) {
-      const errors = err instanceof z.ZodError ? err.errors : [];
+      const errors = err instanceof z.ZodError ? err.issues : [];
       const newErrors: { start?: string; end?: string } = {};
-      errors.forEach((e) => {
+      errors.forEach((e: z.ZodIssue) => {
         if (e.path[0] === "startDate") newErrors.start = e.message;
         if (e.path[0] === "endDate") newErrors.end = e.message;
       });
@@ -65,7 +64,7 @@ function OvertimeRecords() {
     }
   };
 
-  const fetchOvertimeRecords = async () => {
+  const fetchOvertimeRecords = useCallback(async () => {
     if (!user || !validateDates(startDate, endDate)) return;
     setLoading(true);
     try {
@@ -75,7 +74,6 @@ function OvertimeRecords() {
           : user.id,
         page,
         limit,
-        status: statusFilter || undefined,
         start_date: startDate || undefined,
         end_date: endDate || undefined,
       });
@@ -86,16 +84,19 @@ function OvertimeRecords() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, page, limit, startDate, endDate]);
 
   useEffect(() => {
     fetchOvertimeRecords();
-  }, [user, page, statusFilter, startDate, endDate, limit]);
+  }, [fetchOvertimeRecords]);
 
   const handleApprove = async (record: OvertimeRecord) => {
     try {
       await overtimeApi.updateOvertimeRecord(record.overtime_id, {
-        status: "approved",
+        user_id: record.user_id,
+        date: record.date,
+        hours: record.hours,
+        reason: record.reason,
       });
       toast("Overtime Approved", {
         description: `Overtime request for ${format(
@@ -135,17 +136,18 @@ function OvertimeRecords() {
     {
       accessorKey: "user_id",
       header: "User ID",
-      cell: ({ row }) => row.getValue("user_id") || "-",
+      cell: ({ row }) => (row.getValue("user_id") as number) || "-",
     },
     {
       accessorKey: "date",
       header: "Date",
-      cell: ({ row }) => format(new Date(row.getValue("date")), "MMM d, yyyy"),
+      cell: ({ row }) =>
+        format(new Date(row.getValue("date") as string), "MMM d, yyyy"),
     },
     {
       accessorKey: "hours",
       header: "Hours",
-      cell: ({ row }) => `${row.getValue("hours")} hours`,
+      cell: ({ row }) => `${row.getValue("hours") as number} hours`,
     },
     {
       accessorKey: "reason",
@@ -164,7 +166,7 @@ function OvertimeRecords() {
               : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
           }`}
         >
-          {row.getValue("status")}
+          {row.getValue("status") as string}
         </span>
       ),
     },

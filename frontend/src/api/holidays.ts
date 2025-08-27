@@ -5,6 +5,7 @@ interface HolidayQuery {
     year?: number;
     page?: number;
     limit?: number;
+    search?: string;
 }
 
 interface HolidayData {
@@ -32,4 +33,10 @@ export const holidaysApi = {
     deleteHoliday: async (id: number): Promise<void> => {
         await api.delete(`/holiday-calendar/${id}`);
     },
+
+
+    async getHolidayById(id: number): Promise<Holiday> {
+        const response = await api.get(`/holiday-calendar/${id}`);
+        return response.data;
+    }
 };

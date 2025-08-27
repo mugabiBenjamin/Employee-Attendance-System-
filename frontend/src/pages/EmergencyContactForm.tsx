@@ -12,6 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { EmergencyContact } from "@/api/types";
+import type { EmergencyQuery } from "@/api/emergency";
 
 const emergencyContactSchema = z.object({
   user_id: z.number().min(1, "User ID is required"),
@@ -44,8 +45,12 @@ function EmergencyContactForm() {
     if (id && user?.permissions.includes("manage_employees")) {
       setFetchLoading(true);
       emergencyApi
-        .getEmergencyContactById(parseInt(id))
-        .then((contact: EmergencyContact) => {
+        .getEmergencyContacts({ id: parseInt(id) } as EmergencyQuery)
+        .then((response) => {
+          const contact: EmergencyContact = response.items[0];
+          if (!contact) {
+            throw new Error("Emergency contact not found");
+          }
           setDefaultValues({
             user_id: contact.user_id,
             name: contact.name,

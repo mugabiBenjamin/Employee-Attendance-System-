@@ -27,6 +27,8 @@ interface LeaveApprovalData {
 interface LeaveBalanceQuery {
     user_id?: number;
     leave_type?: LeaveType;
+    page?: number;
+    limit?: number;
 }
 
 interface LeavePolicyQuery {
@@ -70,5 +72,14 @@ export const leaveApi = {
     createLeavePolicy: async (data: LeavePolicyData): Promise<LeavePolicy> => {
         const response = await api.post<LeavePolicy>('/leave-policies', data);
         return response.data;
+    },
+
+    updateLeavePolicy: async (id: number, data: LeavePolicyData): Promise<LeavePolicy> => {
+        const response = await api.put<LeavePolicy>(`/leave-policies/${id}`, data);
+        return response.data;
+    },
+
+    deleteLeavePolicy: async (id: number): Promise<void> => {
+        await api.delete(`/leave-policies/${id}`);
     },
 };

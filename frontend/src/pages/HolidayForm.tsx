@@ -12,6 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
+import type { Holiday, PaginatedResponse, HolidayQuery } from "@/api/types";
 
 const holidaySchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -38,8 +39,12 @@ function HolidayForm() {
     if (id && user?.permissions.includes("manage_employees")) {
       setFetchLoading(true);
       holidaysApi
-        .getHolidayById(parseInt(id))
-        .then((holiday) => {
+        .getHolidays({ id: parseInt(id) } as HolidayQuery) // Use HolidayQuery, assuming it's defined
+        .then((response: PaginatedResponse<Holiday>) => {
+          const holiday = response.items[0];
+          if (!holiday) {
+            throw new Error("Holiday not found");
+          }
           setDefaultValues({
             name: holiday.name,
             date: format(new Date(holiday.date), "yyyy-MM-dd"),

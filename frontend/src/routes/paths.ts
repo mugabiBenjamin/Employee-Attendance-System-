@@ -15,5 +15,10 @@ export const ROUTES = {
   SHIFT_PATTERN_EDIT: "/shift-patterns/edit/:id?",
   SYSTEM_LOGS: "/system-logs",
   USER_MANAGEMENT: "/user-management",
+  OVERTIME_RECORDS: "/overtime-records",
+  LEAVE_REQUEST: "/leave-request",
+  LEAVE_BALANCES: "/leave-balances",
+  LEAVE_POLICIES: "/leave-policies",
+  HOLIDAYS: "/holidays",
   NOT_FOUND: "*",
 };

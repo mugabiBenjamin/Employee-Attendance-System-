@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { leaveApi } from "@/api/leave";
@@ -11,6 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon, CheckCircle2 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { useLeaveTypeOptions } from "@/hooks/useEnums";
+import type { LeaveType } from "@/api/types";
 
 const leaveRequestSchema = z.object({
   start_date: z.string().min(1, "Start date is required"),
@@ -18,12 +19,12 @@ const leaveRequestSchema = z.object({
     .string()
     .min(1, "End date is required")
     .refine(
-      (endDate, ctx) => {
-        const start = new Date(ctx.parent.start_date);
-        const end = new Date(endDate);
+      (data) => {
+        const start = new Date(data.start_date);
+        const end = new Date(data.end_date);
         return end >= start;
       },
-      { message: "End date must be after start date" }
+      { message: "End date must be after start date", path: ["end_date"] }
     ),
   leave_type: z.enum([
     "annual",
@@ -37,7 +38,7 @@ const leaveRequestSchema = z.object({
     "bereavement",
     "leave_of_absence",
     "public_holiday",
-  ]),
+  ] as const satisfies LeaveType[]),
   reason: z.string().min(1, "Reason is required"),
 });
 
@@ -50,28 +51,34 @@ function LeaveRequestForm() {
   const [loading, setLoading] = useState(false);
   const leaveTypeOptions = useLeaveTypeOptions();
 
-  const onSubmit = async (data: LeaveRequestFormData) => {
-    if (!user) {
-      setError("User not authenticated");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      await leaveApi.createLeaveRequest({
-        ...data,
-        user_id: user.id,
-      });
-      setSuccess("Leave request submitted successfully");
-    } catch {
-      setError("Failed to submit leave request");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const onSubmit = useCallback(
+    async (data: LeaveRequestFormData) => {
+      if (!user) {
+        setError("User not authenticated");
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      try {
+        await leaveApi.createLeaveRequest({
+          ...data,
+          user_id: user.id,
+        });
+        setSuccess("Leave request submitted successfully");
+      } catch {
+        setError("Failed to submit leave request");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user]
+  );
 
-  const formatDateTime = (dateTime: string) => {
+  const formatDateTime = (value: unknown): string => {
+    if (!value || (Array.isArray(value) && value.length === 0)) return "";
+    const dateTime =
+      typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
     if (!dateTime) return "";
     try {
       return format(parseISO(dateTime), "yyyy-MM-dd");
@@ -88,9 +95,11 @@ function LeaveRequestForm() {
       placeholder: "Select start date",
       description: "Start date of the leave",
       transform: {
-        toInput: formatDateTime,
-        fromInput: (value: string) =>
-          value ? new Date(value).toISOString() : "",
+        toInput: (value: unknown) => formatDateTime(value),
+        fromInput: (value: string | string[]) => {
+          const dateValue = typeof value === "string" ? value : value[0] || "";
+          return dateValue ? new Date(dateValue).toISOString() : "";
+        },
       },
     },
     {
@@ -100,9 +109,11 @@ function LeaveRequestForm() {
       placeholder: "Select end date",
       description: "End date of the leave",
       transform: {
-        toInput: formatDateTime,
-        fromInput: (value: string) =>
-          value ? new Date(value).toISOString() : "",
+        toInput: (value: unknown) => formatDateTime(value),
+        fromInput: (value: string | string[]) => {
+          const dateValue = typeof value === "string" ? value : value[0] || "";
+          return dateValue ? new Date(dateValue).toISOString() : "";
+        },
       },
     },
     {

@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState } from "@/store";
 import { attendanceApi } from "@/api/attendance";
 import { setSummary } from "@/store/slices/attendanceSlice";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ function AttendanceSummary() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
@@ -28,11 +28,11 @@ function AttendanceSummary() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, dispatch]);
 
   useEffect(() => {
     fetchSummary();
-  }, [user, dispatch]);
+  }, [fetchSummary]);
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">

@@ -1,10 +1,12 @@
 import { api } from './index';
 import type { EmergencyContact, PaginatedResponse } from './types';
 
-interface EmergencyQuery {
+export interface EmergencyQuery {
+  id?: number;
   user_id?: number;
   page?: number;
   limit?: number;
+  search?: string;
 }
 
 interface EmergencyContactData {

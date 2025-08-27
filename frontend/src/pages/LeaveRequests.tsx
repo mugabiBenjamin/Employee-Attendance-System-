@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
-import { useSelector, useDispatch } from "react-redux";
+import { useEffect, useState, useCallback } from "react";
+import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { leaveApi } from "@/api/leave";
-import { setHistory } from "@/store/slices/attendanceSlice";
 import type { ColumnDef } from "@tanstack/react-table";
 import { format, isValid } from "date-fns";
 import { z } from "zod";
@@ -31,7 +30,6 @@ const dateSchema = z
   .optional();
 
 function LeaveRequests() {
-  const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [page, setPage] = useState(1);
@@ -57,9 +55,9 @@ function LeaveRequests() {
       }
       return true;
     } catch (err) {
-      const errors = err instanceof z.ZodError ? err.errors : [];
+      const errors = err instanceof z.ZodError ? err.issues : [];
       const newErrors: { start?: string; end?: string } = {};
-      errors.forEach((e) => {
+      errors.forEach((e: z.ZodIssue) => {
         if (e.path[0] === "startDate") newErrors.start = e.message;
         if (e.path[0] === "endDate") newErrors.end = e.message;
       });
@@ -68,7 +66,7 @@ function LeaveRequests() {
     }
   };
 
-  const fetchLeaveRequests = async () => {
+  const fetchLeaveRequests = useCallback(async () => {
     if (!user || !validateDates(startDate, endDate)) return;
     setLoading(true);
     try {
@@ -83,18 +81,17 @@ function LeaveRequests() {
         end_date: endDate || undefined,
       });
       setLeaveRequests(data.items);
-      dispatch(setHistory(data));
       setError(null);
     } catch {
       setError("Failed to load leave requests");
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, page, limit, statusFilter, startDate, endDate]);
 
   useEffect(() => {
     fetchLeaveRequests();
-  }, [user, page, statusFilter, startDate, endDate, limit, dispatch]);
+  }, [fetchLeaveRequests]);
 
   const handleApprove = async (leaveRequest: LeaveRequest) => {
     try {
@@ -121,28 +118,27 @@ function LeaveRequests() {
     {
       accessorKey: "user_id",
       header: "User ID",
-      cell: ({ row }) => row.getValue("user_id") || "-",
+      cell: ({ row }) => (row.getValue("user_id") as number) || "-",
     },
     {
       accessorKey: "start_date",
       header: "Start Date",
       cell: ({ row }) =>
-        format(new Date(row.getValue("start_date")), "MMM d, yyyy"),
+        format(new Date(row.getValue("start_date") as string), "MMM d, yyyy"),
     },
     {
       accessorKey: "end_date",
       header: "End Date",
       cell: ({ row }) =>
-        format(new Date(row.getValue("end_date")), "MMM d, yyyy"),
+        format(new Date(row.getValue("end_date") as string), "MMM d, yyyy"),
     },
     {
       accessorKey: "leave_type",
       header: "Leave Type",
       cell: ({ row }) =>
-        row
-          .getValue("leave_type")
+        (row.getValue("leave_type") as string)
           .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase()),
+          .replace(/\b\w/g, (l: string) => l.toUpperCase()),
     },
     {
       accessorKey: "status",
@@ -157,7 +153,7 @@ function LeaveRequests() {
               : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
           }`}
         >
-          {row.getValue("status")}
+          {row.getValue("status") as string}
         </span>
       ),
     },

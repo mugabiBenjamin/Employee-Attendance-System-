@@ -132,7 +132,7 @@ function Dashboard() {
                 <Users className="h-8 w-8 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                {user.permissions.includes("view_team_attendance") ? (
+                {user && user.permissions.includes("view_team_attendance") ? (
                   <div className="flex items-center space-x-2">
                     <UserCheck className="h-4 w-4 text-green-500" />
                     <span className="text-sm">

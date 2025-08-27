@@ -4,11 +4,14 @@ import type { RootState } from "@/store";
 import { departmentsApi } from "@/api/departments";
 import { z } from "zod";
 import { useParams, useNavigate } from "react-router-dom";
-import GenericForm, { type FormFieldConfig } from "@/components/common/GenericForm";
+import GenericForm, {
+  type FormFieldConfig,
+} from "@/components/common/GenericForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { Department } from "@/api/types";
 
 const departmentSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -32,9 +35,16 @@ function DepartmentForm() {
   useEffect(() => {
     if (id && user?.permissions.includes("manage_departments")) {
       setFetchLoading(true);
+      // Note: The backend API does not support direct ID filtering. Consider adding a `getDepartmentById` endpoint for efficiency.
       departmentsApi
-        .getDepartmentById(parseInt(id))
-        .then((department) => {
+        .getDepartments({ page: 1, limit: 100 }) // Fetch a reasonable number of departments
+        .then((response) => {
+          const department = response.items.find(
+            (d: Department) => d.department_id === parseInt(id)
+          );
+          if (!department) {
+            throw new Error("Department not found");
+          }
           setDefaultValues({
             name: department.name,
             description: department.description || "",

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { emergencyApi } from "@/api/emergency";
@@ -41,7 +41,7 @@ function EmergencyContactsList() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState<string>("");
 
-  const fetchContacts = async () => {
+  const fetchContacts = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -59,13 +59,13 @@ function EmergencyContactsList() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, page, limit, search]);
 
   useEffect(() => {
     if (user) {
       fetchContacts();
     }
-  }, [user, page, limit, search]);
+  }, [user, fetchContacts]);
 
   const handleDelete = async () => {
     if (!deleteId) return;

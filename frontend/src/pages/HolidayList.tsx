@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { holidaysApi } from "@/api/holidays";
@@ -43,7 +43,7 @@ function HolidaysList() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState<string>("");
 
-  const fetchHolidays = async () => {
+  const fetchHolidays = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -54,13 +54,13 @@ function HolidaysList() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, limit, search]);
 
   useEffect(() => {
     if (user?.permissions.includes("manage_employees")) {
       fetchHolidays();
     }
-  }, [user, page, limit, search]);
+  }, [user, fetchHolidays]);
 
   const handleDelete = async () => {
     if (!deleteId) return;

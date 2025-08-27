@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useEnums } from "@/hooks/use-enums"; // Assume a hook for fetching enums
 
 const shiftPatternSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -26,7 +25,6 @@ function ShiftPatternForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
-  const { enums } = useEnums(); // Fetch enums for days
   const [defaultValues, setDefaultValues] = useState<ShiftPatternFormData>({
     name: "",
     start_time: "",
@@ -41,15 +39,22 @@ function ShiftPatternForm() {
     if (id && user?.permissions.includes("manage_employees")) {
       setFetchLoading(true);
       shiftsApi
-        .getShiftPatternById(parseInt(id))
-        .then((shift) => {
-          setDefaultValues({
-            name: shift.name,
-            start_time: shift.start_time,
-            end_time: shift.end_time,
-            days: shift.days,
-          });
-          setError(null);
+        .getShiftPatterns({ limit: 1, page: 1 })
+        .then((response) => {
+          const shift = response.items.find(
+            (item) => item.shift_pattern_id === parseInt(id)
+          );
+          if (shift) {
+            setDefaultValues({
+              name: shift.name,
+              start_time: shift.start_time,
+              end_time: shift.end_time,
+              days: shift.days,
+            });
+            setError(null);
+          } else {
+            setError("Shift pattern not found");
+          }
         })
         .catch(() => {
           setError("Failed to load shift pattern data");
@@ -75,10 +80,7 @@ function ShiftPatternForm() {
     }
   };
 
-  const dayOptions = enums?.days?.map((day: string) => ({
-    value: day,
-    label: day,
-  })) || [
+  const dayOptions = [
     { value: "Monday", label: "Monday" },
     { value: "Tuesday", label: "Tuesday" },
     { value: "Wednesday", label: "Wednesday" },

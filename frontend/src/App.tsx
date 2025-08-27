@@ -26,6 +26,11 @@ const ShiftPatternsList = lazy(() => import("./pages/ShiftPatternsList"));
 const ShiftPatternForm = lazy(() => import("./pages/ShiftPatternForm"));
 const SystemLogs = lazy(() => import("./pages/SystemLogs"));
 const UserManagement = lazy(() => import("./pages/UserManagement"));
+const OvertimeRecords = lazy(() => import("./pages/OvertimeRecords"));
+const LeaveRequestForm = lazy(() => import("./pages/LeaveRequestForm"));
+const LeaveBalances = lazy(() => import("./pages/LeaveBalances"));
+const LeavePolicies = lazy(() => import("./pages/LeavePolicies"));
+const HolidayList = lazy(() => import("./pages/HolidayList"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function App() {
@@ -205,6 +210,68 @@ function App() {
                       }
                     >
                       <UserManagement />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.OVERTIME_RECORDS}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        [
+                          "view_own_attendance",
+                          "manage_overtime",
+                        ] as Permission[]
+                      }
+                    >
+                      <OvertimeRecords />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_REQUEST}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["request_leave"] as Permission[]}
+                    >
+                      <LeaveRequestForm />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_BALANCES}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        [
+                          "view_own_attendance",
+                          "manage_employees",
+                        ] as Permission[]
+                      }
+                    >
+                      <LeaveBalances />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_POLICIES}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        ["manage_leave_policies"] as Permission[]
+                      }
+                    >
+                      <LeavePolicies />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.HOLIDAYS}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["manage_employees"] as Permission[]}
+                    >
+                      <HolidayList />
                     </ProtectedRoute>
                   }
                 />

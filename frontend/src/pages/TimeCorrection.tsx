@@ -80,10 +80,10 @@ function TimeCorrection() {
     }
   };
 
-  const formatDateTime = (dateTime: string) => {
-    if (!dateTime) return "";
+  const formatDateTime = (value: unknown): string => {
+    if (typeof value !== "string" || !value) return "";
     try {
-      return format(parseISO(dateTime), "yyyy-MM-dd'T'HH:mm");
+      return format(parseISO(value), "yyyy-MM-dd'T'HH:mm");
     } catch {
       return "";
     }
@@ -113,8 +113,10 @@ function TimeCorrection() {
       description: "Corrected clock-in time (optional)",
       transform: {
         toInput: formatDateTime,
-        fromInput: (value: string) =>
-          value ? new Date(value).toISOString() : "",
+        fromInput: (value: string | string[]): unknown =>
+          typeof value === "string" && value
+            ? new Date(value).toISOString()
+            : "",
       },
     },
     {
@@ -125,8 +127,10 @@ function TimeCorrection() {
       description: "Corrected clock-out time (optional)",
       transform: {
         toInput: formatDateTime,
-        fromInput: (value: string) =>
-          value ? new Date(value).toISOString() : "",
+        fromInput: (value: string | string[]): unknown =>
+          typeof value === "string" && value
+            ? new Date(value).toISOString()
+            : "",
       },
     },
     {

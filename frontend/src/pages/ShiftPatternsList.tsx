@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { shiftsApi } from "@/api/shifts";
@@ -41,7 +41,7 @@ function ShiftPatternsList() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState<string>("");
 
-  const fetchShiftPatterns = async () => {
+  const fetchShiftPatterns = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -52,13 +52,13 @@ function ShiftPatternsList() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, limit]);
 
   useEffect(() => {
     if (user?.permissions.includes("manage_employees")) {
       fetchShiftPatterns();
     }
-  }, [user, page, limit]);
+  }, [user, page, limit, fetchShiftPatterns]);
 
   const handleDelete = async () => {
     if (!deleteId) return;

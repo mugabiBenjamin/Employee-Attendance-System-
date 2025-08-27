@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { departmentsApi } from "@/api/departments";
@@ -38,7 +38,7 @@ function DepartmentsList() {
   const [loading, setLoading] = useState<boolean>(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const fetchDepartments = async () => {
+  const fetchDepartments = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -49,13 +49,13 @@ function DepartmentsList() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, limit]);
 
   useEffect(() => {
     if (user?.permissions.includes("manage_departments")) {
       fetchDepartments();
     }
-  }, [user, page, limit]);
+  }, [user, fetchDepartments]);
 
   const handleDelete = async () => {
     if (!deleteId) return;

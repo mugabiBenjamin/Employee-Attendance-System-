@@ -43,6 +43,7 @@ interface GenericTableProps<T> {
   data: T[];
   columns: ColumnDef<T>[];
   filterColumn?: string;
+  globalFilter?: string;
   enableSelection?: boolean;
   enableColumnVisibility?: boolean;
   onSelectionChange?: (selectedRows: T[]) => void;
@@ -54,6 +55,7 @@ function GenericTable<T>({
   data,
   columns,
   filterColumn,
+  globalFilter,
   enableSelection = false,
   enableColumnVisibility = false,
   onSelectionChange,
@@ -154,6 +156,7 @@ function GenericTable<T>({
       columnVisibility,
       rowSelection,
       pagination: { pageIndex: 0, pageSize },
+      globalFilter,
     },
   });
 
@@ -165,6 +168,10 @@ function GenericTable<T>({
       onSelectionChange(selectedRows);
     }
   }, [rowSelection, enableSelection, onSelectionChange, table]);
+
+  React.useEffect(() => {
+    table.setGlobalFilter(globalFilter);
+  }, [globalFilter, table]);
 
   return (
     <div className="w-full" aria-label="Data table">

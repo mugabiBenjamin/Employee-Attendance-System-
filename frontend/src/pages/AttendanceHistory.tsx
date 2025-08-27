@@ -53,7 +53,7 @@ function AttendanceHistory() {
       }
       return true;
     } catch (err) {
-      const errors = err instanceof z.ZodError ? err.errors : [];
+      const errors = err instanceof z.ZodError ? err.issues : [];
       const newErrors: { start?: string; end?: string } = {};
       errors.forEach((e) => {
         if (e.path[0] === "startDate") newErrors.start = e.message;
@@ -140,7 +140,9 @@ function AttendanceHistory() {
             type="date"
             placeholder="Start Date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setStartDate(e.target.value)
+            }
             className={dateError.start ? "border-destructive" : ""}
           />
           {dateError.start && (
@@ -152,7 +154,9 @@ function AttendanceHistory() {
             type="date"
             placeholder="End Date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setEndDate(e.target.value)
+            }
             className={dateError.end ? "border-destructive" : ""}
           />
           {dateError.end && (

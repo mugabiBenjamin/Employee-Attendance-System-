@@ -60,7 +60,7 @@ function AttendanceClock() {
             disabled={loading}
             className="relative"
           >
-            {loading && type === "in" ? (
+            {loading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -73,7 +73,7 @@ function AttendanceClock() {
             variant="outline"
             className="relative"
           >
-            {loading && type === "out" ? (
+            {loading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <CheckCircle2 className="mr-2 h-4 w-4" />

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useSelector, useDispatch } from "react-redux";
+import { useEffect, useState, useCallback } from "react";
+import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { leaveApi } from "@/api/leave";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -19,7 +19,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { LeaveBalance } from "@/api/types";
 
 function LeaveBalances() {
-  const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [page, setPage] = useState(1);
@@ -27,7 +26,7 @@ function LeaveBalances() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
-  const fetchLeaveBalances = async () => {
+  const fetchLeaveBalances = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
@@ -40,42 +39,40 @@ function LeaveBalances() {
         limit,
       });
       setLeaveBalances(data.items);
-      // Optionally dispatch to Redux if needed
     } catch {
       setError("Failed to load leave balances");
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, page, limit]);
 
   useEffect(() => {
     fetchLeaveBalances();
-  }, [user, page, limit, dispatch]);
+  }, [fetchLeaveBalances]);
 
   const columns: ColumnDef<LeaveBalance>[] = [
     {
       accessorKey: "user_id",
       header: "User ID",
-      cell: ({ row }) => row.getValue("user_id") || "-",
+      cell: ({ row }) => (row.getValue("user_id") as number) || "-",
     },
     {
       accessorKey: "leave_type",
       header: "Leave Type",
       cell: ({ row }) =>
-        row
-          .getValue("leave_type")
+        (row.getValue("leave_type") as string)
           .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase()),
+          .replace(/\b\w/g, (l: string) => l.toUpperCase()),
     },
     {
       accessorKey: "balance",
       header: "Remaining Balance",
-      cell: ({ row }) => `${row.getValue("balance")} days`,
+      cell: ({ row }) => `${row.getValue("balance") as number} days`,
     },
     {
       accessorKey: "used",
       header: "Used",
-      cell: ({ row }) => `${row.getValue("used")} days`,
+      cell: ({ row }) => `${row.getValue("used") as number} days`,
     },
   ];
 

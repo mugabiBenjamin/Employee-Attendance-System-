@@ -1,4 +1,3 @@
-// CORE MODELS
 export interface User {
   id: number;
   email: string;
@@ -150,6 +149,7 @@ export interface EmployeeHierarchy {
   hierarchy_id: number;
   employee_id: number;
   manager_id: number;
+  effective_from: string; // Added based on previous error in EmployeeHierarchy.tsx
 }
 
 // SHIFTS
@@ -201,6 +201,13 @@ export interface Holiday {
   is_active: boolean;
   created_at: string;
   updated_at?: string;
+}
+
+export interface HolidayQuery {
+  id?: number;
+  page?: number;
+  limit?: number;
+  search?: string; // Added to support HolidaysList.tsx
 }
 
 // API RESPONSE WRAPPERS
