@@ -4,10 +4,10 @@ import { useSelector } from "react-redux";
 import { AuthContext } from "@/context/AuthContext";
 import type { RootState } from "@/store";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Permission } from "@/api/enums"; // ✅ Import the backend-enum-mapped Permission type
+import type { Permission } from "@/api/types";
 
 interface ProtectedRouteProps {
-  requiredPermissions: Permission[]; // ✅ Strongly typed with Permission
+  requiredPermissions: Permission[];
   children?: ReactNode;
 }
 

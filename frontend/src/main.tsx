@@ -8,6 +8,7 @@ import { setAuth } from "./store/slices/authSlice";
 import { authApi } from "./api/auth";
 import { enumsCache } from "./lib/enumsCache";
 import { enumsApi } from "./api/enums";
+import ErrorBoundary from "./components/common/ErrorBoundary.tsx";
 
 // Initialize auth and enums before rendering
 const initializeAuth = async () => {
@@ -54,7 +55,9 @@ if (!rootElement) {
     createRoot(rootElement).render(
       <StrictMode>
         <Provider store={store}>
-          <App />
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
         </Provider>
       </StrictMode>
     );
