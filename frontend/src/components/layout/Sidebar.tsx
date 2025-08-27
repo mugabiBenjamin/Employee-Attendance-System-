@@ -47,7 +47,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         { title: "Summary", url: "/attendance/summary" },
       ],
     },
-    ...(user?.permissions.includes("manage_departments")
+    ...(user?.permissions?.includes("manage_departments")
       ? [
           {
             title: "Departments",
@@ -60,7 +60,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions.includes("manage_employees")
+    ...(user?.permissions?.includes("manage_employees")
       ? [
           {
             title: "Emergency Contacts",
@@ -96,8 +96,8 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions.includes("view_own_attendance") ||
-    user?.permissions.includes("manage_overtime")
+    ...(user?.permissions?.includes("view_own_attendance") ||
+    user?.permissions?.includes("manage_overtime")
       ? [
           {
             title: "Overtime",
@@ -110,34 +110,34 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions.includes("request_leave") ||
-    user?.permissions.includes("manage_employees") ||
-    user?.permissions.includes("manage_leave_policies")
+    ...(user?.permissions?.includes("request_leave") ||
+    user?.permissions?.includes("manage_employees") ||
+    user?.permissions?.includes("manage_leave_policies")
       ? [
           {
             title: "Leaves",
             url: "/leave-request",
             icon: Calendar,
             items: [
-              ...(user?.permissions.includes("request_leave")
+              ...(user?.permissions?.includes("request_leave")
                 ? [{ title: "Request Leave", url: "/leave-request" }]
                 : []),
-              ...(user?.permissions.includes("manage_employees") ||
-              user?.permissions.includes("manage_leave_policies")
+              ...(user?.permissions?.includes("manage_employees") ||
+              user?.permissions?.includes("manage_leave_policies")
                 ? [{ title: "Leave Requests", url: "/leave-requests" }]
                 : []),
-              ...(user?.permissions.includes("view_own_attendance") ||
-              user?.permissions.includes("manage_employees")
+              ...(user?.permissions?.includes("view_own_attendance") ||
+              user?.permissions?.includes("manage_employees")
                 ? [{ title: "Leave Balances", url: "/leave-balances" }]
                 : []),
-              ...(user?.permissions.includes("manage_leave_policies")
+              ...(user?.permissions?.includes("manage_leave_policies")
                 ? [{ title: "Leave Policies", url: "/leave-policies" }]
                 : []),
             ],
           },
         ]
       : []),
-    ...(user?.permissions.includes("view_logs")
+    ...(user?.permissions?.includes("view_logs")
       ? [
           {
             title: "System Logs",
@@ -146,7 +146,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions.includes("manage_users")
+    ...(user?.permissions?.includes("manage_users")
       ? [
           {
             title: "User Management",
