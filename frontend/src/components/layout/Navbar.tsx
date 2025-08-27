@@ -43,35 +43,29 @@ function Navbar() {
   };
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-2 px-4 bg-background border-b">
+    <header className="flex h-16 shrink-0 items-center gap-2 px-4 bg-background border-b overflow-hidden">
       <div className="flex items-center gap-2">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mr-2 h-4" />
       </div>
 
       <div className="flex-1 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          {/* Greeting */}
-          {user && (
-            <span className="hidden sm:inline text-sm font-medium">
-              {getGreeting()}, {user?.first_name}
-            </span>
-          )}
+        {/* Greeting */}
+        {user && (
+          <span className="hidden sm:inline text-lg font-bold">
+            {getGreeting()}, {user?.first_name}
+          </span>
+        )}
 
-          {/* Search - responsive */}
-          <div className="relative">
-            <div className="hidden sm:block">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search..."
-                className="pl-8 w-64"
-              />
-            </div>
-            <Button variant="ghost" size="icon" className="sm:hidden">
-              <Search className="h-4 w-4" />
-            </Button>
+        {/* Search - responsive */}
+        <div className="relative">
+          <div className="hidden sm:block">
+            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input type="text" placeholder="Search..." className="pl-8 w-64" />
           </div>
+          <Button variant="ghost" size="icon" className="sm:hidden">
+            <Search className="h-4 w-4" />
+          </Button>
         </div>
 
         {user && (
