@@ -22,6 +22,8 @@ import {
   Settings,
   UserCog,
   GalleryVerticalEnd,
+  FileClock,
+  CalendarCheck,
 } from "lucide-react";
 
 function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -83,13 +85,68 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             url: "/employee-hierarchy",
             icon: Users,
           },
+          {
+            title: "Holidays",
+            url: "/holidays",
+            icon: CalendarCheck,
+          },
+        ]
+      : []),
+    ...(user?.permissions.includes("view_own_attendance") ||
+    user?.permissions.includes("manage_overtime")
+      ? [
+          {
+            title: "Overtime Records",
+            url: "/overtime-records",
+            icon: FileClock,
+          },
+        ]
+      : []),
+    ...(user?.permissions.includes("request_leave")
+      ? [
+          {
+            title: "Leave Request",
+            url: "/leave-request",
+            icon: Calendar,
+          },
+        ]
+      : []),
+    ...(user?.permissions.includes("view_own_attendance") ||
+    user?.permissions.includes("manage_employees")
+      ? [
+          {
+            title: "Leave Balances",
+            url: "/leave-balances",
+            icon: FileText,
+          },
+        ]
+      : []),
+    ...(user?.permissions.includes("manage_leave_policies")
+      ? [
+          {
+            title: "Leave Policies",
+            url: "/leave-policies",
+            icon: FileText,
+          },
         ]
       : []),
     ...(user?.permissions.includes("view_logs")
-      ? [{ title: "System Logs", url: "/system-logs", icon: Settings }]
+      ? [
+          {
+            title: "System Logs",
+            url: "/system-logs",
+            icon: Settings,
+          },
+        ]
       : []),
     ...(user?.permissions.includes("manage_users")
-      ? [{ title: "User Management", url: "/user-management", icon: UserCog }]
+      ? [
+          {
+            title: "User Management",
+            url: "/user-management",
+            icon: UserCog,
+          },
+        ]
       : []),
   ];
 
