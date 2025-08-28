@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Provider } from "react-redux";
 import "./index.css";
 import App from "./App.tsx";
-import store from "./store";
+import { store } from "./store";
 import { setAuth } from "./store/slices/authSlice";
 import { authApi } from "./api/auth";
 import { enumsCache } from "./lib/enumsCache";

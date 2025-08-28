@@ -25,9 +25,21 @@ import {
   FileClock,
   CalendarCheck,
 } from "lucide-react";
+import { enumsApi } from "@/api/enums";
 
 function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const user = useSelector((state: RootState) => state.auth.user);
+
+  // Log user and permissions for debugging
+  React.useEffect(() => {
+    console.log("User:", user);
+    console.log("User Permissions:", user?.permissions || []);
+
+    // Fetch all available permissions for comparison
+  enumsApi.getPermissions().then(allPermissions => {
+    console.log("All Available Permissions:", allPermissions);
+  });
+}, [user]);
 
   const navItems = [
     {
@@ -155,7 +167,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-  ];
+  ].filter(Boolean); // Remove any undefined/null entries
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -182,8 +194,8 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarFooter>
         <NavUser
           user={{
-            name: user?.first_name || "",
-            email: user?.email || "",
+            name: user?.first_name || "Guest",
+            email: user?.email || "N/A",
             avatar: "",
           }}
         />
