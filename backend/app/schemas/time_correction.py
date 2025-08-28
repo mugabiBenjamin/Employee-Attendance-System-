@@ -80,7 +80,10 @@ class TimeCorrectionOut(TimeCorrectionBase):
     created_at: datetime = Field(..., description="Timestamp when the correction was created")
     updated_at: Optional[datetime] = Field(None, description="Timestamp when the correction was last updated")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
 class TimeCorrectionApproval(BaseModel):
     status: CorrectionStatus = Field(..., description="Approval status (APPROVED or REJECTED)")

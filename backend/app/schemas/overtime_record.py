@@ -117,7 +117,10 @@ class OvertimeRecordOut(OvertimeRecordBase):
             raise ValidationError(detail=f"{info.field_name.capitalize()} must include timezone")
         return value
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
 class OvertimeRecordApproval(BaseModel):
     status: OvertimeStatus = Field(..., description="Approval status")

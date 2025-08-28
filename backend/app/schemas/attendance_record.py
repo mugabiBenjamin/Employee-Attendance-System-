@@ -99,7 +99,10 @@ class AttendanceRecordOut(AttendanceRecordBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
 class ClockInOut(BaseModel):
     action: str

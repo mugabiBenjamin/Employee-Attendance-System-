@@ -56,4 +56,7 @@ class DepartmentOut(DepartmentBase):
     created_at: datetime = Field(..., description="Timestamp when the department was created")
     updated_at: Optional[datetime] = Field(None, description="Timestamp when the department was last updated")
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )

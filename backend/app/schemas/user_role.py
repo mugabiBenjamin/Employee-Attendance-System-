@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, List
 from app.core.exceptions import ValidationError
 
@@ -51,7 +51,10 @@ class UserRoleOut(UserRoleBase):
     assigned_at: datetime = Field(..., description="Timestamp when the role was assigned")
     updated_at: Optional[datetime] = Field(None, description="Timestamp when the role assignment was last updated")
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
 
 class UserProfile(BaseModel):
     user_id: int = Field(..., description="ID of the user")
@@ -62,4 +65,3 @@ class UserProfile(BaseModel):
     roles: List[str] = Field(default_factory=list, description="List of role names assigned to the user")
     permissions: dict = Field(default_factory=dict, description="Permissions granted to the user")
     
-    model_config = ConfigDict(from_attributes=True)
