@@ -23,7 +23,7 @@ from app.core.enums import SystemAction, LeaveRequestStatus, Permission, LeaveTy
 from app.core.mail import send_email
 from app.core.exceptions import DatabaseError, LeaveApprovalWorkflowError, UserNotFoundError, ValidationError, LeaveRequestNotFoundError, LeaveBalanceNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_request_exists, validate_user_exists
 from app.core.utils import get_request_id
@@ -69,7 +69,7 @@ async def approve_or_reject_leave(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.APPROVE_LEAVE]))
+    _= Depends(require_permissions_dependency([Permission.APPROVE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
     """Approve or reject a leave request with validation, logging, and notification."""
     try:
@@ -264,7 +264,7 @@ async def get_leave_approval(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_APPROVAL]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> LeaveApprovalWorkflowOut:
     """Retrieve a leave approval by ID with authorization checks and caching."""
     try:
@@ -344,7 +344,7 @@ async def get_leave_approvals_by_request(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_APPROVAL]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> List[LeaveApprovalWorkflowOut]:
     """Retrieve a list of approvals for a leave request with pagination and caching."""
     try:
@@ -436,7 +436,7 @@ async def update_leave_approval(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.MANAGE_LEAVE]))
+    _= Depends(require_permissions_dependency([Permission.MANAGE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
     """Update a leave approval workflow entry with validation, logging, and notification."""
     try:
@@ -648,7 +648,7 @@ async def delete_leave_approval(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.MANAGE_LEAVE]))
+    _= Depends(require_permissions_dependency([Permission.MANAGE_LEAVE]))
 ) -> None:
     """Soft delete a leave approval workflow entry with logging and notification."""
     try:
@@ -803,7 +803,7 @@ async def define_workflow_steps(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.MANAGE_WORKFLOWS]))
+    _= Depends(require_permissions_dependency([Permission.MANAGE_WORKFLOWS]))
 ) -> List[WorkflowStepOut]:
     """Define leave approval workflow steps with validation and logging."""
     try:
@@ -964,7 +964,7 @@ async def get_workflow_by_type(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_WORKFLOWS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_WORKFLOWS]))
 ) -> List[WorkflowStepOut]:
     """Retrieve workflow steps for a specific leave type with authorization checks and caching."""
     try:

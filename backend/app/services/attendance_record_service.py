@@ -16,7 +16,7 @@ from app.core.config import Settings, get_settings
 from app.core.utils import calculate_total_hours, calculate_overtime_hours, calculate_shift_hours
 from app.core.enums import SystemAction, Permission
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.exceptions import UserNotFoundError, ValidationError, ResourceNotFoundError, AttendanceError
 from app.core.utils import get_request_id, get_users_with_permission
@@ -32,7 +32,7 @@ async def clock_in(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CLOCK_IN]))
+    _= Depends(require_permissions_dependency([Permission.CLOCK_IN]))
 ) -> AttendanceRecordOut:
     """Handle employee clock-in with validation, holiday checks, and logging."""
     try:
@@ -154,7 +154,7 @@ async def clock_out(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CLOCK_OUT]))
+    _= Depends(require_permissions_dependency([Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
     """Handle employee clock-out with validation, time calculations, and logging."""
     try:
@@ -314,7 +314,7 @@ async def get_attendance_history(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
     """Retrieve attendance history for a user with date range, pagination, and authorization."""
     try:

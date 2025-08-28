@@ -13,7 +13,7 @@ from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.mail import send_email
 from app.core.exceptions import LeavePolicyNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_policy_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -29,7 +29,7 @@ async def create_leave_policy(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_LEAVE_POLICY]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
     """Create a new leave policy with validation, version tracking, and logging."""
     try:
@@ -161,7 +161,7 @@ async def get_leave_policy(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
     """Retrieve a leave policy by ID with caching."""
     try:
@@ -227,7 +227,7 @@ async def list_leave_policies(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
 ) -> List[LeavePolicyOut]:
     """Retrieve a list of active leave policies with pagination and filtering."""
     try:
@@ -287,7 +287,7 @@ async def update_leave_policy(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_POLICY]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
     """Update a leave policy with validation, version increment, and logging."""
     try:
@@ -437,7 +437,7 @@ async def delete_leave_policy(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_LEAVE_POLICY]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_LEAVE_POLICY]))
 ) -> None:
     """Soft delete a leave policy with validation, logging, and notification."""
     try:

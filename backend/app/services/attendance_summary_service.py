@@ -15,7 +15,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import ResourceNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_department_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -59,7 +59,7 @@ async def get_attendance_summary_by_user(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE]))
 ) -> List[AttendanceSummaryOut]:
     """Retrieve attendance summary for a specific user with optional filters and pagination."""
     try:
@@ -148,7 +148,7 @@ async def get_all_attendance_summaries(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_ALL_ATTENDANCE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_ALL_ATTENDANCE]))
 ) -> List[AttendanceSummaryOut]:
     """Retrieve all attendance summaries with optional filters and pagination."""
     try:
@@ -215,7 +215,7 @@ async def generate_attendance_summary(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.GENERATE_REPORTS]))
+    _= Depends(require_permissions_dependency([Permission.GENERATE_REPORTS]))
 ) -> AttendanceSummaryOut:
     """Generate or update an attendance summary for a specific user and date."""
     try:

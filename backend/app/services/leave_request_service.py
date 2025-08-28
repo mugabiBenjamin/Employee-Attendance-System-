@@ -17,7 +17,7 @@ from app.core.enums import LeaveRequestStatus, SystemAction, Permission, LeaveTy
 from app.core.mail import send_email
 from app.core.exceptions import LeaveRequestNotFoundError, LeaveBalanceNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_leave_request_exists, validate_user_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -72,7 +72,7 @@ async def create_leave_request(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_LEAVE_REQUEST]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """Create a new leave request with validation, holiday checks, policy checks, logging, and notifications."""
     try:
@@ -239,7 +239,7 @@ async def get_leave_request(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """Retrieve a leave request by ID with caching and authorization."""
     try:
@@ -309,7 +309,7 @@ async def get_leave_requests(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
 ) -> List[LeaveRequestOut]:
     """Retrieve a list of leave requests with optional filters and pagination."""
     try:
@@ -381,7 +381,7 @@ async def update_leave_request(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_REQUEST]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """Update a leave request with validation, policy checks, logging, and notifications."""
     try:
@@ -564,7 +564,7 @@ async def approve_reject_leave_request(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.APPROVE_LEAVE]))
+    _= Depends(require_permissions_dependency([Permission.APPROVE_LEAVE]))
 ) -> LeaveRequestOut:
     """Approve or reject a leave request, update balance, log, and notify."""
     try:
@@ -726,7 +726,7 @@ async def get_team_leave_requests(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_TEAM_LEAVE_REQUESTS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_TEAM_LEAVE_REQUESTS]))
 ) -> List[LeaveRequestOut]:
     """Retrieve leave requests for a manager's team with optional filters and pagination."""
     try:
@@ -798,7 +798,7 @@ async def delete_leave_request(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_LEAVE_REQUEST]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_LEAVE_REQUEST]))
 ) -> None:
     """Soft delete a leave request with validation, logging, and notifications."""
     try:

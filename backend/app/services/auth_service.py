@@ -13,7 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import AuthenticationError, ValidationError
 from app.core.database import get_db, validate_enum_value
-from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache
 from app.core.utils import get_request_id
 import logging
 
@@ -282,7 +282,7 @@ async def get_current_user_profile(
     user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OWN_PROFILE]))
 ) -> dict:
     """Retrieve profile information for the current user."""
     try:
@@ -313,7 +313,7 @@ async def validate_token(
     user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OWN_PROFILE]))
 ) -> dict:
     """Validate if the current access token is valid and user is active."""
     try:

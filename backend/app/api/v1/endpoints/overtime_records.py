@@ -18,7 +18,7 @@ from app.services.overtime_record_service import (
     delete_overtime_record
 )
 from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordUpdate, OvertimeRecordOut, OvertimeRecordApproval
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions_dependency
 import logging
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ async def create_overtime_record_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.CREATE_OVERTIME_RECORD]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """Create a new overtime record.
 
@@ -76,7 +76,7 @@ async def get_overtime_record_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """Retrieve an overtime record by ID.
 
@@ -119,7 +119,7 @@ async def get_user_overtime_records_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> List[OvertimeRecordOut]:
     """List overtime records for a specific user.
 
@@ -167,7 +167,7 @@ async def get_team_overtime_records_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
 ) -> List[OvertimeRecordOut]:
     """List overtime records for a manager's team.
 
@@ -211,7 +211,7 @@ async def update_overtime_record_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.UPDATE_OVERTIME]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_OVERTIME]))
 ) -> OvertimeRecordOut:
     """Update an overtime record.
 
@@ -252,7 +252,7 @@ async def approve_overtime_record_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.APPROVE_OVERTIME]))
+    _= Depends(require_permissions_dependency([Permission.APPROVE_OVERTIME]))
 ) -> OvertimeRecordOut:
     """Approve or reject an overtime record.
 
@@ -292,7 +292,7 @@ async def delete_overtime_record_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.DELETE_OVERTIME]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_OVERTIME]))
 ) -> None:
     """Soft delete an overtime record.
 

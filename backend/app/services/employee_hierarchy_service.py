@@ -10,7 +10,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError, EmployeeHierarchyError, ValidationError, DepartmentNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists
 from app.services.system_log_service import create_system_log
@@ -60,7 +60,7 @@ async def create_employee_hierarchy(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.CREATE_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
     """Create a new employee-supervisor relationship with validation, logging, and cache clearing."""
     try:
@@ -143,7 +143,7 @@ async def get_employee_hierarchy(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
     """Retrieve an employee-supervisor relationship by ID."""
     try:
@@ -209,7 +209,7 @@ async def list_employee_hierarchies(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
 ) -> List[EmployeeHierarchyOut]:
     """Retrieve a list of active employee-supervisor relationships with pagination."""
     try:
@@ -292,7 +292,7 @@ async def update_employee_hierarchy(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.UPDATE_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
     """Update an employee-supervisor relationship with validation, logging, and cache clearing."""
     try:
@@ -386,7 +386,7 @@ async def delete_employee_hierarchy(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.DELETE_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_HIERARCHY]))
 ) -> None:
     """Soft delete an employee-supervisor relationship with validation, logging, and cache clearing."""
     try:

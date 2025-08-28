@@ -14,7 +14,7 @@ from app.services.shift_pattern_service import (
     delete_shift_pattern
 )
 from app.schemas.shift_pattern import ShiftPatternCreate, ShiftPatternUpdate, ShiftPatternOut
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions_dependency
 from app.core.utils import get_request_id
 from app.core.enums import Permission
 import logging
@@ -36,7 +36,7 @@ async def create_shift_pattern_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.CREATE_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """Create a new shift pattern.
 
@@ -74,7 +74,7 @@ async def get_shift_pattern_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """Retrieve a shift pattern by ID.
 
@@ -115,7 +115,7 @@ async def list_shift_patterns_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_SHIFT_PATTERN]))
 ) -> List[ShiftPatternOut]:
     """List all active shift patterns with optional filters and pagination.
 
@@ -158,7 +158,7 @@ async def update_shift_pattern_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.UPDATE_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """Update a shift pattern.
 
@@ -198,7 +198,7 @@ async def delete_shift_pattern_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.DELETE_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_SHIFT_PATTERN]))
 ) -> None:
     """Soft delete a shift pattern.
 

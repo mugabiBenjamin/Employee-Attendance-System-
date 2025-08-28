@@ -9,7 +9,7 @@ from app.core.security import get_password_hash
 from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.exceptions import ValidationError, DatabaseError, UserNotFoundError, ResourceConflictError, BusinessLogicError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache
 from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists
@@ -25,7 +25,7 @@ async def create_user(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.CREATE_USER]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_USER]))
 ) -> UserOut:
     """Create a new user with validation and logging."""
     try:
@@ -116,7 +116,7 @@ async def read_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_USER]))
 ) -> UserOut:
     """Retrieve a user by ID."""
     try:
@@ -140,15 +140,15 @@ async def read_user(
         if not user:
             raise UserNotFoundError(user_id=user_id)
 
-        user_dict = UserOut.model_validate(user).model_dump()
-        await set_cache(cache_key, user_dict, ttl=300)
-        logger.info(f"Cache set for user_id inaccurately {user_id}", extra={"request_id": request_id})
+        user_out = UserOut.model_validate(user)
+        await set_cache(cache_key, user_out.model_dump(mode='json'), ttl=300)
+        logger.info(f"Cache set for user_id: {user_id}", extra={"request_id": request_id})
 
         logger.info(
             f"Retrieved user, user_id: {user_id}",
             extra={"request_id": request_id}
         )
-        return UserOut.model_validate(user)
+        return user_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -169,7 +169,7 @@ async def read_users(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_USER]))
 ) -> List[UserOut]:
     """Retrieve a list of active users with pagination."""
     try:
@@ -190,7 +190,7 @@ async def read_users(
         result = await db.execute(query)
         users = result.scalars().all()
 
-        users_dict = [UserOut.model_validate(user).model_dump() for user in users]
+        users_dict = [UserOut.model_validate(user).model_dump(mode='json') for user in users]
         await set_cache(cache_key, users_dict, ttl=300)
         logger.info(f"Cache set for users list, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
 
@@ -217,7 +217,7 @@ async def update_user(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.UPDATE_USER]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_USER]))
 ) -> UserOut:
     """Update a user with validation and logging."""
     try:
@@ -318,7 +318,7 @@ async def delete_user(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.DELETE_USER]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_USER]))
 ) -> None:
     """Soft delete a user with validation and logging."""
     try:
@@ -394,7 +394,7 @@ async def get_current_user_profile(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_OWN_PROFILE]))
 ) -> UserOut:
     """Retrieve the current authenticated user's profile."""
     try:

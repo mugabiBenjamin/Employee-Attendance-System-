@@ -17,7 +17,7 @@ from app.schemas.employee_hierarchy import (
     EmployeeHierarchyUpdate,
     EmployeeHierarchyOut
 )
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions_dependency
 from app.core.enums import Permission
 import logging
 
@@ -38,7 +38,7 @@ async def create_employee_hierarchy_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.CREATE_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
     """Create a new employee-supervisor relationship.
 
@@ -76,7 +76,7 @@ async def get_employee_hierarchy_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
     """Retrieve an employee hierarchy by ID.
 
@@ -118,7 +118,7 @@ async def list_employee_hierarchies_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_HIERARCHY, Permission.VIEW_OWN_HIERARCHY]))
 ) -> List[EmployeeHierarchyOut]:
     """List employee hierarchies with optional filters and pagination.
 
@@ -162,7 +162,7 @@ async def update_employee_hierarchy_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.UPDATE_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_HIERARCHY]))
 ) -> EmployeeHierarchyOut:
     """Update an employee hierarchy.
 
@@ -202,7 +202,7 @@ async def delete_employee_hierarchy_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.DELETE_HIERARCHY]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_HIERARCHY]))
 ) -> None:
     """Soft delete an employee hierarchy.
 

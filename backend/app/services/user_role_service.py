@@ -10,7 +10,7 @@ from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserRoleNotFoundError, ValidationError, DatabaseError, ResourceConflictError, UserNotFoundError, RoleNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, invalidate_role_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, invalidate_role_cache, get_user_permissions
 from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists, validate_role_exists
@@ -26,7 +26,7 @@ async def create_user_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.CREATE_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_USER_ROLE]))
 ) -> UserRoleOut:
     """Assign a role to a user with validation, logging, and cache clearing."""
     try:
@@ -108,7 +108,7 @@ async def read_user_role(
     user_role_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> UserRoleOut:
     """Retrieve a user-role assignment by ID."""
     try:
@@ -163,7 +163,7 @@ async def read_user_roles(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """Retrieve a list of user-role assignments with optional filters and pagination."""
     try:
@@ -227,7 +227,7 @@ async def update_user_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.UPDATE_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_USER_ROLE]))
 ) -> UserRoleOut:
     """Update a user-role assignment with validation, logging, and cache clearing."""
     try:
@@ -340,7 +340,7 @@ async def delete_user_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.DELETE_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_USER_ROLE]))
 ) -> None:
     """Soft delete a user-role assignment with validation, logging, and cache clearing."""
     try:
@@ -422,7 +422,7 @@ async def get_user_roles(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """Retrieve a list of role assignments for a user with pagination."""
     try:
@@ -472,7 +472,7 @@ async def get_user_permissions(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> dict:
     """Retrieve the permissions assigned to a user based on their roles."""
     try:

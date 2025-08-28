@@ -11,7 +11,7 @@ from app.schemas.system_log import SystemLogCreate
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserDepartmentNotFoundError, DatabaseError, ResourceConflictError, UserNotFoundError, DepartmentNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, get_user_permissions, invalidate_cache_prefix
+from app.core.permissions import require_permissions_dependency, get_user_permissions, invalidate_cache_prefix
 from app.services.system_log_service import create_system_log
 from app.core.validators import validate_user_exists, validate_department_exists
 from app.core.config import Settings, get_settings
@@ -56,7 +56,7 @@ async def create_user_department(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Create a new user-department assignment with validation, logging, and cache clearing."""
     try:
@@ -152,7 +152,7 @@ async def read_user_department(
     user_department_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Retrieve a user-department assignment by ID."""
     try:
@@ -208,7 +208,7 @@ async def read_user_departments(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """List user-department assignments with optional filters and pagination."""
     try:
@@ -295,7 +295,7 @@ async def update_user_department(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Update a user-department assignment with validation, logging, and cache clearing."""
     try:
@@ -424,7 +424,7 @@ async def delete_user_department(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_USER_DEPARTMENT]))
 ) -> None:
     """Soft delete a user-department assignment with validation, logging, and cache clearing."""
     try:
@@ -523,7 +523,7 @@ async def get_user_departments(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """Retrieve a list of department assignments for a user with pagination."""
     try:

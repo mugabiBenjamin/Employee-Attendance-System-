@@ -74,4 +74,10 @@ class UserOut(BaseModel):
     created_at: datetime = Field(..., description="User creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="User update timestamp")
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={
+            date: lambda v: v.isoformat(),
+            datetime: lambda v: v.isoformat()
+        }
+    )

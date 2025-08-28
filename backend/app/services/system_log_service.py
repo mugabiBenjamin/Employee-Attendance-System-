@@ -13,7 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError, SystemLogNotFoundError, ValidationError, DepartmentNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_department_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -145,7 +145,7 @@ async def read_system_log(
     log_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> SystemLogOut:
     """Retrieve a system log by ID."""
     try:
@@ -203,7 +203,7 @@ async def read_system_logs(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
     """Retrieve a list of system logs with optional filters and pagination."""
     try:
@@ -299,7 +299,7 @@ async def get_user_logs(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
     """Retrieve system logs for a specific user with optional action and table filters."""
     try:
@@ -373,7 +373,7 @@ async def get_log_actions_summary(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> List[SystemLogActionSummary]:
     """Retrieve a summary of system actions with occurrence counts."""
     try:
@@ -447,7 +447,7 @@ async def delete_system_log(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_LOGS]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_LOGS]))
 ) -> None:
     """Soft delete a system log with logging and cache clearing."""
     try:

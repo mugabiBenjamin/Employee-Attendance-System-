@@ -14,7 +14,7 @@ from app.services.user_department_service import (
     get_user_departments as service_get_user_departments
 )
 from app.schemas.user_department import UserDepartmentCreate, UserDepartmentUpdate, UserDepartmentOut
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions_dependency
 from app.core.enums import Permission
 import logging
 
@@ -35,7 +35,7 @@ async def create_user_department_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.CREATE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Create a new user-department assignment.
 
@@ -72,7 +72,7 @@ async def read_user_department_endpoint(
     user_department_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Retrieve a user-department assignment by ID.
 
@@ -112,7 +112,7 @@ async def read_user_departments_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """List user-department assignments with optional filters and pagination.
 
@@ -155,7 +155,7 @@ async def update_user_department_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.UPDATE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Update a user-department assignment.
 
@@ -195,7 +195,7 @@ async def delete_user_department_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.DELETE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_USER_DEPARTMENT]))
 ) -> None:
     """Soft delete a user-department assignment.
 
@@ -236,7 +236,7 @@ async def get_user_departments_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """Retrieve all department assignments for a specific user with pagination.
 

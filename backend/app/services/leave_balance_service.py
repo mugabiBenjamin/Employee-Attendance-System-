@@ -16,7 +16,7 @@ from app.core.enums import LeaveType, SystemAction, Permission, LeaveRequestStat
 from app.core.mail import send_email
 from app.core.exceptions import LeaveBalanceNotFoundError, UserNotFoundError, LeavePolicyNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_leave_policy_exists
 from app.core.utils import get_request_id
@@ -32,7 +32,7 @@ async def get_leave_balances_by_user_and_type(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
 ) -> List[LeaveBalanceOut]:
     """Retrieve leave balances for a user with optional leave type filter and caching."""
     try:
@@ -135,7 +135,7 @@ async def update_leave_balance(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_BALANCE]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_BALANCE]))
 ) -> LeaveBalanceOut:
     """Update leave balance for a user with validation, version control, and logging."""
     try:
