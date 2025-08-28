@@ -36,7 +36,7 @@ async def create_shift_assignment_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.CREATE_SHIFT_ASSIGNMENT]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
     """Create a new shift assignment.
 
@@ -75,7 +75,7 @@ async def read_shift_assignment_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
     """Retrieve a shift assignment by ID.
 
@@ -118,7 +118,7 @@ async def read_shift_assignments_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_SHIFT_ASSIGNMENT, Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> List[ShiftAssignmentOut]:
     """List shift assignments with optional filters and pagination.
 
@@ -162,7 +162,7 @@ async def update_shift_assignment_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.UPDATE_SHIFT_ASSIGNMENT]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_SHIFT_ASSIGNMENT]))
 ) -> ShiftAssignmentOut:
     """Update a shift assignment.
 
@@ -202,7 +202,7 @@ async def delete_shift_assignment_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.DELETE_SHIFT_ASSIGNMENT]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_SHIFT_ASSIGNMENT]))
 ) -> None:
     """Soft delete a shift assignment.
 
@@ -242,7 +242,7 @@ async def get_my_shift_assignments_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_OWN_SHIFT_ASSIGNMENT]))
 ) -> List[ShiftAssignmentOut]:
     """Retrieve the current user's shift assignments.
 

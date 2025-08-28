@@ -33,7 +33,7 @@ async def create_role_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.CREATE_ROLE]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_ROLE]))
 ) -> RoleOut:
     """Create a new role.
 
@@ -70,7 +70,7 @@ async def get_role_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.VIEW_ROLE]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_ROLE]))
 ) -> RoleOut:
     """Retrieve a role by ID.
 
@@ -109,7 +109,7 @@ async def list_roles_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_ROLE]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_ROLE]))
 ) -> List[RoleOut]:
     """List all active roles with pagination.
 
@@ -149,7 +149,7 @@ async def update_role_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.UPDATE_ROLE]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_ROLE]))
 ) -> RoleOut:
     """Update a role.
 
@@ -187,7 +187,7 @@ async def delete_role_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.DELETE_ROLE]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_ROLE]))
 ) -> None:
     """Soft delete a role.
 

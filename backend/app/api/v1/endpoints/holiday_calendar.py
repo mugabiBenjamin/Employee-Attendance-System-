@@ -38,7 +38,7 @@ async def create_holiday_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.CREATE_HOLIDAY]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Create a new holiday.
 
@@ -76,7 +76,7 @@ async def get_holiday_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.VIEW_HOLIDAY]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Retrieve a holiday by ID.
 
@@ -116,7 +116,7 @@ async def list_holidays_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_HOLIDAY]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_HOLIDAY]))
 ) -> List[HolidayCalendarOut]:
     """List all active holidays with optional filters and pagination.
 
@@ -159,7 +159,7 @@ async def update_holiday_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.UPDATE_HOLIDAY]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_HOLIDAY]))
 ) -> HolidayCalendarOut:
     """Update a holiday.
 
@@ -199,7 +199,7 @@ async def delete_holiday_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.DELETE_HOLIDAY]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_HOLIDAY]))
 ) -> None:
     """Soft delete a holiday.
 

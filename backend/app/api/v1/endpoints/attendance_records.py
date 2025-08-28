@@ -30,7 +30,7 @@ async def clock_in_out_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.CLOCK_IN, Permission.CLOCK_OUT]))
+    _=Depends(require_permissions_dependency([Permission.CLOCK_IN, Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
     """Handle clock-in or clock-out requests.
 
@@ -78,7 +78,7 @@ async def get_attendance_history_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ATTENDANCE]))
 ) -> List[AttendanceRecordOut]:
     """Retrieve attendance history for a user.
 

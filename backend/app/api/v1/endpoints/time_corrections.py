@@ -38,7 +38,7 @@ async def request_time_correction(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.CREATE_TIME_CORRECTION]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Submit a time correction request for an attendance record."""
     try:
@@ -62,7 +62,7 @@ async def get_time_correction(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_any_permissions_dependency([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
+    _=Depends(require_any_permissions_dependency([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Retrieve a specific time correction request."""
     try:
@@ -91,7 +91,7 @@ async def list_time_corrections(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_any_permissions_dependency([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
+    _=Depends(require_any_permissions_dependency([Permission.VIEW_TIME_CORRECTION, Permission.MANAGE_TIME_CORRECTION]))
 ) -> List[TimeCorrectionOut]:
     """Retrieve time correction requests for current user, specified user, or department."""
     try:
@@ -127,7 +127,7 @@ async def update_time_correction(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.UPDATE_TIME_CORRECTION]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Update an existing time correction request."""
     try:
@@ -153,7 +153,7 @@ async def approve_reject_time_correction(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.MANAGE_TIME_CORRECTION]))
+    _=Depends(require_permissions_dependency([Permission.MANAGE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Approve or reject a time correction request."""
     try:
@@ -178,7 +178,7 @@ async def remove_time_correction(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.DELETE_TIME_CORRECTION]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_TIME_CORRECTION]))
 ) -> None:
     """Soft delete a time correction request (HR/admin only)."""
     try:

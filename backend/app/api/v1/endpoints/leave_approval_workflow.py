@@ -37,13 +37,13 @@ router = APIRouter(prefix="/leave-approval-workflow", tags=["Leave Approval Work
     summary="Approve or reject a leave request",
     description="Approve or reject a leave request with validation and notifications."
 )
-@require_permissions_dependency([Permission.APPROVE_LEAVE])
 async def approve_leave_endpoint(
     approval: LeaveApprovalWorkflowCreate,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.APPROVE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
     """Approve or reject a leave request with workflow validation.
 
@@ -69,13 +69,13 @@ async def approve_leave_endpoint(
     summary="Get leave approval by ID",
     description="Retrieve a specific leave approval workflow entry by its ID."
 )
-@require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL])
 async def get_leave_approval_endpoint(
     workflow_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> LeaveApprovalWorkflowOut:
     """Retrieve a leave approval by ID.
 
@@ -101,7 +101,6 @@ async def get_leave_approval_endpoint(
     summary="List leave approvals by request",
     description="Retrieve a list of approvals for a specific leave request with pagination."
 )
-@require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL])
 async def get_leave_approvals_by_request_endpoint(
     request: Request,
     leave_id: int,
@@ -109,7 +108,8 @@ async def get_leave_approvals_by_request_endpoint(
     limit: Optional[int] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> List[LeaveApprovalWorkflowOut]:
     """List leave approvals for a leave request with pagination.
 
@@ -137,14 +137,14 @@ async def get_leave_approvals_by_request_endpoint(
     summary="Update leave approval",
     description="Update a leave approval workflow entry with validation and notifications."
 )
-@require_permissions_dependency([Permission.MANAGE_LEAVE])
 async def update_leave_approval_endpoint(
     workflow_id: int,
     update_data: LeaveApprovalWorkflowUpdate,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.MANAGE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
     """Update a leave approval workflow entry.
 
@@ -171,13 +171,13 @@ async def update_leave_approval_endpoint(
     summary="Delete leave approval",
     description="Soft delete a leave approval workflow entry with validation and notifications."
 )
-@require_permissions_dependency([Permission.MANAGE_LEAVE])
 async def delete_leave_approval_endpoint(
     workflow_id: int,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.MANAGE_LEAVE]))
 ) -> None:
     """Soft delete a leave approval workflow entry.
 
@@ -204,13 +204,13 @@ async def delete_leave_approval_endpoint(
     summary="Define leave approval workflow steps",
     description="Define steps for a leave approval workflow with approver sequencing and notifications."
 )
-@require_permissions_dependency([Permission.MANAGE_WORKFLOWS])
 async def define_workflow_steps_endpoint(
     workflow_steps: List[WorkflowStepCreate],
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.MANAGE_WORKFLOWS]))
 ) -> List[WorkflowStepOut]:
     """Define leave approval workflow steps.
 
@@ -236,13 +236,13 @@ async def define_workflow_steps_endpoint(
     summary="Get workflow by leave type",
     description="Retrieve approval workflow steps for a specific leave type with pagination."
 )
-@require_permissions_dependency([Permission.VIEW_WORKFLOWS])
 async def get_workflow_by_type_endpoint(
     leave_type: LeaveType,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.VIEW_WORKFLOWS]))
 ) -> List[WorkflowStepOut]:
     """Retrieve workflow steps by leave type.
 

@@ -33,7 +33,7 @@ async def create_department_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.CREATE_DEPARTMENT]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """Create a new department.
 
@@ -69,7 +69,7 @@ async def get_department_endpoint(
     department_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.VIEW_DEPARTMENT]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_DEPARTMENT]))
 ) -> DepartmentOut:
     """Retrieve a department by ID.
 
@@ -106,7 +106,7 @@ async def list_departments_endpoint(
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_DEPARTMENT]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_DEPARTMENT]))
 ) -> List[DepartmentOut]:
     """List all active departments with pagination.
 
@@ -145,7 +145,7 @@ async def update_department_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.UPDATE_DEPARTMENT]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """Update a department.
 
@@ -183,7 +183,7 @@ async def delete_department_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _= Depends(require_permissions_dependency([Permission.DELETE_DEPARTMENT]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_DEPARTMENT]))
 ) -> None:
     """Soft delete a department.
 

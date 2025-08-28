@@ -38,7 +38,7 @@ async def create_leave_request_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.CREATE_LEAVE_REQUEST]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """Create a new leave request.
 
@@ -77,7 +77,7 @@ async def get_leave_request_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """Retrieve a leave request by ID.
 
@@ -120,7 +120,7 @@ async def get_leave_requests_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_REQUEST, Permission.VIEW_OWN_LEAVE_REQUEST]))
 ) -> List[LeaveRequestOut]:
     """List leave requests with pagination and optional filters.
 
@@ -168,7 +168,7 @@ async def get_team_leave_requests_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.VIEW_TEAM_LEAVE_REQUESTS]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_TEAM_LEAVE_REQUESTS]))
 ) -> List[LeaveRequestOut]:
     """List leave requests for a manager's team.
 
@@ -213,7 +213,7 @@ async def update_leave_request_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_REQUEST]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_REQUEST]))
 ) -> LeaveRequestOut:
     """Update a leave request.
 
@@ -254,7 +254,7 @@ async def approve_reject_leave_request_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.APPROVE_LEAVE]))
+    _=Depends(require_permissions_dependency([Permission.APPROVE_LEAVE]))
 ) -> LeaveRequestOut:
     """Approve or reject a leave request.
 
@@ -294,7 +294,7 @@ async def delete_leave_request_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _= Depends(require_permissions_dependency([Permission.DELETE_LEAVE_REQUEST]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_LEAVE_REQUEST]))
 ) -> None:
     """Soft delete a leave request.
 
