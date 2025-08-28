@@ -62,5 +62,9 @@ class RoleOut(RoleBase):
     
     model_config = ConfigDict(
         from_attributes=True,
-        json_encoders={datetime: lambda v: v.isoformat()}
+        json_encoders={
+            datetime: lambda v: v.isoformat() if v else None
+        },
+        # Add this to ensure proper serialization
+        arbitrary_types_allowed=True
     )

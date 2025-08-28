@@ -125,7 +125,8 @@ async def get_role(
         if not role:
             raise RoleNotFoundError(role_id=role_id)
 
-        role_dict = RoleOut.model_validate(role).model_dump()
+        role_object = RoleOut.model_validate(role)
+        role_dict = role_object.model_dump(mode='json')  # Use mode='json' for proper serialization
         await set_cache(cache_key, role_dict, ttl=300)
         logger.info(f"Cache set for role_id: {role_id}", extra={"request_id": request_id})
 
@@ -133,7 +134,7 @@ async def get_role(
             f"Retrieved role, role_id: {role_id}, user_id: {current_user.user_id}",
             extra={"request_id": request_id}
         )
-        return RoleOut.model_validate(role)
+        return role_object
 
     except ValidationError as e:
         logger.error(f"Validation error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
@@ -176,7 +177,8 @@ async def list_roles(
         result = await db.execute(query)
         roles = result.scalars().all()
 
-        roles_dict = [RoleOut.model_validate(role).model_dump() for role in roles]
+        role_objects = [RoleOut.model_validate(role) for role in roles]
+        roles_dict = [role.model_dump(mode='json') for role in role_objects]  # Use mode='json' for proper serialization
         await set_cache(cache_key, roles_dict, ttl=300)
         logger.info(f"Cache set for roles list, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
 
@@ -184,7 +186,7 @@ async def list_roles(
             f"Retrieved {len(roles)} roles for user_id: {current_user.user_id}",
             extra={"request_id": request_id}
         )
-        return [RoleOut.model_validate(role) for role in roles]
+        return role_objects
 
     except ValidationError as e:
         logger.error(f"Validation error retrieving roles: {str(e)}", extra={"request_id": request_id})

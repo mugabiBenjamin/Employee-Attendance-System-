@@ -53,7 +53,7 @@ class UserRoleOut(UserRoleBase):
     
     model_config = ConfigDict(
         from_attributes=True,
-        json_encoders={datetime: lambda v: v.isoformat()}
+        json_encoders={datetime: lambda v: v.isoformat() if v else None}
     )
 
 class UserProfile(BaseModel):
@@ -64,4 +64,3 @@ class UserProfile(BaseModel):
     job_title: Optional[str] = Field(None, description="Job title of the user")
     roles: List[str] = Field(default_factory=list, description="List of role names assigned to the user")
     permissions: dict = Field(default_factory=dict, description="Permissions granted to the user")
-    

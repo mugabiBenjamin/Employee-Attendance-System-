@@ -176,7 +176,8 @@ async def read_user_department(
         if not user_department:
             raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
-        user_department_dict = UserDepartmentOut.model_validate(user_department).model_dump()
+        user_department_out = UserDepartmentOut.model_validate(user_department)
+        user_department_dict = user_department_out.model_dump(mode='json')
         await set_cache(cache_key, user_department_dict, ttl=300)
         logger.info(f"Cache set for user_department_id: {user_department_id}", extra={"request_id": request_id})
 
@@ -184,7 +185,7 @@ async def read_user_department(
             f"Retrieved user department: user_department_id={user_department_id}",
             extra={"request_id": request_id}
         )
-        return UserDepartmentOut.model_validate(user_department)
+        return user_department_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -255,7 +256,8 @@ async def read_user_departments(
         result = await db.execute(query)
         user_departments = result.scalars().all()
 
-        user_departments_dict = [UserDepartmentOut.model_validate(ud).model_dump() for ud in user_departments]
+        user_departments_out = [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        user_departments_dict = [ud.model_dump(mode='json') for ud in user_departments_out]
         await set_cache(cache_key, user_departments_dict, ttl=300)
         logger.info(
             f"Cache set for user_departments, user_id: {user_id or 'all'}, department_id: {department_id or 'all'}",
@@ -266,7 +268,7 @@ async def read_user_departments(
             f"Retrieved {len(user_departments)} user department assignments",
             extra={"request_id": request_id, "user_id": current_user.user_id, "target_user_id": user_id, "department_id": department_id}
         )
-        return [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        return user_departments_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
@@ -558,7 +560,8 @@ async def get_user_departments(
         result = await db.execute(query)
         user_departments = result.scalars().all()
 
-        user_departments_dict = [UserDepartmentOut.model_validate(ud).model_dump() for ud in user_departments]
+        user_departments_out = [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        user_departments_dict = [ud.model_dump(mode='json') for ud in user_departments_out]
         await set_cache(cache_key, user_departments_dict, ttl=300)
         logger.info(
             f"Cache set for user_departments, user_id: {user_id}",
@@ -569,7 +572,7 @@ async def get_user_departments(
             f"Retrieved {len(user_departments)} departments for user_id: {user_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
-        return [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        return user_departments_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})

@@ -56,7 +56,8 @@ async def clock_in(
             AttendanceRecords.deleted_at.is_(None)
         )
         result = await db.execute(query)
-        if result.scalar_one_or_none():
+        existing_record = result.scalar_one_or_none()
+        if existing_record:
             raise AttendanceError(detail="User already clocked in for today")
 
         # Check for holidays if enabled
@@ -70,43 +71,56 @@ async def clock_in(
             if result_holiday.scalar_one_or_none():
                 raise AttendanceError(detail="Clock-in not allowed on a holiday")
 
-        # Create attendance record
-        db_record = AttendanceRecords(
-            **AttendanceRecordCreate(
-                user_id=user.user_id,
-                clock_in_time=current_time,
-                ip_address=str(request.client.host),
-                location=location
-            ).model_dump(),
-            date=current_date,
-            created_at=current_time,
-            updated_at=current_time,
-            is_active=True
-        )
-        db.add(db_record)
-        await db.commit()
-        await db.refresh(db_record)
+        # Validate IP address
+        ip_address = str(request.client.host) if request.client and request.client.host else None
+        if settings.REQUIRE_ATTENDANCE_IP and not ip_address:
+            raise ValidationError(detail="IP address is required for clock-in")
 
-        # Log action
-        system_log = SystemLogs(
-            user_id=user.user_id,
-            action=SystemAction.CLOCK_IN,
-            table_affected="attendance_records",
-            record_id=db_record.attendance_id,
-            old_values=None,
-            new_values=db_record.__dict__,
-            ip_address=str(request.client.host),
-            user_agent=request.headers.get("user-agent"),
-            timestamp=current_time,
-            request_id=request_id
-        )
-        db.add(system_log)
-        await db.commit()
+        # Create attendance record with explicit transaction handling
+        try:
+            db_record = AttendanceRecords(
+                **AttendanceRecordCreate(
+                    user_id=user.user_id,
+                    clock_in_time=current_time,
+                    ip_address=ip_address,
+                    location=location,
+                    date=current_date
+                ).model_dump(),
+                created_at=current_time,
+                updated_at=current_time,
+            )
+            db.add(db_record)
+            await db.flush()  # Flush to get the ID before committing
+            
+            # Log action
+            system_log = SystemLogs(
+                user_id=user.user_id,
+                action=SystemAction.CLOCK_IN,
+                table_affected="attendance_records",
+                record_id=db_record.attendance_id,
+                old_values=None,
+                new_values=db_record.__dict__,
+                ip_address=ip_address,
+                user_agent=request.headers.get("user-agent"),
+                timestamp=current_time,
+                request_id=request_id
+            )
+            db.add(system_log)
+            await db.commit()
+            await db.refresh(db_record)
+            
+        except Exception as db_error:
+            await db.rollback()
+            # Check for unique constraint violation
+            if "unique_user_date" in str(db_error) or "duplicate key value violates unique constraint" in str(db_error):
+                raise AttendanceError(detail="User already clocked in for today")
+            else:
+                logger.error(f"Database error during clock-in for user_id {user.user_id}: {str(db_error)}", extra={"request_id": request_id})
+                raise AttendanceError(detail="Error creating attendance record")
 
         # Invalidate cache
         await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
         invalidate_user_cache(user.user_id)
-        invalidate_user_cache(user.user_id)  # Invalidate current user's cache (same as user in this case)
         logger.info(
             f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
             extra={"request_id": request_id}
@@ -214,8 +228,9 @@ async def clock_out(
                 )
 
         # Update record
+        ip_address = str(request.client.host) if request.client and request.client.host else None
         db_record.clock_out_time = current_time
-        db_record.ip_address = str(request.client.host)
+        db_record.ip_address = ip_address
         total_hours = calculate_total_hours(
             clock_in=db_record.clock_in_time,
             clock_out=db_record.clock_out_time,
@@ -250,7 +265,7 @@ async def clock_out(
             record_id=db_record.attendance_id,
             old_values=None,
             new_values=db_record.__dict__,
-            ip_address=str(request.client.host),
+            ip_address=ip_address,
             user_agent=request.headers.get("user-agent"),
             timestamp=current_time,
             request_id=request_id
@@ -350,7 +365,7 @@ async def get_attendance_history(
         cached_result = await get_cache(cache_key)
         if cached_result:
             logger.info(f"Cache hit for attendance_history, user_id: {user_id or current_user.user_id}", extra={"request_id": request_id})
-            return [AttendanceRecordOut(**record) for record in cached_result]
+            return [AttendanceRecordOut.model_validate(record) for record in cached_result]
 
         # Validate user_id if provided
         target_user_id = user_id or current_user.user_id
@@ -378,7 +393,7 @@ async def get_attendance_history(
         result = await db.execute(query)
         records = result.scalars().all()
 
-        records_dict = [AttendanceRecordOut.model_validate(record).model_dump() for record in records]
+        records_dict = [AttendanceRecordOut.model_validate(record).model_dump(mode='json') for record in records]
         await set_cache(cache_key, records_dict, ttl=300)
         logger.info(f"Cache set for attendance_history, user_id: {target_user_id}", extra={"request_id": request_id})
 

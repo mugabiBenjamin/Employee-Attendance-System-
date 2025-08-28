@@ -132,7 +132,8 @@ async def read_user_role(
         if not user_role:
             raise UserRoleNotFoundError(user_role_id=user_role_id)
 
-        user_role_dict = UserRoleOut.model_validate(user_role).model_dump()
+        user_role_out = UserRoleOut.model_validate(user_role)
+        user_role_dict = user_role_out.model_dump(mode='json')
         await set_cache(cache_key, user_role_dict, ttl=300)
         logger.info(f"Cache set for user_role_id: {user_role_id}", extra={"request_id": request_id})
 
@@ -140,7 +141,7 @@ async def read_user_role(
             f"Retrieved user role, user_role_id: {user_role_id}",
             extra={"request_id": request_id}
         )
-        return UserRoleOut.model_validate(user_role)
+        return user_role_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -194,7 +195,8 @@ async def read_user_roles(
         result = await db.execute(query)
         user_roles = result.scalars().all()
 
-        user_roles_dict = [UserRoleOut.model_validate(ur).model_dump() for ur in user_roles]
+        user_roles_out = [UserRoleOut.model_validate(ur) for ur in user_roles]
+        user_roles_dict = [ur.model_dump(mode='json') for ur in user_roles_out]
         await set_cache(cache_key, user_roles_dict, ttl=300)
         logger.info(f"Cache set for user_roles, user_id: {user_id or 'all'}, role_id: {role_id or 'all'}", extra={"request_id": request_id})
 
@@ -202,7 +204,7 @@ async def read_user_roles(
             f"Retrieved {len(user_roles)} user roles",
             extra={"request_id": request_id, "user_id": user_id, "role_id": role_id}
         )
-        return [UserRoleOut.model_validate(ur) for ur in user_roles]
+        return user_roles_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -445,7 +447,8 @@ async def get_user_roles(
         result = await db.execute(query)
         user_roles = result.scalars().all()
 
-        user_roles_dict = [UserRoleOut.model_validate(ur).model_dump() for ur in user_roles]
+        user_roles_out = [UserRoleOut.model_validate(ur) for ur in user_roles]
+        user_roles_dict = [ur.model_dump(mode='json') for ur in user_roles_out]
         await set_cache(cache_key, user_roles_dict, ttl=300)
         logger.info(f"Cache set for user_roles, user_id: {user_id}", extra={"request_id": request_id})
 
@@ -453,7 +456,7 @@ async def get_user_roles(
             f"Retrieved {len(user_roles)} roles for user_id: {user_id}",
             extra={"request_id": request_id}
         )
-        return [UserRoleOut.model_validate(ur) for ur in user_roles]
+        return user_roles_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})

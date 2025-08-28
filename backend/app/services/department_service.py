@@ -117,7 +117,8 @@ async def get_department(
         if not department:
             raise DepartmentNotFoundError(dept_id=department_id)
 
-        department_dict = DepartmentOut.model_validate(department).model_dump()
+        department_object = DepartmentOut.model_validate(department)
+        department_dict = department_object.model_dump(mode='json')
         await set_cache(cache_key, department_dict, ttl=300)
         logger.info(f"Cache set for department_id: {department_id}", extra={"request_id": request_id})
 
@@ -125,7 +126,7 @@ async def get_department(
             f"Retrieved department, department_id: {department_id}",
             extra={"request_id": request_id}
         )
-        return DepartmentOut.model_validate(department)
+        return department_object
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -164,7 +165,8 @@ async def list_departments(
         result = await db.execute(query)
         departments = result.scalars().all()
 
-        departments_dict = [DepartmentOut.model_validate(dept).model_dump() for dept in departments]
+        department_objects = [DepartmentOut.model_validate(dept) for dept in departments]
+        departments_dict = [dept.model_dump(mode='json') for dept in department_objects]
         await set_cache(cache_key, departments_dict, ttl=300)
         logger.info(f"Cache set for departments, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
 
@@ -172,7 +174,7 @@ async def list_departments(
             f"Retrieved {len(departments)} departments",
             extra={"request_id": request_id}
         )
-        return [DepartmentOut.model_validate(dept) for dept in departments]
+        return department_objects
 
     except ValidationError as e:
         logger.error(f"Validation error retrieving departments: {str(e)}", extra={"request_id": request_id})

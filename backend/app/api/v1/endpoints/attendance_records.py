@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException, status
 from typing import List, Optional
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 from app.services.attendance_record_service import clock_in, clock_out, get_attendance_history
 from app.models.users import Users
 from app.core.security import get_current_user
@@ -47,19 +48,35 @@ async def clock_in_out_endpoint(
     Raises:
         HTTPException: For invalid actions (400), validation errors (422), not found (404), database errors (500), or unexpected errors (500).
     """
+    # Extract user_id early to avoid session issues in exception handlers
+    user_id = current_user.user_id
+    request_id = get_request_id(request)
+    
     try:
-        request_id = get_request_id(request)
         if clock_data.action == "clock_in":
             return await clock_in(request, current_user, clock_data.location, db, settings, request_id)
         elif clock_data.action == "clock_out":
             return await clock_out(request, current_user, db, settings, request_id)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action. Must be 'clock_in' or 'clock_out'")
+    except IntegrityError as e:
+        # Handle database constraint violations
+        await db.rollback()
+        if "unique_user_date" in str(e):
+            logger.error(f"Duplicate clock-in attempt for user_id {user_id} on {date.today()}", extra={"request_id": request_id, "user_id": user_id})
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User has already clocked in for today"
+            )
+        else:
+            logger.error(f"Database integrity error for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Database constraint violation")
     except HTTPException as e:
-        logger.error(f"Error processing clock action {clock_data.action}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
+        logger.error(f"Error processing clock action {clock_data.action} for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error processing clock action {clock_data.action}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
+        await db.rollback()
+        logger.error(f"Unexpected error processing clock action {clock_data.action} for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e
 
 @router.get(
@@ -99,12 +116,16 @@ async def get_attendance_history_endpoint(
     Raises:
         HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
     """
+    # Extract user_id early to avoid session issues in exception handlers
+    current_user_id = current_user.user_id
+    request_id = get_request_id(request)
+    
     try:
-        request_id = get_request_id(request)
         return await get_attendance_history(user_id, start_date, end_date, skip, limit, current_user, db, settings, request_id)
     except HTTPException as e:
-        logger.error(f"Error retrieving attendance history for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
+        logger.error(f"Error retrieving attendance history for user_id {user_id or current_user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error retrieving attendance history for user_id {user_id or current_user.user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
+        await db.rollback()
+        logger.error(f"Unexpected error retrieving attendance history for user_id {user_id or current_user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error retrieving attendance history") from e

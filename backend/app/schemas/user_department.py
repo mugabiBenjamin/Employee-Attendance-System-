@@ -55,5 +55,5 @@ class UserDepartmentOut(UserDepartmentBase):
     
     model_config = ConfigDict(
         from_attributes=True,
-        json_encoders={datetime: lambda v: v.isoformat()}
+        json_encoders={datetime: lambda v: v.isoformat() if v else None}
     )
