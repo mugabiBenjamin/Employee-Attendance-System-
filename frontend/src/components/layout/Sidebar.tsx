@@ -36,10 +36,25 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     console.log("User Permissions:", user?.permissions || []);
 
     // Fetch all available permissions for comparison
-  enumsApi.getPermissions().then(allPermissions => {
-    console.log("All Available Permissions:", allPermissions);
-  });
-}, [user]);
+    enumsApi.getPermissions().then((allPermissions) => {
+      console.log("All Available Permissions:", allPermissions);
+    });
+  }, [user]);
+
+  // Helper function to check if user has permission or all_permissions
+  const hasPermission = (requiredPermission: string): boolean => {
+    const hasAllPermissions =
+      user?.permissions?.includes("all_permissions") || false;
+    const hasSpecificPermission =
+      user?.permissions?.includes(requiredPermission) || false;
+    const result = hasAllPermissions || hasSpecificPermission;
+    console.log(
+      `Checking permission '${requiredPermission}': ${
+        result ? "Granted" : "Denied"
+      } (all_permissions: ${hasAllPermissions}, specific: ${hasSpecificPermission})`
+    );
+    return result;
+  };
 
   const navItems = [
     {
@@ -59,7 +74,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         { title: "Summary", url: "/attendance/summary" },
       ],
     },
-    ...(user?.permissions?.includes("manage_departments")
+    ...(hasPermission("manage_departments")
       ? [
           {
             title: "Departments",
@@ -72,7 +87,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions?.includes("manage_employees")
+    ...(hasPermission("manage_employees")
       ? [
           {
             title: "Emergency Contacts",
@@ -108,8 +123,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions?.includes("view_own_attendance") ||
-    user?.permissions?.includes("manage_overtime")
+    ...(hasPermission("view_own_attendance") || hasPermission("manage_overtime")
       ? [
           {
             title: "Overtime",
@@ -122,34 +136,34 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions?.includes("request_leave") ||
-    user?.permissions?.includes("manage_employees") ||
-    user?.permissions?.includes("manage_leave_policies")
+    ...(hasPermission("request_leave") ||
+    hasPermission("manage_employees") ||
+    hasPermission("manage_leave_policies")
       ? [
           {
             title: "Leaves",
             url: "/leave-request",
             icon: Calendar,
             items: [
-              ...(user?.permissions?.includes("request_leave")
+              ...(hasPermission("request_leave")
                 ? [{ title: "Request Leave", url: "/leave-request" }]
                 : []),
-              ...(user?.permissions?.includes("manage_employees") ||
-              user?.permissions?.includes("manage_leave_policies")
+              ...(hasPermission("manage_employees") ||
+              hasPermission("manage_leave_policies")
                 ? [{ title: "Leave Requests", url: "/leave-requests" }]
                 : []),
-              ...(user?.permissions?.includes("view_own_attendance") ||
-              user?.permissions?.includes("manage_employees")
+              ...(hasPermission("view_own_attendance") ||
+              hasPermission("manage_employees")
                 ? [{ title: "Leave Balances", url: "/leave-balances" }]
                 : []),
-              ...(user?.permissions?.includes("manage_leave_policies")
+              ...(hasPermission("manage_leave_policies")
                 ? [{ title: "Leave Policies", url: "/leave-policies" }]
                 : []),
             ],
           },
         ]
       : []),
-    ...(user?.permissions?.includes("view_logs")
+    ...(hasPermission("view_logs")
       ? [
           {
             title: "System Logs",
@@ -158,7 +172,7 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           },
         ]
       : []),
-    ...(user?.permissions?.includes("manage_users")
+    ...(hasPermission("manage_users")
       ? [
           {
             title: "User Management",
@@ -168,6 +182,14 @@ function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ]
       : []),
   ].filter(Boolean); // Remove any undefined/null entries
+
+  // Log navItems for debugging
+  React.useEffect(() => {
+    console.log(
+      "Rendered navItems:",
+      navItems.map((item) => item.title)
+    );
+  }, [navItems]);
 
   return (
     <Sidebar collapsible="icon" {...props}>

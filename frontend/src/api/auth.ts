@@ -1,7 +1,8 @@
 import { api } from './index';
-import { store } from '@/store'; // Import the Redux store
-import { clearAuth, setAuth } from '@/store/slices/authSlice'; // Import the setAuth action
+import { store } from '@/store';
+import { clearAuth, setAuth } from '@/store/slices/authSlice';
 import type { Permission, User } from './types';
+import { enumsApi } from '@/api/enums';
 
 // Define request payload interfaces
 interface LoginCredentials {
@@ -66,13 +67,28 @@ export const authApi = {
   getCurrentUser: async (): Promise<User> => {
     try {
       const response = await api.get<UserResponse>('/auth/me');
+      let permissions: Permission[] = response.data.permissions as Permission[] ?? [];
+
+      // Check if permissions include 'all_permissions' and expand if necessary
+      if (permissions.includes('all_permissions')) {
+        try {
+          const allPermissions = await enumsApi.getPermissions();
+          console.log("Expanding 'all_permissions' to:", allPermissions);
+          permissions = allPermissions;
+        } catch (error) {
+          console.error("Failed to fetch all permissions for 'all_permissions' expansion:", error);
+          // Fallback to original permissions to avoid breaking the app
+          permissions = response.data.permissions as Permission[] ?? [];
+        }
+      }
+
       const user: User = {
         id: response.data.user_id,
         email: response.data.email,
         first_name: response.data.first_name,
         last_name: response.data.last_name,
         roles: response.data.roles,
-        permissions: response.data.permissions as Permission[] ?? [], // Ensure permissions is an array
+        permissions,
         is_active: true,
       };
 
