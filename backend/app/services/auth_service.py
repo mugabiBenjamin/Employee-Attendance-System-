@@ -6,11 +6,13 @@ from sqlalchemy.exc import InvalidRequestError
 from datetime import datetime, timezone
 from jose import JWTError, jwt
 from app.models.users import Users
+from app.models.user_roles import UserRoles
+from app.models.roles import Roles
 from app.schemas.system_log import SystemLogCreate
 from app.services.system_log_service import create_system_log
 from app.core.security import get_current_user, verify_password, create_access_token, create_refresh_token
 from app.core.config import Settings, get_settings
-from app.core.enums import SystemAction, Permission
+from app.core.enums import SystemAction, Permission, PermissionGroup, PERMISSION_GROUPS
 from app.core.exceptions import AuthenticationError, ValidationError
 from app.core.database import get_db, validate_enum_value
 from app.core.permissions import require_permissions_dependency, invalidate_user_cache
@@ -281,11 +283,93 @@ async def refresh_token(
 async def get_current_user_profile(
     user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
+    settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
     _= Depends(require_permissions_dependency([Permission.VIEW_OWN_PROFILE]))
 ) -> dict:
-    """Retrieve profile information for the current user."""
+    """Retrieve profile information for the current user, including roles and permissions."""
     try:
+        # Validate SystemAction.PROFILE_UPDATE
+        if not await validate_enum_value(SystemAction, SystemAction.PROFILE_UPDATE.value):
+            logger.warning(f"Invalid SystemAction value: {SystemAction.PROFILE_UPDATE.value}")
+            raise ValidationError(detail=f"Invalid system action: {SystemAction.PROFILE_UPDATE.value}")
+
+        # Fetch user roles
+        query = select(UserRoles).where(
+            UserRoles.user_id == user.user_id,
+            UserRoles.is_active.is_(True),
+            UserRoles.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        user_roles = result.scalars().all()
+
+        # Initialize roles and permissions lists
+        roles = []
+        permissions = set()
+
+        # Fetch role details and permissions
+        for user_role in user_roles:
+            role_query = select(Roles).where(
+                Roles.role_id == user_role.role_id,
+                Roles.is_active.is_(True),
+                Roles.deleted_at.is_(None)
+            )
+            role_result = await db.execute(role_query)
+            role = role_result.scalar_one_or_none()
+
+            if role:
+                roles.append(role.role_name)
+                if role.permissions.get("all_permissions", False):
+                    # Include all permissions for super_admin
+                    permissions.update(PERMISSION_GROUPS[PermissionGroup.SUPER_ADMIN])
+                else:
+                    # Add individual permissions from the role
+                    permissions.update(
+                        key for key, value in role.permissions.items() if value and key != "all_permissions"
+                    )
+
+        # Log fetched roles and permissions for debugging
+        logger.info(
+            f"Profile retrieved for user_id: {user.user_id}, roles: {roles}, permissions: {list(permissions)}",
+            extra={"request_id": request_id, "user_id": user.user_id}
+        )
+
+        # Create system log for profile retrieval
+        log = SystemLogCreate(
+            user_id=user.user_id,
+            action=SystemAction.PROFILE_UPDATE,
+            table_affected="users",
+            record_id=user.user_id,
+            old_values=None,
+            new_values={
+                "user_id": user.user_id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "employee_id": user.employee_id,
+                "department_id": user.department_id,
+                "is_active": user.is_active,
+                "roles": roles,
+                "permissions": list(permissions)
+            },
+            ip_address=str(request.client.host) if request else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+            request_id=request_id
+        )
+        system_log = await create_system_log(log, request, user, db, settings, request_id)
+
+        # Check if system_log is None
+        if system_log is None:
+            logger.error(
+                f"Failed to create system log for profile retrieval, user_id: {user.user_id}",
+                extra={"request_id": request_id, "user_id": user.user_id}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create system log for profile retrieval"
+            )
+
         return {
             "user_id": user.user_id,
             "email": user.email,
@@ -293,9 +377,14 @@ async def get_current_user_profile(
             "last_name": user.last_name,
             "employee_id": user.employee_id,
             "department_id": user.department_id,
-            "is_active": user.is_active
+            "is_active": user.is_active,
+            "roles": roles,
+            "permissions": list(permissions)
         }
 
+    except ValidationError as e:
+        logger.error(f"Validation error during profile retrieval for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except InvalidRequestError as e:
         logger.error(f"Mapper initialization error retrieving profile for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(
