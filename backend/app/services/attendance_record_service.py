@@ -92,6 +92,26 @@ async def clock_in(
             db.add(db_record)
             await db.flush()  # Flush to get the ID before committing
             
+            # Get admin users and send notifications BEFORE commit
+            if settings.NOTIFY_ON_ATTENDANCE:
+                admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
+                recipients = [(user.email, user.first_name)]
+                recipients.extend([(admin.email, admin.first_name) for admin in admins])
+                for email, first_name in recipients:
+                    await send_email(
+                        to_email=email,
+                        subject=f"Clock-In Recorded (ID: {db_record.attendance_id})",
+                        body=(
+                            f"Dear {first_name},\n\n"
+                            f"A clock-in has been recorded for user ID {user.user_id} at {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}.\n"
+                            f"Attendance ID: {db_record.attendance_id}\n"
+                            f"Location: {db_record.location or 'Not provided'}\n\n"
+                            f"Please review in the Employee Management System.\n\n"
+                            f"Best regards,\nEmployee Management System"
+                        ),
+                        request_id=request_id
+                    )
+            
             # Log action
             system_log = SystemLogs(
                 user_id=user.user_id,
@@ -125,26 +145,6 @@ async def clock_in(
             f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
             extra={"request_id": request_id}
         )
-
-        # Notify user and admins if enabled
-        if settings.NOTIFY_ON_ATTENDANCE:
-            recipients = [(user.email, user.first_name)]
-            admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
-            recipients.extend([(admin.email, admin.first_name) for admin in admins])
-            for email, first_name in recipients:
-                await send_email(
-                    to_email=email,
-                    subject=f"Clock-In Recorded (ID: {db_record.attendance_id})",
-                    body=(
-                        f"Dear {first_name},\n\n"
-                        f"A clock-in has been recorded for user ID {user.user_id} at {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}.\n"
-                        f"Attendance ID: {db_record.attendance_id}\n"
-                        f"Location: {db_record.location or 'Not provided'}\n\n"
-                        f"Please review in the Employee Management System.\n\n"
-                        f"Best regards,\nEmployee Management System"
-                    ),
-                    request_id=request_id
-                )
 
         logger.info(
             f"User clocked in, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}",
@@ -227,6 +227,11 @@ async def clock_out(
                     detail=f"Shift duration ({total_hours:.2f} hours) is less than the minimum required ({settings.MINIMUM_SHIFT_DURATION} hours)"
                 )
 
+        # Get admin users for notifications BEFORE database operations
+        admins = []
+        if settings.NOTIFY_ON_ATTENDANCE:
+            admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
+
         # Update record
         ip_address = str(request.client.host) if request.client and request.client.host else None
         db_record.clock_out_time = current_time
@@ -254,38 +259,10 @@ async def clock_out(
 
         db_record.updated_at = current_time
         db.add(db_record)
-        await db.commit()
-        await db.refresh(db_record)
 
-        # Log action
-        system_log = SystemLogs(
-            user_id=user.user_id,
-            action=SystemAction.CLOCK_OUT,
-            table_affected="attendance_records",
-            record_id=db_record.attendance_id,
-            old_values=None,
-            new_values=db_record.__dict__,
-            ip_address=ip_address,
-            user_agent=request.headers.get("user-agent"),
-            timestamp=current_time,
-            request_id=request_id
-        )
-        db.add(system_log)
-        await db.commit()
-
-        # Invalidate cache
-        await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
-        invalidate_user_cache(user.user_id)
-        invalidate_user_cache(user.user_id)  # Invalidate current user's cache (same as user in this case)
-        logger.info(
-            f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
-            extra={"request_id": request_id}
-        )
-
-        # Notify user and admins if enabled
+        # Send notifications BEFORE commit
         if settings.NOTIFY_ON_ATTENDANCE:
             recipients = [(user.email, user.first_name)]
-            admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
             recipients.extend([(admin.email, admin.first_name) for admin in admins])
             for email, first_name in recipients:
                 await send_email(
@@ -302,6 +279,31 @@ async def clock_out(
                     ),
                     request_id=request_id
                 )
+
+        # Log action
+        system_log = SystemLogs(
+            user_id=user.user_id,
+            action=SystemAction.CLOCK_OUT,
+            table_affected="attendance_records",
+            record_id=db_record.attendance_id,
+            old_values=None,
+            new_values=db_record.__dict__,
+            ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
+            timestamp=current_time,
+            request_id=request_id
+        )
+        db.add(system_log)
+        await db.commit()
+        await db.refresh(db_record)
+
+        # Invalidate cache
+        await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
+        invalidate_user_cache(user.user_id)
+        logger.info(
+            f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
+            extra={"request_id": request_id}
+        )
 
         logger.info(
             f"User clocked out, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}, total_hours: {db_record.total_hours or 0}",

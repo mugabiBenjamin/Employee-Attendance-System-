@@ -125,3 +125,37 @@ async def get_users_with_permission(permission: str, db: AsyncSession) -> List[U
     except Exception as e:
         logger.error(f"Error getting users with permission {permission}: {str(e)}")
         return []
+
+def serialize_model_for_logging(model) -> dict:
+    """Convert SQLAlchemy model to JSON-serializable dict."""
+    result = {}
+    for column in model.__table__.columns:
+        value = getattr(model, column.name)
+        if value is None:
+            result[column.name] = None
+        elif hasattr(value, 'isoformat'):  # datetime/date
+            result[column.name] = value.isoformat()
+        elif hasattr(value, 'value'):  # enum
+            result[column.name] = value.value
+        else:
+            result[column.name] = value
+    return result
+
+def serialize_dict_for_logging(data_dict: dict) -> dict:
+    """Convert dictionary with potentially non-serializable values to JSON-serializable dict."""
+    if not data_dict:
+        return None
+        
+    result = {}
+    for key, value in data_dict.items():
+        if value is None:
+            result[key] = None
+        elif hasattr(value, 'isoformat'):  # datetime/date
+            result[key] = value.isoformat()
+        elif hasattr(value, 'value'):  # enum
+            result[key] = value.value
+        elif isinstance(value, (int, float, str, bool)):
+            result[key] = value
+        else:
+            result[key] = str(value)
+    return result

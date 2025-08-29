@@ -18,7 +18,7 @@ from app.core.security import get_current_user
 from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_department_exists
-from app.core.utils import get_request_id, get_users_with_permission
+from app.core.utils import get_request_id, get_users_with_permission, serialize_dict_for_logging, serialize_model_for_logging
 from app.services.system_log_service import create_system_log
 from app.core.mail import send_email
 import logging
@@ -306,14 +306,14 @@ async def generate_attendance_summary(
         await db.commit()
         await db.refresh(db_summary)
 
-        # Log the action
+        # Log the action using the helper functions for serialization
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.GENERATE_REPORT,
             table_affected="attendance_summary",
             record_id=db_summary.user_id,
-            old_values=old_values,
-            new_values=db_summary.__dict__,
+            old_values=serialize_dict_for_logging(old_values),
+            new_values=serialize_model_for_logging(db_summary),
             ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             request_id=request_id
