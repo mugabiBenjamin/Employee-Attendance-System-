@@ -11,11 +11,11 @@ from app.schemas.system_log import SystemLogCreate
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserDepartmentNotFoundError, DatabaseError, ResourceConflictError, UserNotFoundError, DepartmentNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions_dependency, get_user_permissions, invalidate_cache_prefix
+from app.core.permissions import require_permissions_dependency, get_user_permissions
+from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.services.system_log_service import create_system_log
 from app.core.validators import validate_user_exists, validate_department_exists
 from app.core.config import Settings, get_settings
-from app.core.database import get_db, get_cache, set_cache
 from app.core.utils import get_request_id
 import logging
 

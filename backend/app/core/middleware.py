@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Request
-from app.core.database import ensure_session_factory
+from fastapi import FastAPI, Request, Depends
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.enums import SystemAction
 from app.models.system_logs import SystemLogs
 from app.core.config import settings
+from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 import uuid
 import re
@@ -23,7 +24,6 @@ def determine_system_action(path: str, method: str) -> str | None:
         "DELETE": SystemAction.DELETE.value,
     }
     return METHOD_FALLBACK.get(method)
-
 
 def get_table_affected(path: str) -> str | None:
     """Determine the affected table based on the route path."""
@@ -60,12 +60,11 @@ def get_table_affected(path: str) -> str | None:
 
     return None
 
-
 def setup_middleware(app: FastAPI) -> None:
     """Setup middleware for logging system actions."""
 
     @app.middleware("http")
-    async def log_system_actions(request: Request, call_next):
+    async def log_system_actions(request: Request, call_next, db: AsyncSession = Depends(get_db)):
         print(f"Request query params: {dict(request.query_params)}")
         print(f"Request path params: {request.path_params}")
         
@@ -90,13 +89,6 @@ def setup_middleware(app: FastAPI) -> None:
         action = determine_system_action(path, method)
 
         if action:
-            try:
-                session_factory = ensure_session_factory()
-            except RuntimeError:
-                # Database not initialized yet, skip logging
-                logger.warning("Database not initialized, skipping system logging", extra={"request_id": request_id})
-                return response
-
             # Safe way to get user from request state
             user = getattr(request.state, "user", None)
             user_id = getattr(user, 'user_id', None) if user else None
@@ -107,7 +99,7 @@ def setup_middleware(app: FastAPI) -> None:
             except Exception as e:
                 logger.warning(f"Failed to get client IP: {str(e)}", extra={"request_id": request_id})
 
-            async with session_factory() as session:
+            async def log_action(session: AsyncSession):
                 try:
                     system_log = SystemLogs(
                         user_id=user_id,
@@ -132,5 +124,17 @@ def setup_middleware(app: FastAPI) -> None:
                         extra={"request_id": request_id}
                     )
                     await session.rollback()
+
+            try:
+                # Ensure db is an AsyncSession instance, create new session if not
+                session = db if isinstance(db, AsyncSession) else AsyncSessionLocal()
+                try:
+                    await log_action(session)
+                finally:
+                    # Close the session only if we created a new one
+                    if not isinstance(db, AsyncSession):
+                        await session.close()
+            except Exception as e:
+                logger.error(f"Unexpected error in middleware logging: {str(e)}", extra={"request_id": request_id})
 
         return response

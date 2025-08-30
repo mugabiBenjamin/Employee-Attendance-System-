@@ -1,8 +1,8 @@
-from datetime import date, datetime, datetime, timedelta, timezone
+import asyncio
+from datetime import date, datetime, timedelta, timezone
 from celery import Celery
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.sql import text, select
-import asyncio
 import logging
 import aiofiles
 import csv
@@ -40,13 +40,21 @@ app.conf.update(
 class TaskConfig(BaseModel):
     task_name: str
     description: str
-
     model_config = ConfigDict(from_attributes=True)
 
 # Ensure DB and Redis are initialized before tasks run
 @app.on_after_configure.connect
 def setup_task_prerequisites(**kwargs):
-    asyncio.run(initialize_engine_and_session())
+    async def init_async():
+        await initialize_engine_and_session()
+        logger.info("Database engine and session initialized for Celery tasks")
+    
+    # Run the async initialization in a new event loop
+    try:
+        asyncio.run(init_async())
+    except Exception as e:
+        logger.error(f"Failed to initialize database for Celery tasks: {str(e)}")
+        raise
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename to prevent path traversal and invalid characters."""
@@ -88,125 +96,117 @@ async def fetch_attendance_records(user_id: int, start_date: str, end_date: str,
         raise
 
 @app.task
-def refresh_materialized_view():
+async def refresh_materialized_view():
     """Celery task to refresh the attendance_summary materialized view."""
-    async def _refresh():
-        async with AsyncSessionLocal() as session:
-            try:
-                await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY attendance_summary"))
-                await session.commit()
-                logger.info("Materialized view 'attendance_summary' refreshed successfully")
-                return {"status": "success", "message": "Materialized view refreshed"}
-            except Exception as e:
-                logger.error(f"Error refreshing materialized view: {str(e)}")
-                await session.rollback()
-                raise
-    return asyncio.run(_refresh())
+    async with AsyncSessionLocal() as session:
+        try:
+            await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY attendance_summary"))
+            await session.commit()
+            logger.info("Materialized view 'attendance_summary' refreshed successfully")
+            return {"status": "success", "message": "Materialized view refreshed"}
+        except Exception as e:
+            logger.error(f"Error refreshing materialized view: {str(e)}")
+            await session.rollback()
+            raise
 
 @app.task
-def send_email_task(notification_type: str, context: dict):
+async def send_email_task(notification_type: str, context: dict):
     """Celery task to send emails asynchronously."""
-    async def _send_email():
-        async with AsyncSessionLocal() as session:
-            try:
-                await send_email_notification(notification_type, context, session)
-                logger.info(f"Email sent successfully for {notification_type} to user_id: {context.get('user_id')}")
-                return {"status": "success", "message": f"Email sent for {notification_type}"}
-            except Exception as e:
-                logger.error(f"Failed to send email for {notification_type}: {str(e)}")
-                raise
-    return asyncio.run(_send_email())
+    async with AsyncSessionLocal() as session:
+        try:
+            await send_email_notification(notification_type, context, session)
+            logger.info(f"Email sent successfully for {notification_type} to user_id: {context.get('user_id')}")
+            return {"status": "success", "message": f"Email sent for {notification_type}"}
+        except Exception as e:
+            logger.error(f"Failed to send email for {notification_type}: {str(e)}")
+            raise
 
 @app.task
-def generate_attendance_csv_task(user_id: int, start_date: str, end_date: str, filename: str):
+async def generate_attendance_csv_task(user_id: int, start_date: str, end_date: str, filename: str):
     """Celery task to generate attendance CSV report asynchronously."""
-    async def _generate_csv():
-        sanitized_filename = sanitize_filename(filename)
-        output_path = os.path.join(settings.UPLOAD_FOLDER, sanitized_filename)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        async with AsyncSessionLocal() as session:
-            try:
-                records = await fetch_attendance_records(user_id, start_date, end_date, session)
+    sanitized_filename = sanitize_filename(filename)
+    output_path = os.path.join(settings.UPLOAD_FOLDER, sanitized_filename)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    async with AsyncSessionLocal() as session:
+        try:
+            records = await fetch_attendance_records(user_id, start_date, end_date, session)
 
-                output = io.StringIO()
-                writer = csv.writer(output)
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow([
+                "Record ID", "Date", "Clock In", "Clock Out", 
+                "Status", "Total Hours", "Overtime Hours"
+            ])
+            
+            for record in records:
+                # Access Row tuple elements by index
                 writer.writerow([
-                    "Record ID", "Date", "Clock In", "Clock Out", 
-                    "Status", "Total Hours", "Overtime Hours"
+                    record[0],  # attendance_id
+                    record[1],  # date
+                    record[2],  # clock_in_time
+                    record[3],  # clock_out_time
+                    record[4],  # status
+                    record[5],  # total_hours
+                    record[6]   # overtime_hours
                 ])
-                
-                for record in records:
-                    # Access Row tuple elements by index
-                    writer.writerow([
-                        record[0],  # attendance_id
-                        record[1],  # date
-                        record[2],  # clock_in_time
-                        record[3],  # clock_out_time
-                        record[4],  # status
-                        record[5],  # total_hours
-                        record[6]   # overtime_hours
-                    ])
 
-                async with aiofiles.open(output_path, "w", encoding='utf-8') as f:
-                    await f.write(output.getvalue())
+            async with aiofiles.open(output_path, "w", encoding='utf-8') as f:
+                await f.write(output.getvalue())
 
-                logger.info(f"Attendance CSV generated for user_id: {user_id}, file: {output_path}")
-                return {"status": "success", "message": f"CSV generated: {output_path}"}
-            except Exception as e:
-                logger.error(f"Error generating attendance CSV for user_id {user_id}: {str(e)}")
-                raise
-    return asyncio.run(_generate_csv())
+            logger.info(f"Attendance CSV generated for user_id: {user_id}, file: {output_path}")
+            return {"status": "success", "message": f"CSV generated: {output_path}"}
+        except Exception as e:
+            logger.error(f"Error generating attendance CSV for user_id {user_id}: {str(e)}")
+            raise
 
 @app.task
-def generate_attendance_pdf_task(user_id: int, start_date: str, end_date: str, filename: str):
+async def generate_attendance_pdf_task(user_id: int, start_date: str, end_date: str, filename: str):
     """Celery task to generate attendance PDF report asynchronously."""
-    async def _generate_pdf():
-        sanitized_filename = sanitize_filename(filename)
-        output_path = os.path.join(settings.UPLOAD_FOLDER, sanitized_filename)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        async with AsyncSessionLocal() as session:
-            try:
-                records = await fetch_attendance_records(user_id, start_date, end_date, session)
+    sanitized_filename = sanitize_filename(filename)
+    output_path = os.path.join(settings.UPLOAD_FOLDER, sanitized_filename)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    async with AsyncSessionLocal() as session:
+        try:
+            records = await fetch_attendance_records(user_id, start_date, end_date, session)
 
-                data = [[
-                    "Record ID", "Date", "Clock In", "Clock Out", 
-                    "Status", "Total Hours", "Overtime Hours"
-                ]]
-                
-                for record in records:
-                    # Access Row tuple elements by index with safe conversion
-                    data.append([
-                        str(record[0]) if record[0] is not None else "",  # attendance_id
-                        str(record[1]) if record[1] is not None else "",  # date
-                        str(record[2]) if record[2] is not None else "",  # clock_in_time
-                        str(record[3]) if record[3] is not None else "",  # clock_out_time
-                        str(record[4]) if record[4] is not None else "",  # status
-                        str(record[5]) if record[5] is not None else "",  # total_hours
-                        str(record[6]) if record[6] is not None else ""   # overtime_hours
-                    ])
+            data = [[
+                "Record ID", "Date", "Clock In", "Clock Out", 
+                "Status", "Total Hours", "Overtime Hours"
+            ]]
+            
+            for record in records:
+                # Access Row tuple elements by index with safe conversion
+                data.append([
+                    str(record[0]) if record[0] is not None else "",  # attendance_id
+                    str(record[1]) if record[1] is not None else "",  # date
+                    str(record[2]) if record[2] is not None else "",  # clock_in_time
+                    str(record[3]) if record[3] is not None else "",  # clock_out_time
+                    str(record[4]) if record[4] is not None else "",  # status
+                    str(record[5]) if record[5] is not None else "",  # total_hours
+                    str(record[6]) if record[6] is not None else ""   # overtime_hours
+                ])
 
-                doc = SimpleDocTemplate(output_path, pagesize=letter)
-                table = Table(data)
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                ]))
-                doc.build([table])
+            doc = SimpleDocTemplate(output_path, pagesize=letter)
+            table = Table(data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            doc.build([table])
 
-                logger.info(f"Attendance PDF generated for user_id: {user_id}, file: {output_path}")
-                return {"status": "success", "message": f"PDF generated: {output_path}"}
-            except Exception as e:
-                logger.error(f"Error generating attendance PDF for user_id {user_id}: {str(e)}")
-                raise
-    return asyncio.run(_generate_pdf())
+            logger.info(f"Attendance PDF generated for user_id: {user_id}, file: {output_path}")
+            return {"status": "success", "message": f"PDF generated: {output_path}"}
+        except Exception as e:
+            logger.error(f"Error generating attendance PDF for user_id {user_id}: {str(e)}")
+            raise
 
 def dispatch_csv_report(user_id: int, start_date: date, end_date: date) -> str:
     """Dispatch CSV report generation task and return job ID."""

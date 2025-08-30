@@ -12,6 +12,7 @@ from app.models.roles import Roles
 from app.core.exceptions import AuthorizationError
 import cachetools
 import logging
+import anyio
 
 logger = logging.getLogger(__name__)
 
@@ -418,10 +419,10 @@ async def get_effective_permissions(user_id: int, db: AsyncSession) -> dict:
             "error": str(e)
         }
 
-def invalidate_user_cache(user_id: int):
+async def invalidate_user_cache(user_id: int):
     """Invalidate cached permissions for a user."""
     cache_key = f"user_{user_id}_permissions"
-    user_permission_cache.pop(cache_key, None)
+    await anyio.to_thread.run_sync(lambda: user_permission_cache.pop(cache_key, None))
 
 def invalidate_role_cache(role_id: int):
     """Invalidate cached permissions for a role."""
@@ -433,8 +434,17 @@ def invalidate_department_cache(department_id: int):
     cache_key = f"department_{department_id}_permissions"
     department_permission_cache.pop(cache_key, None)
 
-async def invalidate_cache_prefix(prefix: str):
-    """Invalidate all cached entries that start with the given prefix."""
+async def invalidate_in_memory_cache_prefix(prefix: str):
+    """
+    Invalidate all in-memory cached entries (TTLCache) that start with the given prefix.
+
+    This function clears cache entries in user_permission_cache, role_permission_cache,
+    and department_permission_cache that match the specified prefix. It is distinct from
+    the Redis-based `invalidate_cache_prefix` in `database.py`, which handles Redis cache keys.
+
+    Args:
+        prefix (str): The prefix to match cache keys against.
+    """
     try:
         keys_to_remove = []
         
@@ -452,11 +462,11 @@ async def invalidate_cache_prefix(prefix: str):
         
         for cache_type, key in keys_to_remove:
             if cache_type == 'user':
-                user_permission_cache.pop(key, None)
+                await anyio.to_thread.run_sync(lambda: user_permission_cache.pop(key, None))
             elif cache_type == 'role':
-                role_permission_cache.pop(key, None)
+                await anyio.to_thread.run_sync(lambda: role_permission_cache.pop(key, None))
             elif cache_type == 'dept':
-                department_permission_cache.pop(key, None)
+                await anyio.to_thread.run_sync(lambda: department_permission_cache.pop(key, None))
                 
         logger.debug(f"Invalidated {len(keys_to_remove)} cache entries with prefix: {prefix}")
         
