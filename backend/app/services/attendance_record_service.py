@@ -40,10 +40,19 @@ async def clock_in(
     try:
         current_time = datetime.now(timezone.utc)
         current_date = current_time.date()
-        eat_tz = ZoneInfo("Africa/Nairobi")  # EAT is UTC+3
+        eat_tz = ZoneInfo("Africa/Nairobi")
         current_time_eat = current_time.astimezone(eat_tz)
 
-        # Validate location if required
+        # Get admin users for notifications BEFORE any database operations
+        admins = []
+        if settings.NOTIFY_ON_ATTENDANCE:
+            try:
+                admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
+            except Exception as e:
+                logger.error(f"Failed to get admin users: {str(e)}", extra={"request_id": request_id})
+                # Continue without notifications rather than failing the clock-in
+
+        # Validation logic
         if settings.REQUIRE_ATTENDANCE_LOCATION and (not location or location.strip() == ""):
             raise ValidationError(detail="Location is required for clock-in")
         if location and len(location) > 255:
@@ -62,7 +71,7 @@ async def clock_in(
         if existing_record:
             raise AttendanceError(detail="User already clocked in for today")
 
-        # Check for holidays if enabled
+        # Holiday check
         if settings.CHECK_HOLIDAYS_ON_ATTENDANCE:
             query_holiday = select(HolidayCalendar).where(
                 HolidayCalendar.holiday_date == current_date,
@@ -73,12 +82,12 @@ async def clock_in(
             if result_holiday.scalar_one_or_none():
                 raise AttendanceError(detail="Clock-in not allowed on a holiday")
 
-        # Validate IP address
+        # IP address validation
         ip_address = str(request.client.host) if request.client and request.client.host else None
         if settings.REQUIRE_ATTENDANCE_IP and not ip_address:
             raise ValidationError(detail="IP address is required for clock-in")
 
-        # Create attendance record with explicit transaction handling
+        # Create attendance record
         try:
             db_record = AttendanceRecords(
                 **AttendanceRecordCreate(
@@ -92,58 +101,7 @@ async def clock_in(
                 updated_at=current_time,
             )
             db.add(db_record)
-            await db.flush()  # Flush to get the ID before committing
-            
-            # Get admin users and dispatch notifications to Celery BEFORE commit
-            if settings.NOTIFY_ON_ATTENDANCE:
-                admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
-                recipients = [(user.email, user.first_name)]
-                recipients.extend([(admin.email, admin.first_name) for admin in admins])
-                for email, first_name in recipients:
-                    context = {
-                        "user_id": user.user_id,
-                        "attendance_id": db_record.attendance_id,
-                        "email": email,
-                        "first_name": first_name,
-                        "clock_in_time": current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z'),
-                        "location": db_record.location or "Not provided",
-                        "request_id": request_id
-                    }
-                    try:
-                        send_email_task.delay("clock_in_notification", context)
-                        logger.info(
-                            f"Dispatched email task for clock-in notification to {email}",
-                            extra={"request_id": request_id}
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to dispatch email task for {email}: {str(e)}",
-                            extra={"request_id": request_id}
-                        )
-                        # Fallback to synchronous email sending
-                        try:
-                            await send_email(
-                                to_email=email,
-                                subject=f"Clock-In Recorded (ID: {db_record.attendance_id})",
-                                body=(
-                                    f"Dear {first_name},\n\n"
-                                    f"A clock-in has been recorded for user ID {user.user_id} at {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}.\n"
-                                    f"Attendance ID: {db_record.attendance_id}\n"
-                                    f"Location: {db_record.location or 'Not provided'}\n\n"
-                                    f"Please review in the Employee Management System.\n\n"
-                                    f"Best regards,\nEmployee Management System"
-                                ),
-                                request_id=request_id
-                            )
-                            logger.info(
-                                f"Fallback synchronous email sent for clock-in notification to {email}",
-                                extra={"request_id": request_id}
-                            )
-                        except Exception as fallback_error:
-                            logger.error(
-                                f"Fallback email sending failed for {email}: {str(fallback_error)}",
-                                extra={"request_id": request_id}
-                            )
+            await db.flush()  # Get the ID
             
             # Log action
             system_log = SystemLogs(
@@ -159,25 +117,50 @@ async def clock_in(
                 request_id=request_id
             )
             db.add(system_log)
+            
+            # COMMIT TRANSACTION
             await db.commit()
             await db.refresh(db_record)
             
         except Exception as db_error:
             await db.rollback()
-            # Check for unique constraint violation
             if "unique_user_date" in str(db_error) or "duplicate key value violates unique constraint" in str(db_error):
                 raise AttendanceError(detail="User already clocked in for today")
             else:
                 logger.error(f"Database error during clock-in for user_id {user.user_id}: {str(db_error)}", extra={"request_id": request_id})
                 raise AttendanceError(detail="Error creating attendance record")
 
+        # Dispatch notifications AFTER successful commit and outside db context
+        if settings.NOTIFY_ON_ATTENDANCE and admins:
+            recipients = [(user.email, user.first_name)]
+            recipients.extend([(admin.email, admin.first_name) for admin in admins])
+            
+            for email, first_name in recipients:
+                context = {
+                    "user_id": user.user_id,
+                    "attendance_id": db_record.attendance_id,
+                    "email": email,
+                    "first_name": first_name,
+                    "clock_in_time": current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                    "location": db_record.location or "Not provided",
+                    "request_id": request_id
+                }
+                try:
+                    # Only use Celery task - remove async fallback that causes greenlet issues
+                    send_email_task.delay("clock_in_notification", context)
+                    logger.info(
+                        f"Dispatched email task for clock-in notification to {email}",
+                        extra={"request_id": request_id}
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to dispatch email task for {email}: {str(e)}",
+                        extra={"request_id": request_id}
+                    )
+
         # Invalidate cache
         await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
         await invalidate_user_cache(user.user_id)
-        logger.info(
-            f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
-            extra={"request_id": request_id}
-        )
 
         logger.info(
             f"User clocked in, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}",
@@ -209,6 +192,14 @@ async def clock_out(
         current_date = current_time.date()
         eat_tz = ZoneInfo("Africa/Nairobi")  # EAT is UTC+3
         current_time_eat = current_time.astimezone(eat_tz)
+
+        # Get admin users for notifications BEFORE database operations
+        admins = []
+        if settings.NOTIFY_ON_ATTENDANCE:
+            try:
+                admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
+            except Exception as e:
+                logger.error(f"Failed to get admin users: {str(e)}", extra={"request_id": request_id})
 
         # Find active clock-in record
         query = select(AttendanceRecords).where(
@@ -260,11 +251,6 @@ async def clock_out(
                     detail=f"Shift duration ({total_hours:.2f} hours) is less than the minimum required ({settings.MINIMUM_SHIFT_DURATION} hours)"
                 )
 
-        # Get admin users for notifications BEFORE database operations
-        admins = []
-        if settings.NOTIFY_ON_ATTENDANCE:
-            admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
-
         # Update record
         ip_address = str(request.client.host) if request.client and request.client.host else None
         db_record.clock_out_time = current_time
@@ -293,58 +279,6 @@ async def clock_out(
         db_record.updated_at = current_time
         db.add(db_record)
 
-        # Send notifications to Celery BEFORE commit
-        if settings.NOTIFY_ON_ATTENDANCE:
-            recipients = [(user.email, user.first_name)]
-            recipients.extend([(admin.email, admin.first_name) for admin in admins])
-            for email, first_name in recipients:
-                context = {
-                    "user_id": user.user_id,
-                    "attendance_id": db_record.attendance_id,
-                    "email": email,
-                    "first_name": first_name,
-                    "clock_out_time": current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z'),
-                    "total_hours": db_record.total_hours or 0,
-                    "overtime_hours": db_record.overtime_hours or 0,
-                    "request_id": request_id
-                }
-                try:
-                    send_email_task.delay("clock_out_notification", context)
-                    logger.info(
-                        f"Dispatched email task for clock-out notification to {email}",
-                        extra={"request_id": request_id}
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to dispatch email task for {email}: {str(e)}",
-                        extra={"request_id": request_id}
-                    )
-                    # Fallback to synchronous email sending
-                    try:
-                        await send_email(
-                            to_email=email,
-                            subject=f"Clock-Out Recorded (ID: {db_record.attendance_id})",
-                            body=(
-                                f"Dear {first_name},\n\n"
-                                f"A clock-out has been recorded for user ID {user.user_id} at {current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z')}.\n"
-                                f"Attendance ID: {db_record.attendance_id}\n"
-                                f"Total Hours: {db_record.total_hours or 0:.2f}\n"
-                                f"Overtime Hours: {db_record.overtime_hours or 0:.2f}\n\n"
-                                f"Please review in the Employee Management System.\n\n"
-                                f"Best regards,\nEmployee Management System"
-                            ),
-                            request_id=request_id
-                        )
-                        logger.info(
-                            f"Fallback synchronous email sent for clock-out notification to {email}",
-                            extra={"request_id": request_id}
-                        )
-                    except Exception as fallback_error:
-                        logger.error(
-                            f"Fallback email sending failed for {email}: {str(fallback_error)}",
-                            extra={"request_id": request_id}
-                        )
-
         # Log action
         system_log = SystemLogs(
             user_id=user.user_id,
@@ -359,8 +293,39 @@ async def clock_out(
             request_id=request_id
         )
         db.add(system_log)
+        
+        # COMMIT TRANSACTION
         await db.commit()
         await db.refresh(db_record)
+
+        # Send notifications AFTER commit and outside db context
+        if settings.NOTIFY_ON_ATTENDANCE and admins:
+            recipients = [(user.email, user.first_name)]
+            recipients.extend([(admin.email, admin.first_name) for admin in admins])
+            
+            for email, first_name in recipients:
+                context = {
+                    "user_id": user.user_id,
+                    "attendance_id": db_record.attendance_id,
+                    "email": email,
+                    "first_name": first_name,
+                    "clock_out_time": current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                    "total_hours": db_record.total_hours or 0,
+                    "overtime_hours": db_record.overtime_hours or 0,
+                    "request_id": request_id
+                }
+                try:
+                    # Only use Celery task - remove problematic async fallback
+                    send_email_task.delay("clock_out_notification", context)
+                    logger.info(
+                        f"Dispatched email task for clock-out notification to {email}",
+                        extra={"request_id": request_id}
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to dispatch email task for {email}: {str(e)}",
+                        extra={"request_id": request_id}
+                    )
 
         # Invalidate cache
         await invalidate_cache_prefix(f"attendance_history:{user.user_id}")

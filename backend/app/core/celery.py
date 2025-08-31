@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from celery import Celery
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.sql import text, select
@@ -96,8 +96,16 @@ async def fetch_attendance_records(user_id: int, start_date: str, end_date: str,
         raise
 
 @app.task
-async def refresh_materialized_view():
+def refresh_materialized_view():
     """Celery task to refresh the attendance_summary materialized view."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_refresh_view_async())
+    finally:
+        loop.close()
+
+async def _refresh_view_async():
     async with AsyncSessionLocal() as session:
         try:
             await session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY attendance_summary"))
@@ -110,8 +118,17 @@ async def refresh_materialized_view():
             raise
 
 @app.task
-async def send_email_task(notification_type: str, context: dict):
+def send_email_task(notification_type: str, context: dict):
     """Celery task to send emails asynchronously."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_send_email_async(notification_type, context))
+    finally:
+        loop.close()
+
+async def _send_email_async(notification_type: str, context: dict):
+    """Async function to send emails."""
     async with AsyncSessionLocal() as session:
         try:
             await send_email_notification(notification_type, context, session)
@@ -122,8 +139,16 @@ async def send_email_task(notification_type: str, context: dict):
             raise
 
 @app.task
-async def generate_attendance_csv_task(user_id: int, start_date: str, end_date: str, filename: str):
+def generate_attendance_csv_task(user_id: int, start_date: str, end_date: str, filename: str):
     """Celery task to generate attendance CSV report asynchronously."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_generate_csv_async(user_id, start_date, end_date, filename))
+    finally:
+        loop.close()
+
+async def _generate_csv_async(user_id: int, start_date: str, end_date: str, filename: str):
     sanitized_filename = sanitize_filename(filename)
     output_path = os.path.join(settings.UPLOAD_FOLDER, sanitized_filename)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -140,15 +165,8 @@ async def generate_attendance_csv_task(user_id: int, start_date: str, end_date: 
             ])
             
             for record in records:
-                # Access Row tuple elements by index
                 writer.writerow([
-                    record[0],  # attendance_id
-                    record[1],  # date
-                    record[2],  # clock_in_time
-                    record[3],  # clock_out_time
-                    record[4],  # status
-                    record[5],  # total_hours
-                    record[6]   # overtime_hours
+                    record[0], record[1], record[2], record[3], record[4], record[5], record[6]
                 ])
 
             async with aiofiles.open(output_path, "w", encoding='utf-8') as f:
@@ -161,8 +179,16 @@ async def generate_attendance_csv_task(user_id: int, start_date: str, end_date: 
             raise
 
 @app.task
-async def generate_attendance_pdf_task(user_id: int, start_date: str, end_date: str, filename: str):
+def generate_attendance_pdf_task(user_id: int, start_date: str, end_date: str, filename: str):
     """Celery task to generate attendance PDF report asynchronously."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_generate_pdf_async(user_id, start_date, end_date, filename))
+    finally:
+        loop.close()
+
+async def _generate_pdf_async(user_id: int, start_date: str, end_date: str, filename: str):
     sanitized_filename = sanitize_filename(filename)
     output_path = os.path.join(settings.UPLOAD_FOLDER, sanitized_filename)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -177,15 +203,14 @@ async def generate_attendance_pdf_task(user_id: int, start_date: str, end_date: 
             ]]
             
             for record in records:
-                # Access Row tuple elements by index with safe conversion
                 data.append([
-                    str(record[0]) if record[0] is not None else "",  # attendance_id
-                    str(record[1]) if record[1] is not None else "",  # date
-                    str(record[2]) if record[2] is not None else "",  # clock_in_time
-                    str(record[3]) if record[3] is not None else "",  # clock_out_time
-                    str(record[4]) if record[4] is not None else "",  # status
-                    str(record[5]) if record[5] is not None else "",  # total_hours
-                    str(record[6]) if record[6] is not None else ""   # overtime_hours
+                    str(record[0]) if record[0] is not None else "",
+                    str(record[1]) if record[1] is not None else "",
+                    str(record[2]) if record[2] is not None else "",
+                    str(record[3]) if record[3] is not None else "",
+                    str(record[4]) if record[4] is not None else "",
+                    str(record[5]) if record[5] is not None else "",
+                    str(record[6]) if record[6] is not None else ""
                 ])
 
             doc = SimpleDocTemplate(output_path, pagesize=letter)

@@ -34,23 +34,19 @@ async def clock_in_out_endpoint(
     _=Depends(require_permissions_dependency([Permission.CLOCK_IN, Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
     """Handle clock-in or clock-out requests.
-
     Args:
         clock_data: Contains the action ('clock_in' or 'clock_out') and optional location.
         request: The incoming HTTP request for logging client details.
         current_user: The authenticated user performing the action.
         db: Database session dependency.
         settings: Application settings.
-
     Returns:
         AttendanceRecordOut: The created or updated attendance record.
-
     Raises:
         HTTPException: For invalid actions (400), validation errors (422), not found (404), database errors (500), or unexpected errors (500).
     """
-    # Extract user_id early to avoid session issues in exception handlers
     user_id = current_user.user_id
-    request_id = get_request_id(request)
+    request_id = get_request_id(request) or "unknown"
     
     try:
         if clock_data.action == "clock_in":
@@ -59,23 +55,9 @@ async def clock_in_out_endpoint(
             return await clock_out(request, current_user, db, settings, request_id)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action. Must be 'clock_in' or 'clock_out'")
-    except IntegrityError as e:
-        # Handle database constraint violations
-        await db.rollback()
-        if "unique_user_date" in str(e):
-            logger.error(f"Duplicate clock-in attempt for user_id {user_id} on {date.today()}", extra={"request_id": request_id, "user_id": user_id})
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="User has already clocked in for today"
-            )
-        else:
-            logger.error(f"Database integrity error for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Database constraint violation")
-    except HTTPException as e:
-        logger.error(f"Error processing clock action {clock_data.action} for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
+    except HTTPException:
         raise
     except Exception as e:
-        await db.rollback()
         logger.error(f"Unexpected error processing clock action {clock_data.action} for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e
 
@@ -118,7 +100,7 @@ async def get_attendance_history_endpoint(
     """
     # Extract user_id early to avoid session issues in exception handlers
     current_user_id = current_user.user_id
-    request_id = get_request_id(request)
+    request_id = get_request_id(request) or "unknown"
     
     try:
         return await get_attendance_history(user_id, start_date, end_date, skip, limit, current_user, db, settings, request_id)
