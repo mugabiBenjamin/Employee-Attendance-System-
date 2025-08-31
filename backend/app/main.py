@@ -27,14 +27,34 @@ settings = get_settings()
 # Logging Configuration
 # -----------------------
 logger = logging.getLogger(__name__)
-log_handler = logging.FileHandler(settings.LOG_FILE)
-formatter = jsonlogger.JsonFormatter(
-    fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
-    json_ensure_ascii=False
-)
-log_handler.setFormatter(formatter)
-logger.handlers = [log_handler]
-logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
+try:
+    log_handler = logging.FileHandler(settings.LOG_FILE)
+    formatter = jsonlogger.JsonFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
+        json_ensure_ascii=False
+    )
+    if log_handler and formatter:
+        log_handler.setFormatter(formatter)
+        logger.handlers = [log_handler]
+        logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
+        # Verify logger.error is callable
+        if not callable(getattr(logger, 'error', None)):
+            raise ValueError("Logger error method is not callable")
+    else:
+        raise ValueError("Failed to initialize log handler or formatter")
+except Exception as e:
+    print(f"Warning: Logging setup failed: {str(e)}. Falling back to console logging.")
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    # Ensure logger is properly initialized
+    if not logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        logger.addHandler(console_handler)
+        logger.setLevel(logging.INFO)
+    # Verify logger.error again
+    if not callable(getattr(logger, 'error', None)):
+        print("Warning: Logger error method is still not callable after fallback setup.")
 
 # -----------------------
 # Rate Limiter Setup

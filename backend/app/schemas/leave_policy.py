@@ -92,5 +92,9 @@ class LeavePolicyOut(LeavePolicyBase):
 
     model_config = ConfigDict(
         from_attributes=True,
-        json_encoders={datetime: lambda v: v.isoformat()}
+        json_encoders={
+            datetime: lambda v: v.isoformat() if v else None,
+            date: lambda v: v.isoformat() if v else None,
+        },
+        arbitrary_types_allowed=True,
     )

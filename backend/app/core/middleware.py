@@ -68,22 +68,33 @@ def setup_middleware(app: FastAPI) -> None:
         print(f"Request query params: {dict(request.query_params)}")
         print(f"Request path params: {request.path_params}")
         
-        logger.info(f"Middleware processing: {request.method} {request.url.path}")
         request_id = str(uuid.uuid4())
+        # Ensure logger is callable
+        log_func = logger.info if callable(getattr(logger, 'info', None)) else print
+        log_func(f"Middleware processing: {request.method} {request.url.path}", extra={"request_id": request_id} if log_func == logger.info else None)
         
         # Safe way to set request_id on request state
         if not hasattr(request, 'state'):
             request.state = type('State', (), {})()
         request.state.request_id = request_id
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            error_msg = f"Error during call_next: {str(e)}"
+            if callable(getattr(logger, 'error', None)):
+                logger.error(error_msg, extra={"request_id": request_id})
+            else:
+                print(f"Warning: {error_msg}")
+            raise
 
         path = request.url.path
         method = request.method
 
         # Skip logging for /api/v1/auth/token to prevent duplicate SystemLogs entries
         if path.endswith(f"{settings.API_V1_STR}/auth/token"):
-            logger.debug(f"Skipping system log for endpoint: {path}", extra={"request_id": request_id})
+            debug_func = logger.debug if callable(getattr(logger, 'debug', None)) else print
+            debug_func(f"Skipping system log for endpoint: {path}", extra={"request_id": request_id} if debug_func == logger.debug else None)
             return response
 
         action = determine_system_action(path, method)
@@ -97,7 +108,8 @@ def setup_middleware(app: FastAPI) -> None:
             try:
                 ip_address = str(request.client.host) if request.client else None
             except Exception as e:
-                logger.warning(f"Failed to get client IP: {str(e)}", extra={"request_id": request_id})
+                warn_func = logger.warning if callable(getattr(logger, 'warning', None)) else print
+                warn_func(f"Failed to get client IP: {str(e)}", extra={"request_id": request_id} if warn_func == logger.warning else None)
 
             async def log_action(session: AsyncSession):
                 try:
@@ -114,14 +126,16 @@ def setup_middleware(app: FastAPI) -> None:
                     )
                     session.add(system_log)
                     await session.commit()
-                    logger.info(
+                    info_func = logger.info if callable(getattr(logger, 'info', None)) else print
+                    info_func(
                         f"Logged system action: {action} for user_id: {user_id}",
-                        extra={"request_id": request_id}
+                        extra={"request_id": request_id} if info_func == logger.info else None
                     )
                 except Exception as e:
-                    logger.error(
+                    error_func = logger.error if callable(getattr(logger, 'error', None)) else print
+                    error_func(
                         f"Failed to log system action: {str(e)}",
-                        extra={"request_id": request_id}
+                        extra={"request_id": request_id} if error_func == logger.error else None
                     )
                     await session.rollback()
 
@@ -135,6 +149,7 @@ def setup_middleware(app: FastAPI) -> None:
                     if not isinstance(db, AsyncSession):
                         await session.close()
             except Exception as e:
-                logger.error(f"Unexpected error in middleware logging: {str(e)}", extra={"request_id": request_id})
+                error_func = logger.error if callable(getattr(logger, 'error', None)) else print
+                error_func(f"Unexpected error in middleware logging: {str(e)}", extra={"request_id": request_id} if error_func == logger.error else None)
 
         return response

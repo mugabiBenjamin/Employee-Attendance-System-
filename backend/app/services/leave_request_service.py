@@ -111,6 +111,10 @@ async def create_leave_request(
         result_balance = await db.execute(query_balance)
         leave_balance = result_balance.scalar_one_or_none()
         if not leave_balance:
+            logger.debug(
+                f"No leave balance found for user_id: {leave_request.user_id}, leave_type: {leave_request.leave_type}",
+                extra={"request_id": request_id}
+            )
             raise LeaveBalanceNotFoundError(user_id=leave_request.user_id, leave_type=leave_request.leave_type)
 
         days_requested = (leave_request.end_date - leave_request.start_date).days + 1
@@ -444,6 +448,10 @@ async def update_leave_request(
             result_balance = await db.execute(query_balance)
             leave_balance = result_balance.scalar_one_or_none()
             if not leave_balance:
+                logger.debug(
+                    f"No leave balance found for user_id: {user_id}, leave_type: {leave_type}",
+                    extra={"request_id": request_id}
+                )
                 raise LeaveBalanceNotFoundError(user_id=user_id, leave_type=leave_type)
             available_days = leave_balance.allocated_days - leave_balance.used_days + leave_balance.carried_forward
             if days_requested > available_days:
@@ -617,6 +625,10 @@ async def approve_reject_leave_request(
             result_balance = await db.execute(query_balance)
             leave_balance = result_balance.scalar_one_or_none()
             if not leave_balance:
+                logger.debug(
+                    f"No leave balance found for user_id: {leave_request.user_id}, leave_type: {leave_request.leave_type}",
+                    extra={"request_id": request_id}
+                )
                 raise LeaveBalanceNotFoundError(user_id=leave_request.user_id, leave_type=leave_request.leave_type)
             available_days = leave_balance.allocated_days - leave_balance.used_days + leave_balance.carried_forward
             if leave_request.days_requested > available_days:

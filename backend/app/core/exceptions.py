@@ -110,9 +110,20 @@ class OvertimeRecordNotFoundError(ResourceNotFoundError):
     def __init__(self, record_id: Optional[int] = None):
         super().__init__("OvertimeRecord", record_id)
 
-class LeaveBalanceNotFoundError(ResourceNotFoundError):
-    def __init__(self, balance_id: Optional[int] = None):
-        super().__init__("LeaveBalance", balance_id)
+class LeaveBalanceNotFoundError(BaseCustomException):
+    def __init__(self, user_id: Optional[int] = None, leave_type: Optional[str] = None):
+        detail = "LeaveBalance not found"
+        if user_id and leave_type:
+            detail += f" for user ID {user_id} and leave type {leave_type}"
+        elif user_id:
+            detail += f" for user ID {user_id}"
+        elif leave_type:
+            detail += f" for leave type {leave_type}"
+        super().__init__(
+            detail=detail,
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="LEAVEBALANCE_NOT_FOUND"
+        )
 
 class HolidayNotFoundError(ResourceNotFoundError):
     def __init__(self, holiday_id: Optional[int] = None):

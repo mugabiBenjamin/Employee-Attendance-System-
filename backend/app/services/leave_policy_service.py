@@ -22,6 +22,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 async def create_leave_policy(
     policy: LeavePolicyCreate,
     request: Request,
@@ -31,7 +32,6 @@ async def create_leave_policy(
     request_id: Optional[str] = Depends(get_request_id),
     _= Depends(require_permissions_dependency([Permission.CREATE_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
-    """Create a new leave policy with validation, version tracking, and logging."""
     try:
         # Validate inputs
         if policy.effective_from < date.today():
@@ -41,7 +41,7 @@ async def create_leave_policy(
         if policy.employee_type not in EmployeeType:
             raise ValidationError(detail=f"Invalid employee type: {policy.employee_type}")
 
-        # Validate unique constraint
+        # Unique
         query = select(LeavePolicies).where(
             LeavePolicies.employee_type == policy.employee_type,
             LeavePolicies.leave_type == policy.leave_type,
@@ -53,7 +53,7 @@ async def create_leave_policy(
         if result.scalar_one_or_none():
             raise ValidationError(detail=f"Leave policy for {policy.employee_type} and {policy.leave_type} on {policy.effective_from} already exists")
 
-        # Create policy
+        # Create
         db_policy = LeavePolicies(
             **policy.model_dump(),
             created_at=datetime.now(timezone.utc),
@@ -106,27 +106,23 @@ async def create_leave_policy(
         # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
-        logger.info(
-            f"Cache invalidated for leave_policies, leave_balances, {len(users)} users, and current_user:{current_user.user_id}",
-            extra={"request_id": request_id}
-        )
+        invalidate_user_cache(current_user.user_id)
 
-        # Log action
+        # Log
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.CREATE_LEAVE_POLICY,
             table_affected="leave_policies",
             record_id=db_policy.policy_id,
             old_values=None,
-            new_values=db_policy.__dict__,
+            new_values=LeavePolicyOut.model_validate(db_policy).model_dump(mode="json"),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
         await create_system_log(log, request, current_user, db, request_id)
 
-        # Notify admins
+        # Notify
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         for admin in admins:
             await send_email(
@@ -155,6 +151,7 @@ async def create_leave_policy(
         logger.error(f"Unexpected error creating leave policy: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating leave policy")
 
+
 async def get_leave_policy(
     policy_id: int,
     current_user: Users = Depends(get_current_user),
@@ -163,7 +160,6 @@ async def get_leave_policy(
     request_id: Optional[str] = Depends(get_request_id),
     _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
-    """Retrieve a leave policy by ID with caching."""
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")
@@ -172,7 +168,8 @@ async def get_leave_policy(
         cached_policy = await get_cache(cache_key)
         if cached_policy:
             logger.info(f"Cache hit for policy_id: {policy_id}", extra={"request_id": request_id})
-            return LeavePolicyOut(**cached_policy)
+            # Reconstruct with validation (parses ISO strings back to date/datetime)
+            return LeavePolicyOut.model_validate(cached_policy)
 
         await validate_leave_policy_exists(db, policy_id, request_id)
 
@@ -195,7 +192,8 @@ async def get_leave_policy(
                     detail="Not authorized to view this leave policy"
                 )
 
-        policy_dict = LeavePolicyOut.model_validate(policy).model_dump()
+        # JSON-safe cache
+        policy_dict = LeavePolicyOut.model_validate(policy).model_dump(mode="json")
         await set_cache(cache_key, policy_dict, ttl=300)
         logger.info(f"Cache set for policy_id: {policy_id}", extra={"request_id": request_id})
 
@@ -218,6 +216,7 @@ async def get_leave_policy(
         logger.error(f"Unexpected error retrieving leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave policy")
 
+
 async def list_leave_policies(
     employee_type: Optional[EmployeeType] = None,
     leave_type: Optional[str] = None,
@@ -229,7 +228,6 @@ async def list_leave_policies(
     request_id: Optional[str] = Depends(get_request_id),
     _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
 ) -> List[LeavePolicyOut]:
-    """Retrieve a list of active leave policies with pagination and filtering."""
     try:
         if skip < 0 or (limit is not None and limit <= 0):
             raise ValidationError(detail="Invalid pagination parameters")
@@ -239,8 +237,11 @@ async def list_leave_policies(
         cache_key = f"leave_policies:{employee_type or 'all'}:{leave_type or 'all'}:{skip}:{limit or settings.DEFAULT_PAGE_SIZE}"
         cached_policies = await get_cache(cache_key)
         if cached_policies:
-            logger.info(f"Cache hit for leave_policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}", extra={"request_id": request_id})
-            return [LeavePolicyOut(**policy) for policy in cached_policies]
+            logger.info(
+                f"Cache hit for leave_policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}",
+                extra={"request_id": request_id}
+            )
+            return [LeavePolicyOut.model_validate(policy) for policy in cached_policies]
 
         query = select(LeavePolicies).where(
             LeavePolicies.is_active.is_(True),
@@ -262,9 +263,13 @@ async def list_leave_policies(
         result = await db.execute(query)
         policies = result.scalars().all()
 
-        policies_dict = [LeavePolicyOut.model_validate(policy).model_dump() for policy in policies]
+        # JSON-safe cache
+        policies_dict = [LeavePolicyOut.model_validate(policy).model_dump(mode="json") for policy in policies]
         await set_cache(cache_key, policies_dict, ttl=300)
-        logger.info(f"Cache set for leave_policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}", extra={"request_id": request_id})
+        logger.info(
+            f"Cache set for leave_policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}",
+            extra={"request_id": request_id}
+        )
 
         logger.info(
             f"Retrieved {len(policies)} leave policies, employee_type: {employee_type or 'all'}, leave_type: {leave_type or 'all'}",
@@ -279,6 +284,7 @@ async def list_leave_policies(
         logger.error(f"Unexpected error retrieving leave policies: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving leave policies")
 
+
 async def update_leave_policy(
     policy_id: int,
     policy_update: LeavePolicyUpdate,
@@ -289,7 +295,6 @@ async def update_leave_policy(
     request_id: Optional[str] = Depends(get_request_id),
     _= Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
-    """Update a leave policy with validation, version increment, and logging."""
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")
@@ -316,16 +321,16 @@ async def update_leave_policy(
         if not update_data:
             raise ValidationError(detail="No fields provided for update")
 
-        # Validate version for optimistic locking
+        # Optimistic locking
         if "version" in update_data and update_data["version"] != db_policy.version:
             raise ValidationError(detail="Version mismatch, policy has been updated by another user")
 
-        # Validate unique constraint
+        # Unique check if keys changed
         if any(k in update_data for k in ["employee_type", "leave_type", "effective_from"]):
             employee_type = update_data.get("employee_type", db_policy.employee_type)
             leave_type = update_data.get("leave_type", db_policy.leave_type)
             effective_from = update_data.get("effective_from", db_policy.effective_from)
-            query = select(LeavePolicies).where(
+            q2 = select(LeavePolicies).where(
                 LeavePolicies.employee_type == employee_type,
                 LeavePolicies.leave_type == leave_type,
                 LeavePolicies.effective_from == effective_from,
@@ -333,11 +338,11 @@ async def update_leave_policy(
                 LeavePolicies.is_active.is_(True),
                 LeavePolicies.deleted_at.is_(None)
             )
-            result = await db.execute(query)
-            if result.scalar_one_or_none():
+            r2 = await db.execute(q2)
+            if r2.scalar_one_or_none():
                 raise ValidationError(detail=f"Leave policy for {employee_type} and {leave_type} on {effective_from} already exists")
 
-        old_values = db_policy.__dict__.copy()
+        old_values = LeavePolicyOut.model_validate(db_policy).model_dump(mode="json")
         for key, value in update_data.items():
             setattr(db_policy, key, value)
         db_policy.version += 1
@@ -346,7 +351,7 @@ async def update_leave_policy(
         await db.commit()
         await db.refresh(db_policy)
 
-        # Update leave balances
+        # Update balances
         query_users = select(Users).where(
             and_(
                 Users.is_active.is_(True),
@@ -378,27 +383,23 @@ async def update_leave_policy(
         # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
-        logger.info(
-            f"Cache invalidated for leave_policies, leave_balances, {len(users)} users, and current_user:{current_user.user_id}",
-            extra={"request_id": request_id}
-        )
+        invalidate_user_cache(current_user.user_id)
 
-        # Log action
+        # Log
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.UPDATE_LEAVE_POLICY,
             table_affected="leave_policies",
             record_id=policy_id,
             old_values=old_values,
-            new_values=db_policy.__dict__,
+            new_values=LeavePolicyOut.model_validate(db_policy).model_dump(mode="json"),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
         )
         await create_system_log(log, request, current_user, db, request_id)
 
-        # Notify admins
+        # Notify
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         for admin in admins:
             await send_email(
@@ -430,6 +431,7 @@ async def update_leave_policy(
         logger.error(f"Unexpected error updating leave policy {policy_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating leave policy")
 
+
 async def delete_leave_policy(
     policy_id: int,
     request: Request,
@@ -439,7 +441,6 @@ async def delete_leave_policy(
     request_id: Optional[str] = Depends(get_request_id),
     _= Depends(require_permissions_dependency([Permission.DELETE_LEAVE_POLICY]))
 ) -> None:
-    """Soft delete a leave policy with validation, logging, and notification."""
     try:
         if policy_id <= 0:
             raise ValidationError(detail="Invalid policy_id")
@@ -456,7 +457,7 @@ async def delete_leave_policy(
         if not db_policy:
             raise LeavePolicyNotFoundError(leave_type=f"ID {policy_id}")
 
-        # Check if this is the only active policy for the leave_type and employee_type
+        # Prevent deleting only active variant
         query_check = select(LeavePolicies).where(
             LeavePolicies.leave_type == db_policy.leave_type,
             LeavePolicies.employee_type == db_policy.employee_type,
@@ -474,7 +475,7 @@ async def delete_leave_policy(
         db.add(db_policy)
         await db.commit()
 
-        # Invalidate caches for affected users
+        # Invalidate per-user caches
         query_users = select(Users).where(
             and_(
                 Users.is_active.is_(True),
@@ -490,19 +491,15 @@ async def delete_leave_policy(
         # Invalidate caches
         await invalidate_cache_prefix("leave_policies")
         await invalidate_cache_prefix("leave_balances")
-        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
-        logger.info(
-            f"Cache invalidated for leave_policies, leave_balances, {len(users)} users, and current_user:{current_user.user_id}",
-            extra={"request_id": request_id}
-        )
+        invalidate_user_cache(current_user.user_id)
 
-        # Log action
+        # Log
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.DELETE_LEAVE_POLICY,
             table_affected="leave_policies",
             record_id=policy_id,
-            old_values=db_policy.__dict__,
+            old_values=LeavePolicyOut.model_validate(db_policy).model_dump(mode="json"),
             new_values=None,
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
@@ -510,7 +507,7 @@ async def delete_leave_policy(
         )
         await create_system_log(log, request, current_user, db, request_id)
 
-        # Notify admins
+        # Notify
         admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         for admin in admins:
             await send_email(
