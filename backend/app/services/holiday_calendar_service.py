@@ -183,8 +183,22 @@ async def list_holidays(
             HolidayCalendar.is_active.is_(True),
             HolidayCalendar.deleted_at.is_(None)
         )
-        user_permissions = await get_user_permissions(current_user.user_id, db)
-        if Permission.VIEW_HOLIDAY not in user_permissions and Permission.MANAGE_HOLIDAYS not in user_permissions:
+        
+        # Get user permissions and ensure consistent type handling
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        # Debug logging
+        logger.debug(f"User permissions type: {type(user_permissions_raw)}, content: {user_permissions_raw}", extra={"request_id": request_id})
+        logger.debug(f"Checking for permissions: {Permission.VIEW_HOLIDAY.value}, {Permission.MANAGE_HOLIDAYS.value}", extra={"request_id": request_id})
+        
+        # Check if user has limited permissions - if so, filter to their departments
+        has_view_holiday = Permission.VIEW_HOLIDAY.value in user_permissions
+        has_manage_holidays = Permission.MANAGE_HOLIDAYS.value in user_permissions
+        has_all_permissions = Permission.ALL_PERMISSIONS.value in user_permissions
+        
+        # If user doesn't have broad holiday permissions, restrict to their departments
+        if not has_all_permissions and not has_view_holiday and not has_manage_holidays:
             from app.models.user_departments import UserDepartments
             query = query.join(UserDepartments, UserDepartments.user_id == current_user.user_id).where(
                 (HolidayCalendar.applies_to_all.is_(True)) |
@@ -192,6 +206,7 @@ async def list_holidays(
                 UserDepartments.is_active.is_(True),
                 UserDepartments.deleted_at.is_(None)
             )
+        
         if department_id:
             query = query.where(
                 (HolidayCalendar.applies_to_all.is_(True)) |
