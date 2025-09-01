@@ -32,8 +32,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 function EmergencyContactsList() {
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [contacts, setContacts] =
-    useState<PaginatedResponse<EmergencyContact> | null>(null);
+  const [contacts, setContacts] = useState<PaginatedResponse<EmergencyContact>>(
+    {
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 10,
+    }
+  );
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [error, setError] = useState<string | null>(null);
@@ -53,9 +59,22 @@ function EmergencyContactsList() {
         limit,
         search,
       });
-      setContacts(data);
+      setContacts(
+        data ?? {
+          items: [],
+          total: 0,
+          page,
+          limit,
+        }
+      );
     } catch {
       setError("Failed to load emergency contacts");
+      setContacts({
+        items: [],
+        total: 0,
+        page,
+        limit,
+      });
     } finally {
       setLoading(false);
     }
@@ -152,7 +171,7 @@ function EmergencyContactsList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
-      ) : contacts?.items.length === 0 ? (
+      ) : !contacts?.items || contacts.items.length === 0 ? (
         <div className="text-center text-sm text-muted-foreground">
           No emergency contacts found
         </div>
@@ -174,7 +193,7 @@ function EmergencyContactsList() {
               <PaginationItem>
                 <PaginationNext
                   onClick={() => setPage((p) => p + 1)}
-                  disabled={!contacts || (contacts?.total ?? 0) <= page * limit}
+                  disabled={contacts.total <= page * limit}
                 />
               </PaginationItem>
             </PaginationContent>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState } from "@/store";
 import { attendanceApi } from "@/api/attendance";
@@ -18,7 +18,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AttendanceRecord } from "@/api/types";
+import type { AttendanceRecord, PaginatedResponse } from "@/api/types";
 
 // Zod schema for date validation
 const dateSchema = z
@@ -64,34 +64,64 @@ function AttendanceHistory() {
     }
   };
 
-  useEffect(() => {
-    if (user && validateDates(startDate, endDate)) {
-      setLoading(true);
-      attendanceApi
-        .getHistory({
-          user_id: user.id,
+  const fetchHistory = useCallback(async () => {
+    if (!user || !validateDates(startDate, endDate)) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await attendanceApi.getHistory({
+        user_id: user.id,
+        page,
+        limit,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+      });
+
+      // Handle both array and paginated response formats
+      let data: PaginatedResponse<AttendanceRecord>;
+      if (Array.isArray(response)) {
+        data = {
+          items: response,
+          total: response.length,
           page,
           limit,
-          start_date: startDate || undefined,
-          end_date: endDate || undefined,
+        };
+      } else {
+        data = response ?? {
+          items: [],
+          total: 0,
+          page,
+          limit,
+        };
+      }
+
+      dispatch(setHistory(data));
+    } catch (err) {
+      console.error("Failed to fetch attendance history:", err);
+      setError("Failed to load attendance history");
+      dispatch(
+        setHistory({
+          items: [],
+          total: 0,
+          page,
+          limit,
         })
-        .then((data) => {
-          dispatch(setHistory(data));
-          setError(null);
-        })
-        .catch(() => {
-          setError("Failed to load attendance history");
-        })
-        .finally(() => setLoading(false));
+      );
+    } finally {
+      setLoading(false);
     }
-  }, [user, page, startDate, endDate, limit, dispatch]);
+  }, [user, page, limit, startDate, endDate, dispatch]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   const columns: ColumnDef<AttendanceRecord>[] = [
     {
-      accessorKey: "created_at",
+      accessorKey: "date",
       header: "Date",
-      cell: ({ row }) =>
-        format(new Date(row.getValue("created_at")), "MMM d, yyyy"),
+      cell: ({ row }) => format(new Date(row.getValue("date")), "MMM d, yyyy"),
     },
     {
       accessorKey: "clock_in",
@@ -109,19 +139,22 @@ function AttendanceHistory() {
     {
       accessorKey: "status",
       header: "Status",
-      cell: ({ row }) => (
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-            row.getValue("status") === "present"
-              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-              : row.getValue("status") === "late"
-              ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-              : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-          }`}
-        >
-          {row.getValue("status")}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const status = row.getValue("status") as string;
+        return (
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+              status === "present"
+                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                : status === "late"
+                ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
+                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+            }`}
+          >
+            {status?.toUpperCase()}
+          </span>
+        );
+      },
     },
   ];
 
@@ -170,10 +203,14 @@ function AttendanceHistory() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : !history || !history.items || history.items.length === 0 ? (
+        <div className="text-center text-sm text-muted-foreground">
+          No attendance records found
+        </div>
       ) : (
         <>
           <GenericTable
-            data={history?.items || []}
+            data={history.items || []}
             columns={columns}
             filterColumn="status"
           />
@@ -188,7 +225,7 @@ function AttendanceHistory() {
               <PaginationItem>
                 <PaginationNext
                   onClick={() => setPage((p) => p + 1)}
-                  disabled={!history || (history?.total ?? 0) <= page * limit}
+                  disabled={history.total <= page * limit}
                 />
               </PaginationItem>
             </PaginationContent>
