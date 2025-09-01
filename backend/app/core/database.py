@@ -117,7 +117,8 @@ async def shutdown():
 
 # Database dependency for FastAPI
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
+    session_factory = ensure_session_factory()
+    async with session_factory() as session:
         logger.debug(f"New database session created: {id(session)}")
         try:
             yield session

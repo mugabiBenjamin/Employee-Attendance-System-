@@ -29,30 +29,22 @@ logger = logging.getLogger(__name__)
 
 async def clock_in(
     request: Request,
-    user: Users = Depends(get_current_user),
+    user: Users,
     location: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    request_id: Optional[str] = Depends(get_request_id),
-    _= Depends(require_permissions_dependency([Permission.CLOCK_IN]))
+    request_id: Optional[str] = None
 ) -> AttendanceRecordOut:
-    """Handle employee clock-in with validation, holiday checks, and logging."""
+    """Handle employee clock-in with validation and database operations."""
+    if request_id is None:
+        request_id = get_request_id(request) or "unknown"
+    
+    current_time = datetime.now(timezone.utc)
+    current_date = current_time.date()
+    ip_address = str(request.client.host) if request.client and request.client.host else None
+    
     try:
-        current_time = datetime.now(timezone.utc)
-        current_date = current_time.date()
-        eat_tz = ZoneInfo("Africa/Nairobi")
-        current_time_eat = current_time.astimezone(eat_tz)
-
-        # Get admin users for notifications BEFORE any database operations
-        admins = []
-        if settings.NOTIFY_ON_ATTENDANCE:
-            try:
-                admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
-            except Exception as e:
-                logger.error(f"Failed to get admin users: {str(e)}", extra={"request_id": request_id})
-                # Continue without notifications rather than failing the clock-in
-
-        # Validation logic
+        # Basic validation
         if settings.REQUIRE_ATTENDANCE_LOCATION and (not location or location.strip() == ""):
             raise ValidationError(detail="Location is required for clock-in")
         if location and len(location) > 255:
@@ -68,115 +60,65 @@ async def clock_in(
         )
         result = await db.execute(query)
         existing_record = result.scalar_one_or_none()
+        
         if existing_record:
             raise AttendanceError(detail="User already clocked in for today")
 
-        # Holiday check
-        if settings.CHECK_HOLIDAYS_ON_ATTENDANCE:
-            query_holiday = select(HolidayCalendar).where(
-                HolidayCalendar.holiday_date == current_date,
-                HolidayCalendar.is_active.is_(True),
-                HolidayCalendar.deleted_at.is_(None)
-            )
-            result_holiday = await db.execute(query_holiday)
-            if result_holiday.scalar_one_or_none():
-                raise AttendanceError(detail="Clock-in not allowed on a holiday")
-
-        # IP address validation
-        ip_address = str(request.client.host) if request.client and request.client.host else None
-        if settings.REQUIRE_ATTENDANCE_IP and not ip_address:
-            raise ValidationError(detail="IP address is required for clock-in")
-
         # Create attendance record
-        try:
-            db_record = AttendanceRecords(
-                **AttendanceRecordCreate(
-                    user_id=user.user_id,
-                    clock_in_time=current_time,
-                    ip_address=ip_address,
-                    location=location,
-                    date=current_date
-                ).model_dump(),
-                created_at=current_time,
-                updated_at=current_time,
-            )
-            db.add(db_record)
-            await db.flush()  # Get the ID
-            
-            # Log action
-            system_log = SystemLogs(
-                user_id=user.user_id,
-                action=SystemAction.CLOCK_IN,
-                table_affected="attendance_records",
-                record_id=db_record.attendance_id,
-                old_values=None,
-                new_values=db_record.__dict__,
-                ip_address=ip_address,
-                user_agent=request.headers.get("user-agent"),
-                timestamp=current_time,
-                request_id=request_id
-            )
-            db.add(system_log)
-            
-            # COMMIT TRANSACTION
-            await db.commit()
-            await db.refresh(db_record)
-            
-        except Exception as db_error:
-            await db.rollback()
-            if "unique_user_date" in str(db_error) or "duplicate key value violates unique constraint" in str(db_error):
-                raise AttendanceError(detail="User already clocked in for today")
-            else:
-                logger.error(f"Database error during clock-in for user_id {user.user_id}: {str(db_error)}", extra={"request_id": request_id})
-                raise AttendanceError(detail="Error creating attendance record")
-
-        # Dispatch notifications AFTER successful commit and outside db context
-        if settings.NOTIFY_ON_ATTENDANCE and admins:
-            recipients = [(user.email, user.first_name)]
-            recipients.extend([(admin.email, admin.first_name) for admin in admins])
-            
-            for email, first_name in recipients:
-                context = {
-                    "user_id": user.user_id,
-                    "attendance_id": db_record.attendance_id,
-                    "email": email,
-                    "first_name": first_name,
-                    "clock_in_time": current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z'),
-                    "location": db_record.location or "Not provided",
-                    "request_id": request_id
-                }
-                try:
-                    # Only use Celery task - remove async fallback that causes greenlet issues
-                    send_email_task.delay("clock_in_notification", context)
-                    logger.info(
-                        f"Dispatched email task for clock-in notification to {email}",
-                        extra={"request_id": request_id}
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to dispatch email task for {email}: {str(e)}",
-                        extra={"request_id": request_id}
-                    )
-
-        # Invalidate cache
-        await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
-        await invalidate_user_cache(user.user_id)
-
-        logger.info(
-            f"User clocked in, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}",
-            extra={"request_id": request_id, "user_id": user.user_id}
+        db_record = AttendanceRecords(
+            user_id=user.user_id,
+            date=current_date,
+            clock_in_time=current_time,
+            ip_address=ip_address,
+            location=location,
+            created_at=current_time,
+            updated_at=current_time,
         )
+        db.add(db_record)
+        await db.flush()
+        
+        # Log action
+        system_log = SystemLogs(
+            user_id=user.user_id,
+            action=SystemAction.CLOCK_IN,
+            table_affected="attendance_records",
+            record_id=db_record.attendance_id,
+            old_values=None,
+            new_values={k: str(v) for k, v in db_record.__dict__.items() if not k.startswith('_')},
+            ip_address=ip_address,
+            user_agent=request.headers.get("user-agent"),
+            timestamp=current_time,
+            request_id=request_id
+        )
+        db.add(system_log)
+        
+        await db.commit()
+        await db.refresh(db_record)
+        
+        # Cache invalidation
+        try:
+            await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
+            await invalidate_user_cache(user.user_id)
+        except Exception as cache_error:
+            logger.warning(f"Cache invalidation failed: {str(cache_error)}", 
+                         extra={"request_id": request_id})
+
+        logger.info(f"User clocked in successfully, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}", 
+                   extra={"request_id": request_id, "user_id": user.user_id})
+        
         return AttendanceRecordOut.model_validate(db_record)
 
-    except AttendanceError as e:
-        logger.error(f"Attendance error during clock-in for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except ValidationError as e:
-        logger.error(f"Validation error during clock-in for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
+    except (AttendanceError, ValidationError) as e:
+        await db.rollback()
+        logger.error(f"Clock-in validation error for user_id {user.user_id}: {str(e)}", 
+                    extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error during clock-in for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing clock-in")
+        await db.rollback()
+        logger.error(f"Unexpected error during clock-in for user_id {user.user_id}: {str(e)}", 
+                    extra={"request_id": request_id})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                          detail="Error processing clock-in")
 
 async def clock_out(
     request: Request,
@@ -187,20 +129,11 @@ async def clock_out(
     _= Depends(require_permissions_dependency([Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
     """Handle employee clock-out with validation, time calculations, and logging."""
+    current_time = datetime.now(timezone.utc)
+    current_date = current_time.date()
+    ip_address = str(request.client.host) if request.client and request.client.host else None
+    
     try:
-        current_time = datetime.now(timezone.utc)
-        current_date = current_time.date()
-        eat_tz = ZoneInfo("Africa/Nairobi")  # EAT is UTC+3
-        current_time_eat = current_time.astimezone(eat_tz)
-
-        # Get admin users for notifications BEFORE database operations
-        admins = []
-        if settings.NOTIFY_ON_ATTENDANCE:
-            try:
-                admins = await get_users_with_permission(Permission.MANAGE_ATTENDANCE, db)
-            except Exception as e:
-                logger.error(f"Failed to get admin users: {str(e)}", extra={"request_id": request_id})
-
         # Find active clock-in record
         query = select(AttendanceRecords).where(
             AttendanceRecords.user_id == user.user_id,
@@ -218,7 +151,7 @@ async def clock_out(
         if db_record.clock_in_time >= current_time:
             raise ValidationError(detail="Clock-out time must be after clock-in time")
 
-        # Get shift pattern details for validation
+        # Get shift pattern for calculations
         query_assignment = select(ShiftAssignments, ShiftPatterns).join(
             ShiftPatterns,
             and_(
@@ -239,7 +172,7 @@ async def clock_out(
         result_assignment = await db.execute(query_assignment)
         assignment, shift_pattern = result_assignment.first() or (None, None)
 
-        # Validate minimum shift duration if configured
+        # Validate minimum shift duration
         if settings.MINIMUM_SHIFT_DURATION and shift_pattern:
             total_hours = calculate_total_hours(
                 clock_in=db_record.clock_in_time,
@@ -252,9 +185,10 @@ async def clock_out(
                 )
 
         # Update record
-        ip_address = str(request.client.host) if request.client and request.client.host else None
         db_record.clock_out_time = current_time
         db_record.ip_address = ip_address
+        
+        # Calculate hours
         total_hours = calculate_total_hours(
             clock_in=db_record.clock_in_time,
             clock_out=db_record.clock_out_time,
@@ -286,7 +220,7 @@ async def clock_out(
             table_affected="attendance_records",
             record_id=db_record.attendance_id,
             old_values=None,
-            new_values=db_record.__dict__,
+            new_values={k: str(v) for k, v in db_record.__dict__.items() if not k.startswith('_')},
             ip_address=ip_address,
             user_agent=request.headers.get("user-agent"),
             timestamp=current_time,
@@ -294,46 +228,16 @@ async def clock_out(
         )
         db.add(system_log)
         
-        # COMMIT TRANSACTION
         await db.commit()
         await db.refresh(db_record)
 
-        # Send notifications AFTER commit and outside db context
-        if settings.NOTIFY_ON_ATTENDANCE and admins:
-            recipients = [(user.email, user.first_name)]
-            recipients.extend([(admin.email, admin.first_name) for admin in admins])
-            
-            for email, first_name in recipients:
-                context = {
-                    "user_id": user.user_id,
-                    "attendance_id": db_record.attendance_id,
-                    "email": email,
-                    "first_name": first_name,
-                    "clock_out_time": current_time_eat.strftime('%Y-%m-%d %H:%M:%S %Z'),
-                    "total_hours": db_record.total_hours or 0,
-                    "overtime_hours": db_record.overtime_hours or 0,
-                    "request_id": request_id
-                }
-                try:
-                    # Only use Celery task - remove problematic async fallback
-                    send_email_task.delay("clock_out_notification", context)
-                    logger.info(
-                        f"Dispatched email task for clock-out notification to {email}",
-                        extra={"request_id": request_id}
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to dispatch email task for {email}: {str(e)}",
-                        extra={"request_id": request_id}
-                    )
-
-        # Invalidate cache
-        await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
-        await invalidate_user_cache(user.user_id)
-        logger.info(
-            f"Cache invalidated for attendance_history:{user.user_id} and user_id: {user.user_id}",
-            extra={"request_id": request_id}
-        )
+        # Cache invalidation
+        try:
+            await invalidate_cache_prefix(f"attendance_history:{user.user_id}")
+            await invalidate_user_cache(user.user_id)
+        except Exception as cache_error:
+            logger.warning(f"Cache invalidation failed: {str(cache_error)}", 
+                         extra={"request_id": request_id})
 
         logger.info(
             f"User clocked out, user_id: {user.user_id}, attendance_id: {db_record.attendance_id}, total_hours: {db_record.total_hours or 0}",
@@ -342,12 +246,15 @@ async def clock_out(
         return AttendanceRecordOut.model_validate(db_record)
 
     except ResourceNotFoundError as e:
+        await db.rollback()
         logger.error(f"Resource not found during clock-out for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValidationError as e:
+        await db.rollback()
         logger.error(f"Validation error during clock-out for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
+        await db.rollback()
         logger.error(f"Unexpected error during clock-out for user_id {user.user_id}: {str(e)}", extra={"request_id": request_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error processing clock-out")
 

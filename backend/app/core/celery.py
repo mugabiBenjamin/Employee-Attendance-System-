@@ -129,14 +129,51 @@ def send_email_task(notification_type: str, context: dict):
 
 async def _send_email_async(notification_type: str, context: dict):
     """Async function to send emails."""
-    async with AsyncSessionLocal() as session:
-        try:
-            await send_email_notification(notification_type, context, session)
-            logger.info(f"Email sent successfully for {notification_type} to user_id: {context.get('user_id')}")
-            return {"status": "success", "message": f"Email sent for {notification_type}"}
-        except Exception as e:
-            logger.error(f"Failed to send email for {notification_type}: {str(e)}")
-            raise
+    try:
+        # For clock_in/clock_out notifications, send direct email without DB
+        if notification_type in ["clock_in_notification", "clock_out_notification"]:
+            email = context.get("email")
+            first_name = context.get("first_name", "User")
+            
+            if notification_type == "clock_in_notification":
+                subject = "Clock-In Confirmation"
+                body = (
+                    f"Dear {first_name},\n\n"
+                    f"You have successfully clocked in at {context['clock_in_time']}.\n"
+                    f"Location: {context.get('location', 'Not provided')}\n\n"
+                    f"Best regards,\nEmployee Management System"
+                )
+            else:  # clock_out_notification
+                subject = "Clock-Out Confirmation" 
+                body = (
+                    f"Dear {first_name},\n\n"
+                    f"You have successfully clocked out at {context['clock_out_time']}.\n"
+                    f"Total Hours: {context.get('total_hours', 0):.2f}\n"
+                    f"Overtime Hours: {context.get('overtime_hours', 0):.2f}\n\n"
+                    f"Best regards,\nEmployee Management System"
+                )
+            
+            # Send email directly without database session
+            from app.core.mail import send_email
+            await send_email(
+                to_email=email,
+                subject=subject,
+                body=body,
+                request_id=context.get("request_id")
+            )
+            
+        else:
+            # For other notification types that need DB access
+            async with AsyncSessionLocal() as session:
+                from app.core.mail import send_email_notification
+                await send_email_notification(notification_type, context, session)
+        
+        logger.info(f"Email sent successfully for {notification_type} to: {context.get('email')}")
+        return {"status": "success", "message": f"Email sent for {notification_type}"}
+        
+    except Exception as e:
+        logger.error(f"Failed to send email for {notification_type}: {str(e)}")
+        raise
 
 @app.task
 def generate_attendance_csv_task(user_id: int, start_date: str, end_date: str, filename: str):

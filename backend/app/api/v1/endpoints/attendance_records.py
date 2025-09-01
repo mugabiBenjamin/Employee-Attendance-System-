@@ -18,13 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/attendance-records", tags=["Attendance Records"])
 
-@router.post(
-    "/clock",
-    response_model=AttendanceRecordOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Clock in or out",
-    description="Record clock-in or clock-out for an employee with optional location."
-)
+@router.post("/clock")
 async def clock_in_out_endpoint(
     clock_data: ClockInOut,
     request: Request,
@@ -33,19 +27,7 @@ async def clock_in_out_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.CLOCK_IN, Permission.CLOCK_OUT]))
 ) -> AttendanceRecordOut:
-    """Handle clock-in or clock-out requests.
-    Args:
-        clock_data: Contains the action ('clock_in' or 'clock_out') and optional location.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-    Returns:
-        AttendanceRecordOut: The created or updated attendance record.
-    Raises:
-        HTTPException: For invalid actions (400), validation errors (422), not found (404), database errors (500), or unexpected errors (500).
-    """
-    user_id = current_user.user_id
+    """Handle clock-in or clock-out requests."""
     request_id = get_request_id(request) or "unknown"
     
     try:
@@ -54,12 +36,12 @@ async def clock_in_out_endpoint(
         elif clock_data.action == "clock_out":
             return await clock_out(request, current_user, db, settings, request_id)
         else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action. Must be 'clock_in' or 'clock_out'")
+            raise HTTPException(status_code=400, detail="Invalid action")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error processing clock action {clock_data.action} for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error") from e
+        logger.error(f"Unexpected error: {str(e)}", extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail="Unexpected error")
 
 @router.get(
     "/history",

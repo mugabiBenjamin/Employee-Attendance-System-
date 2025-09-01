@@ -64,14 +64,12 @@ def setup_middleware(app: FastAPI) -> None:
     """Setup middleware for logging system actions."""
 
     @app.middleware("http")
-    async def log_system_actions(request: Request, call_next, db: AsyncSession = Depends(get_db)):
+    async def log_system_actions(request: Request, call_next):
         print(f"Request query params: {dict(request.query_params)}")
         print(f"Request path params: {request.path_params}")
         
         request_id = str(uuid.uuid4())
-        # Ensure logger is callable
-        log_func = logger.info if callable(getattr(logger, 'info', None)) else print
-        log_func(f"Middleware processing: {request.method} {request.url.path}", extra={"request_id": request_id} if log_func == logger.info else None)
+        logger.info(f"Middleware processing: {request.method} {request.url.path}", extra={"request_id": request_id})
         
         # Safe way to set request_id on request state
         if not hasattr(request, 'state'):
@@ -81,75 +79,11 @@ def setup_middleware(app: FastAPI) -> None:
         try:
             response = await call_next(request)
         except Exception as e:
-            error_msg = f"Error during call_next: {str(e)}"
-            if callable(getattr(logger, 'error', None)):
-                logger.error(error_msg, extra={"request_id": request_id})
-            else:
-                print(f"Warning: {error_msg}")
+            logger.error(f"Error during call_next: {str(e)}", extra={"request_id": request_id})
             raise
 
-        path = request.url.path
-        method = request.method
-
-        # Skip logging for /api/v1/auth/token to prevent duplicate SystemLogs entries
-        if path.endswith(f"{settings.API_V1_STR}/auth/token"):
-            debug_func = logger.debug if callable(getattr(logger, 'debug', None)) else print
-            debug_func(f"Skipping system log for endpoint: {path}", extra={"request_id": request_id} if debug_func == logger.debug else None)
-            return response
-
-        action = determine_system_action(path, method)
-
-        if action:
-            # Safe way to get user from request state
-            user = getattr(request.state, "user", None)
-            user_id = getattr(user, 'user_id', None) if user else None
-
-            ip_address = None
-            try:
-                ip_address = str(request.client.host) if request.client else None
-            except Exception as e:
-                warn_func = logger.warning if callable(getattr(logger, 'warning', None)) else print
-                warn_func(f"Failed to get client IP: {str(e)}", extra={"request_id": request_id} if warn_func == logger.warning else None)
-
-            async def log_action(session: AsyncSession):
-                try:
-                    system_log = SystemLogs(
-                        user_id=user_id,
-                        action=action,
-                        table_affected=get_table_affected(path),
-                        record_id=None,
-                        old_values=None,
-                        new_values=None,
-                        ip_address=ip_address,
-                        user_agent=request.headers.get("user-agent"),
-                        request_id=request_id
-                    )
-                    session.add(system_log)
-                    await session.commit()
-                    info_func = logger.info if callable(getattr(logger, 'info', None)) else print
-                    info_func(
-                        f"Logged system action: {action} for user_id: {user_id}",
-                        extra={"request_id": request_id} if info_func == logger.info else None
-                    )
-                except Exception as e:
-                    error_func = logger.error if callable(getattr(logger, 'error', None)) else print
-                    error_func(
-                        f"Failed to log system action: {str(e)}",
-                        extra={"request_id": request_id} if error_func == logger.error else None
-                    )
-                    await session.rollback()
-
-            try:
-                # Ensure db is an AsyncSession instance, create new session if not
-                session = db if isinstance(db, AsyncSession) else AsyncSessionLocal()
-                try:
-                    await log_action(session)
-                finally:
-                    # Close the session only if we created a new one
-                    if not isinstance(db, AsyncSession):
-                        await session.close()
-            except Exception as e:
-                error_func = logger.error if callable(getattr(logger, 'error', None)) else print
-                error_func(f"Unexpected error in middleware logging: {str(e)}", extra={"request_id": request_id} if error_func == logger.error else None)
-
+        # REMOVED DATABASE LOGGING TO FIX GREENLET ERROR
+        # The SystemLogs creation should be handled in individual service methods, not middleware
+        logger.info(f"Request completed: {request.method} {request.url.path}", extra={"request_id": request_id})
+        
         return response
