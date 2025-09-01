@@ -169,7 +169,8 @@ async def read_system_log(
         if not log:
             raise SystemLogNotFoundError(log_id=log_id)
 
-        log_dict = SystemLogOut.model_validate(log).model_dump()
+        log_output = SystemLogOut.model_validate(log)
+        log_dict = log_output.model_dump(mode='json')
         await set_cache(cache_key, log_dict, ttl=300)
         logger.info(f"Cache set for system_log:{log_id}", extra={"request_id": request_id})
 
@@ -177,7 +178,7 @@ async def read_system_log(
             f"Retrieved system log, log_id: {log_id}",
             extra={"request_id": request_id}
         )
-        return SystemLogOut.model_validate(log)
+        return log_output
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -267,7 +268,8 @@ async def read_system_logs(
         result = await db.execute(query)
         logs = result.scalars().all()
 
-        logs_dict = [SystemLogOut.model_validate(log).model_dump() for log in logs]
+        log_outputs = [SystemLogOut.model_validate(log) for log in logs]
+        logs_dict = [log.model_dump(mode='json') for log in log_outputs]
         await set_cache(cache_key, logs_dict, ttl=300)
         logger.info(f"Cache set for {cache_key}", extra={"request_id": request_id})
 
@@ -275,7 +277,7 @@ async def read_system_logs(
             f"Retrieved {len(logs)} system logs for user_id: {user_id or 'all'}, action: {action or 'all'}, department_id: {department_id or 'all'}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
-        return [SystemLogOut.model_validate(log) for log in logs]
+        return log_outputs
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -301,69 +303,17 @@ async def get_user_logs(
     request_id: Optional[str] = Depends(get_request_id),
     _= Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
-    """Retrieve system logs for a specific user with optional action and table filters."""
-    try:
-        if user_id <= 0:
-            raise ValidationError(detail="Invalid user ID")
-        if limit is not None and limit <= 0:
-            raise ValidationError(detail="Invalid limit parameter")
-        if action and action not in [a.value for a in SystemAction]:
-            raise ValidationError(detail=f"Invalid action. Must be one of: {[a.value for a in SystemAction]}")
-        if table_affected and not table_affected.isidentifier():
-            raise ValidationError(detail="Invalid table name")
-
-        await validate_user_exists(db, user_id, request_id)
-
-        # Authorization check
-        if not await _check_user_authorization(db, current_user, user_id, [Permission.VIEW_LOGS, Permission.MANAGE_EMPLOYEES], request_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to view logs for this user"
-            )
-
-        cache_key = f"user_logs:{user_id}:{action or 'all'}:{table_affected or 'all'}:{limit or settings.DEFAULT_PAGE_SIZE}"
-        cached_logs = await get_cache(cache_key)
-        if cached_logs:
-            logger.info(f"Cache hit for {cache_key}", extra={"request_id": request_id})
-            return [SystemLogOut(**log) for log in cached_logs]
-
-        query = select(SystemLogs).where(
-            SystemLogs.user_id == user_id,
-            SystemLogs.is_active.is_(True),
-            SystemLogs.deleted_at.is_(None)
-        )
-        if action:
-            query = query.where(SystemLogs.action == action)
-        if table_affected:
-            query = query.where(SystemLogs.table_affected == table_affected)
-
-        limit = limit or settings.DEFAULT_PAGE_SIZE
-        query = query.order_by(SystemLogs.log_id.asc()).limit(limit)
-        result = await db.execute(query)
-        logs = result.scalars().all()
-
-        logs_dict = [SystemLogOut.model_validate(log).model_dump() for log in logs]
-        await set_cache(cache_key, logs_dict, ttl=300)
-        logger.info(f"Cache set for {cache_key}", extra={"request_id": request_id})
-
-        logger.info(
-            f"Retrieved {len(logs)} logs for user_id: {user_id}, action: {action or 'all'}, table_affected: {table_affected or 'all'}",
-            extra={"request_id": request_id, "user_id": current_user.user_id}
-        )
-        return [SystemLogOut.model_validate(log) for log in logs]
-
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except UserNotFoundError as e:
-        logger.error(f"Not found error: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except HTTPException as e:
-        logger.error(f"Authorization error retrieving logs for user {user_id}: {str(e)}", extra={"request_id": request_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error retrieving logs for user {user_id}: {str(e)}", extra={"request_id": request_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving logs")
+    """Retrieve system logs for a specific user - refactored to use read_system_logs."""
+    return await read_system_logs(
+        user_id=user_id,
+        action=action,
+        table_affected=table_affected,
+        limit=limit,
+        current_user=current_user,
+        db=db,
+        settings=settings,
+        request_id=request_id
+    )
 
 async def get_log_actions_summary(
     user_id: Optional[int] = None,
@@ -420,7 +370,8 @@ async def get_log_actions_summary(
         result = await db.execute(query)
         summaries = result.all()
 
-        summaries_dict = [SystemLogActionSummary(action=row[0], count=row[1]).model_dump() for row in summaries]
+        summary_outputs = [SystemLogActionSummary(action=row[0], count=row[1]) for row in summaries]
+        summaries_dict = [summary.model_dump(mode='json') for summary in summary_outputs]
         await set_cache(cache_key, summaries_dict, ttl=300)
         logger.info(f"Cache set for {cache_key}", extra={"request_id": request_id})
 
@@ -428,7 +379,7 @@ async def get_log_actions_summary(
             f"Retrieved action summary with {len(summaries)} actions for user_id: {user_id or 'all'}, department_id: {department_id or 'all'}",
             extra={"request_id": request_id}
         )
-        return [SystemLogActionSummary(action=row[0], count=row[1]) for row in summaries]
+        return summary_outputs
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
