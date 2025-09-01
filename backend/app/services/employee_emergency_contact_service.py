@@ -128,8 +128,7 @@ async def create_emergency_contact(
             action=SystemAction.CREATE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=db_contact.contact_id,
-            old_values=None,
-            new_values=new_values_dict,
+            old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -195,7 +194,7 @@ async def get_emergency_contact(
                     detail="Not authorized to view this emergency contact"
                 )
 
-        contact_dict = EmployeeEmergencyContactOut.model_validate(contact).model_dump()
+        contact_dict = EmployeeEmergencyContactOut.model_validate(contact).model_dump(mode='json')
         await set_cache(cache_key, contact_dict, ttl=300)
         logger.info(f"Cache set for emergency_contact:{contact_id}", extra={"request_id": request_id})
 
@@ -281,7 +280,7 @@ async def list_emergency_contacts(
         result = await db.execute(query)
         contacts = result.scalars().all()
 
-        contacts_dict = [EmployeeEmergencyContactOut.model_validate(c).model_dump() for c in contacts]
+        contacts_dict = [EmployeeEmergencyContactOut.model_validate(c).model_dump(mode='json') for c in contacts]
         await set_cache(cache_key, contacts_dict, ttl=300)
         logger.info(f"Cache set for emergency_contacts:{target_user_id or 'all'}:{department_id or 'all'}:{is_active or 'all'}:{skip}:{limit}", extra={"request_id": request_id})
 
@@ -402,8 +401,7 @@ async def update_emergency_contact(
             action=SystemAction.UPDATE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
-            old_values=old_values_dict,
-            new_values=new_values_dict,
+            old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -486,8 +484,7 @@ async def delete_emergency_contact(
             action=SystemAction.DELETE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
-            old_values=old_values_dict,
-            new_values=None,
+            old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
