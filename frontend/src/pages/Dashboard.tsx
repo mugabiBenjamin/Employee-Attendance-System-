@@ -17,6 +17,13 @@ import {
 import { format } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 
+// Utility function to validate date strings
+const isValidDate = (dateString: string | undefined): boolean => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  return !isNaN(date.getTime());
+};
+
 function Dashboard() {
   const { user } = useSelector((state: RootState) => state.auth);
   const [attendanceSummary, setAttendanceSummary] =
@@ -194,37 +201,58 @@ function Dashboard() {
                     </thead>
                     <tbody>
                       {recentAttendance.length > 0 ? (
-                        recentAttendance.map((record) => (
-                          <tr key={record.attendance_id} className="border-t">
-                            <td className="p-2 text-xs">
-                              {format(
-                                new Date(record.created_at),
-                                "MMM d, yyyy"
-                              )}
-                            </td>
-                            <td className="p-2 text-xs">
-                              {format(new Date(record.clock_in), "h:mm a")}
-                            </td>
-                            <td className="p-2 text-xs">
-                              {record.clock_out
-                                ? format(new Date(record.clock_out), "h:mm a")
-                                : "-"}
-                            </td>
-                            <td className="p-2 text-xs">
-                              <span
-                                className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                  record.status === "present"
-                                    ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                    : record.status === "late"
-                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-                                    : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                                }`}
-                              >
-                                {record.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))
+                        recentAttendance.map((record) => {
+                          // Log invalid records for debugging
+                          if (
+                            !isValidDate(record.created_at) ||
+                            !isValidDate(record.clock_in) ||
+                            (record.clock_out && !isValidDate(record.clock_out))
+                          ) {
+                            console.warn("Invalid date in attendance record:", {
+                              attendance_id: record.attendance_id,
+                              created_at: record.created_at,
+                              clock_in: record.clock_in,
+                              clock_out: record.clock_out,
+                            });
+                          }
+
+                          return (
+                            <tr key={record.attendance_id} className="border-t">
+                              <td className="p-2 text-xs">
+                                {isValidDate(record.created_at)
+                                  ? format(
+                                      new Date(record.created_at),
+                                      "MMM d, yyyy"
+                                    )
+                                  : "-"}
+                              </td>
+                              <td className="p-2 text-xs">
+                                {isValidDate(record.clock_in)
+                                  ? format(new Date(record.clock_in), "h:mm a")
+                                  : "-"}
+                              </td>
+                              <td className="p-2 text-xs">
+                                {record.clock_out &&
+                                isValidDate(record.clock_out)
+                                  ? format(new Date(record.clock_out), "h:mm a")
+                                  : "-"}
+                              </td>
+                              <td className="p-2 text-xs">
+                                <span
+                                  className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                                    record.status === "present"
+                                      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                                      : record.status === "late"
+                                      ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
+                                      : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                                  }`}
+                                >
+                                  {record.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
                       ) : (
                         <tr>
                           <td
