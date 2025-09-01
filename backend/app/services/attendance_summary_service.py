@@ -115,7 +115,8 @@ async def get_attendance_summary_by_user(
         if not summaries:
             raise ResourceNotFoundError(resource="Attendance summary", identifier=f"user_id {user_id}")
 
-        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump() for summary in summaries]
+        # Fix: Use mode='json' for proper serialization
+        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump(mode='json') for summary in summaries]
         await set_cache(cache_key, summaries_dict, ttl=300)
         logger.info(f"Cache set for {cache_key}", extra={"request_id": request_id})
 
@@ -187,7 +188,8 @@ async def get_all_attendance_summaries(
         result = await db.execute(query)
         summaries = result.scalars().all()
 
-        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump() for summary in summaries]
+        # Fix: Use mode='json' for proper serialization
+        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump(mode='json') for summary in summaries]
         await set_cache(cache_key, summaries_dict, ttl=300)
         logger.info(f"Cache set for {cache_key}", extra={"request_id": request_id})
 
@@ -306,14 +308,15 @@ async def generate_attendance_summary(
         await db.commit()
         await db.refresh(db_summary)
 
-        # Log the action using the helper functions for serialization
+        # Log the action using proper serialization for date/time objects
+        new_values_dict = AttendanceSummaryOut.model_validate(db_summary).model_dump(mode='json')
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.GENERATE_REPORT,
             table_affected="attendance_summary",
             record_id=db_summary.user_id,
             old_values=serialize_dict_for_logging(old_values),
-            new_values=serialize_model_for_logging(db_summary),
+            new_values=new_values_dict,
             ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             request_id=request_id

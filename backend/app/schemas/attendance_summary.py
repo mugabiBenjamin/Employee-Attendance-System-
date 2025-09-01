@@ -21,9 +21,12 @@ class AttendanceSummaryOut(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
         json_encoders={
-            date: lambda v: v.isoformat(),
-            datetime: lambda v: v.isoformat()
-        }
+            datetime: lambda v: v.isoformat() if v else None,
+            date: lambda v: v.isoformat() if v else None,
+            # time: lambda v: v.isoformat() if v else None,
+            # Decimal: lambda v: float(v) if v is not None else None
+        },
+        arbitrary_types_allowed=True
     )
 
     @field_validator('attendance_summary_date')
