@@ -149,7 +149,7 @@ export interface EmployeeHierarchy {
   hierarchy_id: number;
   employee_id: number;
   manager_id: number;
-  effective_from: string; // Added based on previous error in EmployeeHierarchy.tsx
+  effective_from: string;
 }
 
 // SHIFTS
@@ -207,7 +207,7 @@ export interface HolidayQuery {
   id?: number;
   page?: number;
   limit?: number;
-  search?: string; // Added to support HolidaysList.tsx
+  search?: string;
 }
 
 // API RESPONSE WRAPPERS
@@ -262,7 +262,7 @@ export type EmployeeType =
   | 'temporary'
   | 'all';
 
-export type Permission = string; // Dynamic list from backend
+export type Permission = string;
 
 export type PermissionGroup =
   | 'employee'

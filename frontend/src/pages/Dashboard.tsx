@@ -38,10 +38,25 @@ function Dashboard() {
             attendanceApi.getHistory({ user_id: user.id, limit: 5 }),
           ]);
           setAttendanceSummary(summary);
-          setRecentAttendance(history.items);
+          // Use history.slice(0, 5) to handle array response and limit to 5 records
+          setRecentAttendance(
+            Array.isArray(history) ? history.slice(0, 5) : []
+          );
         }
-      } catch {
-        setError("Failed to load dashboard data");
+      } catch (error: unknown) {
+        // Assert error as an AxiosError-like object for type safety
+        const err = error as {
+          message?: string;
+          response?: { data?: unknown; status?: number };
+        };
+        console.error("Failed to load dashboard data:", {
+          message: err.message || "Unknown error",
+          response: err.response?.data,
+          status: err.response?.status,
+        });
+        setError(
+          "Failed to load dashboard data: " + (err.message || "Unknown error")
+        );
       } finally {
         setLoading(false);
       }

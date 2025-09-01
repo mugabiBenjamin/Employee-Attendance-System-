@@ -1,5 +1,5 @@
 import { api } from './index';
-import type { AttendanceRecord, PaginatedResponse, TimeCorrection, AttendanceSummary,CorrectionStatus } from './types';
+import type { AttendanceRecord, PaginatedResponse, TimeCorrection, AttendanceSummary, CorrectionStatus } from './types';
 
 // Define interfaces for request payloads
 interface ClockInOutRequest {
@@ -44,9 +44,9 @@ export const attendanceApi = {
     return response.data;
   },
 
-  getHistory: async (query: AttendanceQuery): Promise<PaginatedResponse<AttendanceRecord>> => {
-    const response = await api.get<PaginatedResponse<AttendanceRecord>>('/attendance-records/history', { params: query });
-    return response.data;
+  getHistory: async (query: AttendanceQuery): Promise<AttendanceRecord[]> => {
+    const response = await api.get<AttendanceRecord[]>('/attendance-records/history', { params: query });
+    return Array.isArray(response.data) ? response.data : [];
   },
 
   getSummary: async (user_id: number): Promise<AttendanceSummary> => {
