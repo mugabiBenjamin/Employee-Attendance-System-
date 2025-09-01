@@ -134,7 +134,8 @@ def require_permissions_dependency(required_permissions: List[Permission]):
 def require_any_permissions_dependency(required_permissions: List[Permission]):
     """Dependency that allows access if user has ANY of the required permissions."""
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        user_permissions = await get_user_permissions(current_user.user_id, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
         required_perms_str = [perm.value for perm in required_permissions]
         
         if Permission.ALL_PERMISSIONS.value not in user_permissions:
@@ -242,35 +243,62 @@ def require_super_admin_access_dependency():
 # Specific permission dependencies
 def require_leave_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.VIEW_LEAVE_REQUEST,
-            Permission.VIEW_TEAM_LEAVE_REQUESTS,
-            Permission.VIEW_ALL_LEAVE_REQUESTS,
-            Permission.CREATE_ALL_LEAVE_REQUESTS,
-            Permission.APPROVE_LEAVE,
-            Permission.MANAGE_LEAVE
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_LEAVE_REQUEST.value,
+            Permission.VIEW_TEAM_LEAVE_REQUESTS.value,
+            Permission.VIEW_ALL_LEAVE_REQUESTS.value,
+            Permission.CREATE_ALL_LEAVE_REQUESTS.value,
+            Permission.APPROVE_LEAVE.value,
+            Permission.MANAGE_LEAVE.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_attendance_view_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.VIEW_OWN_ATTENDANCE,
-            Permission.VIEW_TEAM_ATTENDANCE,
-            Permission.VIEW_ALL_ATTENDANCE,
-            Permission.VIEW_ATTENDANCE
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_OWN_ATTENDANCE.value,
+            Permission.VIEW_TEAM_ATTENDANCE.value,
+            Permission.VIEW_ALL_ATTENDANCE.value,
+            Permission.VIEW_ATTENDANCE.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_user_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.CREATE_USER,
-            Permission.VIEW_USER,
-            Permission.UPDATE_USER,
-            Permission.DELETE_USER,
-            Permission.MANAGE_USERS
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.CREATE_USER.value,
+            Permission.VIEW_USER.value,
+            Permission.UPDATE_USER.value,
+            Permission.DELETE_USER.value,
+            Permission.MANAGE_USERS.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_workflow_management_dependency():
@@ -295,77 +323,149 @@ def require_department_management_dependency():
 
 def require_overtime_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.APPROVE_OVERTIME,
-            Permission.APPROVE_OVERTIME_RECORD,
-            Permission.MANAGE_OVERTIME
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.APPROVE_OVERTIME.value,
+            Permission.APPROVE_OVERTIME_RECORD.value,
+            Permission.MANAGE_OVERTIME.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_shift_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.MANAGE_SHIFT_PATTERNS,
-            Permission.MANAGE_SHIFT_ASSIGNMENTS,
-            Permission.CREATE_SHIFT_PATTERN,
-            Permission.UPDATE_SHIFT_PATTERN
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.MANAGE_SHIFT_PATTERNS.value,
+            Permission.MANAGE_SHIFT_ASSIGNMENTS.value,
+            Permission.CREATE_SHIFT_PATTERN.value,
+            Permission.UPDATE_SHIFT_PATTERN.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_emergency_contact_access_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.VIEW_OWN_EMERGENCY_CONTACT,
-            Permission.VIEW_EMERGENCY_CONTACT,
-            Permission.UPDATE_EMERGENCY_CONTACT
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_OWN_EMERGENCY_CONTACT.value,
+            Permission.VIEW_EMERGENCY_CONTACT.value,
+            Permission.UPDATE_EMERGENCY_CONTACT.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_hierarchy_access_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.VIEW_OWN_HIERARCHY,
-            Permission.VIEW_HIERARCHY,
-            Permission.UPDATE_HIERARCHY
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_OWN_HIERARCHY.value,
+            Permission.VIEW_HIERARCHY.value,
+            Permission.UPDATE_HIERARCHY.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_attendance_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.MANAGE_ATTENDANCE,
-            Permission.VIEW_ATTENDANCE,
-            Permission.VIEW_ALL_ATTENDANCE
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.MANAGE_ATTENDANCE.value,
+            Permission.VIEW_ATTENDANCE.value,
+            Permission.VIEW_ALL_ATTENDANCE.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_time_correction_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.MANAGE_TIME_CORRECTION,
-            Permission.CREATE_TIME_CORRECTION,
-            Permission.UPDATE_TIME_CORRECTION,
-            Permission.DELETE_TIME_CORRECTION
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.MANAGE_TIME_CORRECTION.value,
+            Permission.CREATE_TIME_CORRECTION.value,
+            Permission.UPDATE_TIME_CORRECTION.value,
+            Permission.DELETE_TIME_CORRECTION.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_comprehensive_leave_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.CREATE_ALL_LEAVE_REQUESTS,
-            Permission.VIEW_ALL_LEAVE_REQUESTS,
-            Permission.APPROVE_LEAVE_REQUEST,
-            Permission.MANAGE_LEAVE
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.CREATE_ALL_LEAVE_REQUESTS.value,
+            Permission.VIEW_ALL_LEAVE_REQUESTS.value,
+            Permission.APPROVE_LEAVE_REQUEST.value,
+            Permission.MANAGE_LEAVE.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 def require_system_log_management_dependency():
     async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-        await require_any_permissions_dependency([
-            Permission.VIEW_LOGS,
-            Permission.DELETE_LOGS,
-            Permission.CREATE_LOGS
-        ])(current_user, db)
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_LOGS.value,
+            Permission.DELETE_LOGS.value,
+            Permission.CREATE_LOGS.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
     return inner
 
 async def validate_role_permissions(role_permissions: dict, db: AsyncSession) -> tuple[bool, list[str]]:
