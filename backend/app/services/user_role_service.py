@@ -65,8 +65,20 @@ async def create_user_role(
         await invalidate_cache_prefix(f"user:{user_role.user_id}")
         invalidate_user_cache(user_role.user_id)
         invalidate_role_cache(user_role.role_id)
-        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        invalidate_user_cache(current_user.user_id)
         logger.info(f"Cache invalidated for user_role, user:{user_role.user_id}, role:{user_role.role_id}, current_user:{current_user.user_id}", extra={"request_id": request_id})
+
+        # Prepare serializable values for logging
+        new_values = {
+            "user_role_id": db_user_role.user_role_id,
+            "user_id": db_user_role.user_id,
+            "role_id": db_user_role.role_id,
+            "assigned_by": db_user_role.assigned_by,
+            "is_active": db_user_role.is_active,
+            "assigned_at": db_user_role.assigned_at.isoformat() if db_user_role.assigned_at else None,
+            "updated_at": db_user_role.updated_at.isoformat() if db_user_role.updated_at else None,
+            "deleted_at": db_user_role.deleted_at.isoformat() if db_user_role.deleted_at else None
+        }
 
         # Log action using SystemAction.INSERT
         log = SystemLogCreate(
@@ -75,7 +87,7 @@ async def create_user_role(
             table_affected="user_roles",
             record_id=db_user_role.user_role_id,
             old_values=None,
-            new_values=db_user_role.__dict__,
+            new_values=new_values,
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -385,6 +397,18 @@ async def delete_user_role(
         invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
         logger.info(f"Cache invalidated for user_role, user:{db_user_role.user_id}, role:{db_user_role.role_id}, current_user:{current_user.user_id}", extra={"request_id": request_id})
 
+        # Prepare serializable values for logging
+        new_values = {
+            "user_role_id": db_user_role.user_role_id,
+            "user_id": db_user_role.user_id,
+            "role_id": db_user_role.role_id,
+            "assigned_by": db_user_role.assigned_by,
+            "is_active": db_user_role.is_active,
+            "assigned_at": db_user_role.assigned_at.isoformat() if db_user_role.assigned_at else None,
+            "updated_at": db_user_role.updated_at.isoformat() if db_user_role.updated_at else None,
+            "deleted_at": db_user_role.deleted_at.isoformat() if db_user_role.deleted_at else None
+        }
+
         # Log action using SystemAction.DELETE
         log = SystemLogCreate(
             user_id=current_user.user_id,
@@ -392,7 +416,7 @@ async def delete_user_role(
             table_affected="user_roles",
             record_id=user_role_id,
             old_values=db_user_role.__dict__,
-            new_values=None,
+            new_values=new_values,
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id

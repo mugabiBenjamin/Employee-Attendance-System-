@@ -45,7 +45,7 @@ async def create_user(
 
         # Validate supervisor_id if provided
         if user.supervisor_id:
-            await validate_user_exists(user.supervisor_id, db)
+            await validate_user_exists(db, user.supervisor_id)
 
         # Validate required fields
         if not user.email or not user.password:
@@ -73,7 +73,7 @@ async def create_user(
 
         # Invalidate cache for users list and user
         await invalidate_cache_prefix("users")
-        invalidate_user_cache(db_user.user_id)
+        await invalidate_user_cache(db_user.user_id)
         logger.info(f"Cache invalidated for user_id: {db_user.user_id} and users list")
 
         # Log action using SystemAction.INSERT
@@ -83,7 +83,20 @@ async def create_user(
             table_affected="users",
             record_id=db_user.user_id,
             old_values=None,
-            new_values=db_user.__dict__,
+            new_values={
+                "user_id": db_user.user_id,
+                "employee_id": db_user.employee_id,
+                "email": db_user.email,
+                "first_name": db_user.first_name,
+                "last_name": db_user.last_name,
+                "phone": db_user.phone,
+                "job_title": db_user.job_title,
+                "hire_date": db_user.hire_date.isoformat() if db_user.hire_date else None,
+                "employee_type": db_user.employee_type.value if hasattr(db_user.employee_type, 'value') else str(db_user.employee_type),
+                "salary": float(db_user.salary) if db_user.salary else None,
+                "supervisor_id": db_user.supervisor_id,
+                "is_active": db_user.is_active
+            },
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -251,7 +264,7 @@ async def update_user(
                 raise ResourceConflictError(detail="Email already registered")
 
         if "supervisor_id" in update_data and update_data["supervisor_id"] is not None:
-            await validate_user_exists(update_data["supervisor_id"], db)
+            await validate_user_exists(db, update_data["supervisor_id"])
 
         if "employee_type" in update_data and update_data["employee_type"]:
             if not await validate_enum_value(EmployeeType, update_data["employee_type"]):
@@ -279,11 +292,24 @@ async def update_user(
         # Log action using SystemAction.UPDATE
         log = SystemLogCreate(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE,
+            action=SystemAction.INSERT,
             table_affected="users",
-            record_id=user_id,
-            old_values=old_values,
-            new_values=db_user.__dict__,
+            record_id=db_user.user_id,
+            old_values=None,
+            new_values={
+                "user_id": db_user.user_id,
+                "employee_id": db_user.employee_id,
+                "email": db_user.email,
+                "first_name": db_user.first_name,
+                "last_name": db_user.last_name,
+                "phone": db_user.phone,
+                "job_title": db_user.job_title,
+                "hire_date": db_user.hire_date.isoformat() if db_user.hire_date else None,
+                "employee_type": db_user.employee_type.value if hasattr(db_user.employee_type, 'value') else str(db_user.employee_type),
+                "salary": float(db_user.salary) if db_user.salary else None,
+                "supervisor_id": db_user.supervisor_id,
+                "is_active": db_user.is_active
+            },
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -356,13 +382,27 @@ async def delete_user(
         logger.info(f"Cache invalidated for user_id: {user_id} and users list")
 
         # Log action using SystemAction.DELETE
+        # Around line ~67, replace the entire log creation:
         log = SystemLogCreate(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE,
+            action=SystemAction.INSERT,
             table_affected="users",
-            record_id=user_id,
-            old_values=db_user.__dict__,
-            new_values=None,
+            record_id=db_user.user_id,
+            old_values=None,
+            new_values={
+                "user_id": db_user.user_id,
+                "employee_id": db_user.employee_id,
+                "email": db_user.email,
+                "first_name": db_user.first_name,
+                "last_name": db_user.last_name,
+                "phone": db_user.phone,
+                "job_title": db_user.job_title,
+                "hire_date": db_user.hire_date.isoformat() if db_user.hire_date else None,
+                "employee_type": db_user.employee_type.value if hasattr(db_user.employee_type, 'value') else str(db_user.employee_type),
+                "salary": float(db_user.salary) if db_user.salary else None,
+                "supervisor_id": db_user.supervisor_id,
+                "is_active": db_user.is_active
+            },
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id

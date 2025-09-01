@@ -18,7 +18,7 @@ class Users(Base):
     password_hash = Column(String(255), nullable=False)
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=True)
+    phone = Column(String(25), nullable=True)
     job_title = Column(String(100), nullable=True)
     hire_date = Column(Date, nullable=False)
     employee_type = Column(ENUM_CLASSES['employee_type'], nullable=False, default=EmployeeType.FULL_TIME)
@@ -45,7 +45,7 @@ class Users(Base):
 
     __table_args__ = (
         CheckConstraint("email ~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'", name="email_format"),
-        CheckConstraint("phone IS NULL OR phone ~ '^[\\+]?[0-9\\s\\-\\(\\)]{1,20}$'", name="phone_format"),
+        CheckConstraint("phone IS NULL OR phone ~ '^[\\+]?[0-9\\s\\-\\(\\)]{1,25}$'", name="phone_format"),
         CheckConstraint("hire_date <= CURRENT_DATE", name="hire_date_valid"),
         CheckConstraint("salary IS NULL OR salary >= 0", name="salary_valid"),
         CheckConstraint("deleted_at IS NULL OR is_active = FALSE", name="soft_delete_check"),
