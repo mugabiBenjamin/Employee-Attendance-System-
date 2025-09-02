@@ -1,10 +1,10 @@
 from datetime import datetime, time, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi import UploadFile, Request
 from app.core.config import settings
-from app.core.exceptions import FileUploadError
+from app.core.exceptions import FileUploadError, DatabaseError
 import os
 from zoneinfo import ZoneInfo
 import logging
@@ -13,6 +13,9 @@ from sqlalchemy import select, and_
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
+from decimal import Decimal
+from uuid import UUID
+import base64
 
 logger = logging.getLogger(__name__)
 
@@ -123,39 +126,44 @@ async def get_users_with_permission(permission: str, db: AsyncSession) -> List[U
         result = await db.execute(query)
         return result.scalars().all()
     except Exception as e:
-        logger.error(f"Error getting users with permission {permission}: {str(e)}")
-        return []
+        logger.error(f"Error getting users with permission {permission}: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Failed to retrieve users with permission '{permission}': {str(e)}")
 
-def serialize_model_for_logging(model) -> dict:
+def serialize_model_for_logging(model) -> Dict[str, Any]:
     """Convert SQLAlchemy model to JSON-serializable dict."""
     result = {}
     for column in model.__table__.columns:
         value = getattr(model, column.name)
-        if value is None:
-            result[column.name] = None
-        elif hasattr(value, 'isoformat'):  # datetime/date
-            result[column.name] = value.isoformat()
-        elif hasattr(value, 'value'):  # enum
-            result[column.name] = value.value
-        else:
-            result[column.name] = value
+        result[column.name] = _serialize_value_for_logging(value)
     return result
 
-def serialize_dict_for_logging(data_dict: dict) -> dict:
+def serialize_dict_for_logging(data_dict: dict) -> Dict[str, Any]:
     """Convert dictionary with potentially non-serializable values to JSON-serializable dict."""
     if not data_dict:
-        return None
+        return {}
         
     result = {}
     for key, value in data_dict.items():
-        if value is None:
-            result[key] = None
-        elif hasattr(value, 'isoformat'):  # datetime/date
-            result[key] = value.isoformat()
-        elif hasattr(value, 'value'):  # enum
-            result[key] = value.value
-        elif isinstance(value, (int, float, str, bool)):
-            result[key] = value
-        else:
-            result[key] = str(value)
+        result[key] = _serialize_value_for_logging(value)
     return result
+
+def _serialize_value_for_logging(value: Any) -> Any:
+    """Helper function to serialize individual values for logging."""
+    if value is None:
+        return None
+    elif hasattr(value, 'isoformat'):  # datetime/date
+        return value.isoformat()
+    elif hasattr(value, 'value'):  # enum
+        return value.value
+    elif isinstance(value, Decimal):
+        return str(value)  # Convert Decimal to string to preserve precision
+    elif isinstance(value, UUID):
+        return str(value)  # Convert UUID to string
+    elif isinstance(value, (bytes, bytearray)):
+        return base64.b64encode(value).decode('utf-8')  # Convert bytes to base64 string
+    elif isinstance(value, memoryview):
+        return base64.b64encode(value.tobytes()).decode('utf-8')  # Convert memoryview to base64
+    elif isinstance(value, (int, float, str, bool)):
+        return value  # Already JSON-serializable
+    else:
+        return str(value)  # Fallback to string representation
