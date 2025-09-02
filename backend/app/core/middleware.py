@@ -1,12 +1,10 @@
-from fastapi import FastAPI, Request, Depends
-from app.core.database import get_db, AsyncSessionLocal
+from fastapi import FastAPI, Request
 from app.core.enums import SystemAction
-from app.models.system_logs import SystemLogs
 from app.core.config import settings
-from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 import uuid
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +58,35 @@ def get_table_affected(path: str) -> str | None:
 
     return None
 
+def _sanitize_params(params_dict: dict) -> dict:
+    """Sanitize sensitive parameters by masking their values."""
+    sensitive_keys = {
+        'password', 'token', 'secret', 'ssn', 'auth', 'key', 'pass', 
+        'credential', 'authorization', 'jwt', 'session', 'api_key',
+        'access_token', 'refresh_token', 'reset_token', 'csrf_token'
+    }
+    
+    sanitized = {}
+    for key, value in params_dict.items():
+        # Check if key contains any sensitive terms (case insensitive)
+        is_sensitive = any(sensitive_term in key.lower() for sensitive_term in sensitive_keys)
+        sanitized[key] = "***" if is_sensitive else value
+    
+    return sanitized
+
 def setup_middleware(app: FastAPI) -> None:
     """Setup middleware for logging system actions."""
 
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
-        print(f"Request query params: {dict(request.query_params)}")
-        print(f"Request path params: {request.path_params}")
+        # Only log debug info in development environment
+        if os.environ.get("NODE_ENV") == "development":
+            # Sanitize sensitive data before logging
+            sanitized_query_params = _sanitize_params(dict(request.query_params))
+            sanitized_path_params = _sanitize_params(request.path_params)
+            
+            logger.debug(f"Request query params: {sanitized_query_params}")
+            logger.debug(f"Request path params: {sanitized_path_params}")
         
         request_id = str(uuid.uuid4())
         logger.info(f"Middleware processing: {request.method} {request.url.path}", extra={"request_id": request_id})
@@ -79,7 +99,8 @@ def setup_middleware(app: FastAPI) -> None:
         try:
             response = await call_next(request)
         except Exception as e:
-            logger.error(f"Error during call_next: {str(e)}", extra={"request_id": request_id})
+            # Use logger.exception to capture the full stack trace
+            logger.exception(f"Error during call_next", extra={"request_id": request_id})
             raise
 
         # REMOVED DATABASE LOGGING TO FIX GREENLET ERROR
