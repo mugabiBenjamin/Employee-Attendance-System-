@@ -3,42 +3,64 @@ import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { departmentsApi } from "@/api/departments";
 import { z } from "zod";
-import { useParams, useNavigate, Navigate } from "react-router-dom";
-import GenericForm, { type FormFieldConfig } from "@/components/common/GenericForm";
+import { useParams, useNavigate } from "react-router-dom";
+import GenericForm, {
+  type FormFieldConfig,
+} from "@/components/common/GenericForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { Department } from "@/api/types";
 
 const departmentSchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional(),
 });
 
+type DepartmentFormData = z.infer<typeof departmentSchema>;
+
 function DepartmentForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [defaultValues, setDefaultValues] = useState({
+  const [defaultValues, setDefaultValues] = useState<DepartmentFormData>({
     name: "",
     description: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [fetchLoading, setFetchLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (id && user?.permissions.includes("manage_departments")) {
-      departmentsApi.getDepartments({}).then((data) => {
-        const department = data.items.find((d) => d.department_id === parseInt(id));
-        if (department) {
+      setFetchLoading(true);
+      // Note: The backend API does not support direct ID filtering. Consider adding a `getDepartmentById` endpoint for efficiency.
+      departmentsApi
+        .getDepartments({ page: 1, limit: 100 }) // Fetch a reasonable number of departments
+        .then((response) => {
+          const department = response.items.find(
+            (d: Department) => d.department_id === parseInt(id)
+          );
+          if (!department) {
+            throw new Error("Department not found");
+          }
           setDefaultValues({
             name: department.name,
             description: department.description || "",
           });
-        }
-      });
+          setError(null);
+        })
+        .catch(() => {
+          setError("Failed to load department data");
+        })
+        .finally(() => setFetchLoading(false));
     }
   }, [id, user]);
 
-  const onSubmit = async (data: z.infer<typeof departmentSchema>) => {
+  const onSubmit = async (data: DepartmentFormData) => {
+    setLoading(true);
+    setError(null);
     try {
       if (id) {
         await departmentsApi.updateDepartment(parseInt(id), data);
@@ -47,15 +69,13 @@ function DepartmentForm() {
       }
       navigate("/departments");
     } catch {
-      setError("Failed to save department");
+      setError(`Failed to ${id ? "update" : "create"} department`);
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (!user?.permissions.includes("manage_departments")) {
-    return <Navigate to="/" replace />;
-  }
-
-  const fields: FormFieldConfig<z.infer<typeof departmentSchema>>[] = [
+  const fields: FormFieldConfig<DepartmentFormData>[] = [
     {
       name: "name",
       label: "Department Name",
@@ -76,7 +96,7 @@ function DepartmentForm() {
     <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
       {error && (
         <Alert variant="destructive">
-          <AlertCircleIcon />
+          <AlertCircleIcon className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -86,13 +106,22 @@ function DepartmentForm() {
           <CardTitle>{id ? "Edit Department" : "Add Department"}</CardTitle>
         </CardHeader>
         <CardContent>
-          <GenericForm
-            schema={departmentSchema}
-            defaultValues={defaultValues}
-            fields={fields}
-            onSubmit={onSubmit}
-            submitButtonText={id ? "Update Department" : "Create Department"}
-          />
+          {fetchLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-12 w-32" />
+            </div>
+          ) : (
+            <GenericForm
+              schema={departmentSchema}
+              defaultValues={defaultValues}
+              fields={fields}
+              onSubmit={onSubmit}
+              submitButtonText={id ? "Update Department" : "Create Department"}
+              disabled={loading}
+            />
+          )}
         </CardContent>
       </Card>
     </div>

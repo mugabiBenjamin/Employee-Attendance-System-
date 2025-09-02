@@ -24,9 +24,16 @@ from app.core.exceptions import (
     ResourceNotFoundError,
     BusinessLogicError,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def validate_user_exists(db: AsyncSession, user_id: int, request_id: Optional[str] = None) -> None:
     """Validate that a user exists and is active."""
+    logger.debug(
+        f"Validating user existence for user_id: {user_id}",
+        extra={"request_id": request_id}
+    )
     query = select(Users).where(
         Users.user_id == user_id,
         Users.is_active == True,

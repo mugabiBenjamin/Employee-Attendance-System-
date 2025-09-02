@@ -16,7 +16,7 @@ dist/
 
 # Package manager files
 package-lock.json
-yarn.lock
+# yarn.lock
 pnpm-lock.yaml
 
 # Runtime data

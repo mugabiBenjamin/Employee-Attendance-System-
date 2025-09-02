@@ -11,11 +11,11 @@ from app.schemas.system_log import SystemLogCreate
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserDepartmentNotFoundError, DatabaseError, ResourceConflictError, UserNotFoundError, DepartmentNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, get_user_permissions, invalidate_cache_prefix
+from app.core.permissions import require_permissions_dependency, get_user_permissions
+from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.services.system_log_service import create_system_log
 from app.core.validators import validate_user_exists, validate_department_exists
 from app.core.config import Settings, get_settings
-from app.core.database import get_db, get_cache, set_cache
 from app.core.utils import get_request_id
 import logging
 
@@ -56,7 +56,7 @@ async def create_user_department(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Create a new user-department assignment with validation, logging, and cache clearing."""
     try:
@@ -152,7 +152,7 @@ async def read_user_department(
     user_department_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Retrieve a user-department assignment by ID."""
     try:
@@ -176,7 +176,8 @@ async def read_user_department(
         if not user_department:
             raise UserDepartmentNotFoundError(user_department_id=user_department_id)
 
-        user_department_dict = UserDepartmentOut.model_validate(user_department).model_dump()
+        user_department_out = UserDepartmentOut.model_validate(user_department)
+        user_department_dict = user_department_out.model_dump(mode='json')
         await set_cache(cache_key, user_department_dict, ttl=300)
         logger.info(f"Cache set for user_department_id: {user_department_id}", extra={"request_id": request_id})
 
@@ -184,7 +185,7 @@ async def read_user_department(
             f"Retrieved user department: user_department_id={user_department_id}",
             extra={"request_id": request_id}
         )
-        return UserDepartmentOut.model_validate(user_department)
+        return user_department_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -208,7 +209,7 @@ async def read_user_departments(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """List user-department assignments with optional filters and pagination."""
     try:
@@ -255,7 +256,8 @@ async def read_user_departments(
         result = await db.execute(query)
         user_departments = result.scalars().all()
 
-        user_departments_dict = [UserDepartmentOut.model_validate(ud).model_dump() for ud in user_departments]
+        user_departments_out = [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        user_departments_dict = [ud.model_dump(mode='json') for ud in user_departments_out]
         await set_cache(cache_key, user_departments_dict, ttl=300)
         logger.info(
             f"Cache set for user_departments, user_id: {user_id or 'all'}, department_id: {department_id or 'all'}",
@@ -266,7 +268,7 @@ async def read_user_departments(
             f"Retrieved {len(user_departments)} user department assignments",
             extra={"request_id": request_id, "user_id": current_user.user_id, "target_user_id": user_id, "department_id": department_id}
         )
-        return [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        return user_departments_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
@@ -295,7 +297,7 @@ async def update_user_department(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_USER_DEPARTMENT]))
 ) -> UserDepartmentOut:
     """Update a user-department assignment with validation, logging, and cache clearing."""
     try:
@@ -424,7 +426,7 @@ async def delete_user_department(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_USER_DEPARTMENT]))
 ) -> None:
     """Soft delete a user-department assignment with validation, logging, and cache clearing."""
     try:
@@ -523,7 +525,7 @@ async def get_user_departments(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_DEPARTMENT]))
 ) -> List[UserDepartmentOut]:
     """Retrieve a list of department assignments for a user with pagination."""
     try:
@@ -558,7 +560,8 @@ async def get_user_departments(
         result = await db.execute(query)
         user_departments = result.scalars().all()
 
-        user_departments_dict = [UserDepartmentOut.model_validate(ud).model_dump() for ud in user_departments]
+        user_departments_out = [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        user_departments_dict = [ud.model_dump(mode='json') for ud in user_departments_out]
         await set_cache(cache_key, user_departments_dict, ttl=300)
         logger.info(
             f"Cache set for user_departments, user_id: {user_id}",
@@ -569,7 +572,7 @@ async def get_user_departments(
             f"Retrieved {len(user_departments)} departments for user_id: {user_id}",
             extra={"request_id": request_id, "user_id": current_user.user_id}
         )
-        return [UserDepartmentOut.model_validate(ud) for ud in user_departments]
+        return user_departments_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})

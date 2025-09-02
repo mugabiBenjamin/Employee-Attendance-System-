@@ -1,5 +1,6 @@
 from datetime import datetime, date, timezone
-from typing import Optional
+from ipaddress import IPv4Address, IPv6Address
+from typing import Optional, Union
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from app.core.enums import AttendanceStatus
 from app.core.exceptions import ValidationError
@@ -13,9 +14,8 @@ class AttendanceRecordBase(BaseModel):
     overtime_hours: float = Field(0, ge=0)
     date: date
     status: AttendanceStatus = AttendanceStatus.PRESENT
-    ip_address: Optional[str] = None
+    ip_address: Optional[Union[str, IPv4Address, IPv6Address]] = None
     location: Optional[str] = Field(None, max_length=255)
-    is_active: bool = True
 
     @field_validator('clock_in_time', 'clock_out_time', mode='before')
     @classmethod
@@ -46,16 +46,28 @@ class AttendanceRecordBase(BaseModel):
     @field_validator('date')
     @classmethod
     def validate_date(cls, value: datetime.date) -> datetime.date:
-        if value > datetime.date.today():
+        from datetime import date as date_class
+        if value > date_class.today():
             raise ValidationError(detail="Date cannot be in the future.")
+        return value
+    
+    @field_validator('ip_address', mode='before')
+    @classmethod
+    def validate_ip_address(cls, value):
+        if value is None:
+            return value
+        # Convert IPv4Address/IPv6Address objects to string
+        if isinstance(value, (IPv4Address, IPv6Address)):
+            return str(value)
         return value
 
 class AttendanceRecordCreate(AttendanceRecordBase):
     user_id: int
     clock_in_time: datetime
-    ip_address: str
+    ip_address: Optional[Union[str, IPv4Address, IPv6Address]] = None
     location: Optional[str] = None
     status: AttendanceStatus = AttendanceStatus.PRESENT
+    date: date
 
 class AttendanceRecordUpdate(BaseModel):
     clock_in_time: Optional[datetime] = None
@@ -98,8 +110,25 @@ class AttendanceRecordOut(AttendanceRecordBase):
     user_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    is_active: bool = True
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={
+            datetime: lambda v: v.isoformat() if v else None,
+            date: lambda v: v.isoformat() if v else None,
+            IPv4Address: str,
+            IPv6Address: str
+        }
+    )
 
 class ClockInOut(BaseModel):
     action: str
+    location: Optional[str] = Field(None, max_length=255)
+    
+    @field_validator('action')
+    @classmethod
+    def validate_action(cls, v):
+        if v not in ['clock_in', 'clock_out']:
+            raise ValidationError(detail="Action must be either 'clock_in' or 'clock_out'")
+        return v

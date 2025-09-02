@@ -15,10 +15,10 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import ResourceNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_department_exists
-from app.core.utils import get_request_id, get_users_with_permission
+from app.core.utils import get_request_id, get_users_with_permission, serialize_dict_for_logging, serialize_model_for_logging
 from app.services.system_log_service import create_system_log
 from app.core.mail import send_email
 import logging
@@ -59,7 +59,7 @@ async def get_attendance_summary_by_user(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE]))
 ) -> List[AttendanceSummaryOut]:
     """Retrieve attendance summary for a specific user with optional filters and pagination."""
     try:
@@ -115,7 +115,8 @@ async def get_attendance_summary_by_user(
         if not summaries:
             raise ResourceNotFoundError(resource="Attendance summary", identifier=f"user_id {user_id}")
 
-        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump() for summary in summaries]
+        # Fix: Use mode='json' for proper serialization
+        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump(mode='json') for summary in summaries]
         await set_cache(cache_key, summaries_dict, ttl=300)
         logger.info(f"Cache set for {cache_key}", extra={"request_id": request_id})
 
@@ -148,7 +149,7 @@ async def get_all_attendance_summaries(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_ALL_ATTENDANCE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_ALL_ATTENDANCE]))
 ) -> List[AttendanceSummaryOut]:
     """Retrieve all attendance summaries with optional filters and pagination."""
     try:
@@ -187,7 +188,8 @@ async def get_all_attendance_summaries(
         result = await db.execute(query)
         summaries = result.scalars().all()
 
-        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump() for summary in summaries]
+        # Fix: Use mode='json' for proper serialization
+        summaries_dict = [AttendanceSummaryOut.model_validate(summary).model_dump(mode='json') for summary in summaries]
         await set_cache(cache_key, summaries_dict, ttl=300)
         logger.info(f"Cache set for {cache_key}", extra={"request_id": request_id})
 
@@ -215,7 +217,7 @@ async def generate_attendance_summary(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.GENERATE_REPORTS]))
+    _= Depends(require_permissions_dependency([Permission.GENERATE_REPORTS]))
 ) -> AttendanceSummaryOut:
     """Generate or update an attendance summary for a specific user and date."""
     try:
@@ -306,14 +308,15 @@ async def generate_attendance_summary(
         await db.commit()
         await db.refresh(db_summary)
 
-        # Log the action
+        # Log the action using proper serialization for date/time objects
+        new_values_dict = AttendanceSummaryOut.model_validate(db_summary).model_dump(mode='json')
         log = SystemLogCreate(
             user_id=current_user.user_id,
             action=SystemAction.GENERATE_REPORT,
             table_affected="attendance_summary",
             record_id=db_summary.user_id,
-            old_values=old_values,
-            new_values=db_summary.__dict__,
+            old_values=serialize_dict_for_logging(old_values),
+            new_values=new_values_dict,
             ip_address=str(request.client.host),
             user_agent=request.headers.get("user-agent"),
             request_id=request_id

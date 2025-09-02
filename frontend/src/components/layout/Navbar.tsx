@@ -1,4 +1,4 @@
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import type { RootState } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { clearAuth } from "@/store/slices/authSlice";
-import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -32,17 +31,32 @@ function Navbar() {
   };
 
   const getUserInitials = (firstName?: string, lastName?: string) => {
-    return `${firstName?.[0] || ""}${lastName?.[0] || ""}`.toUpperCase() || "U";
+    if (!firstName && !lastName) return "U";
+    return `${firstName?.[0] || ""}${lastName?.[0] || ""}`.toUpperCase();
+  };
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning";
+    if (hour < 18) return "Good Afternoon";
+    return "Good Evening";
   };
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-2 px-4 bg-background border-b">
+    <header className="flex h-16 shrink-0 items-center gap-2 px-4 bg-background border-b overflow-hidden">
       <div className="flex items-center gap-2">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mr-2 h-4" />
       </div>
 
       <div className="flex-1 flex items-center justify-between">
+        {/* Greeting */}
+        {user && (
+          <span className="hidden sm:inline text-lg font-bold">
+            {getGreeting()}, {user?.first_name}
+          </span>
+        )}
+
         {/* Search - responsive */}
         <div className="relative">
           <div className="hidden sm:block">
@@ -79,13 +93,13 @@ function Navbar() {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="px-2" size="lg">
                   <Avatar className="h-8 w-8 rounded-full">
-                    <AvatarImage src="" alt={user.first_name} />
+                    <AvatarImage src="" alt={user?.first_name || "User"} />
                     <AvatarFallback className="text-sm">
-                      {getUserInitials(user.first_name)}
+                      {getUserInitials(user?.first_name, user?.last_name)}
                     </AvatarFallback>
                   </Avatar>
                   <span className="hidden sm:inline text-sm">
-                    {user.first_name}
+                    {user?.first_name}
                   </span>
                 </Button>
               </DropdownMenuTrigger>

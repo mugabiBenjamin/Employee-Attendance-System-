@@ -15,7 +15,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import Permission, SystemAction, CorrectionStatus
 from app.core.mail import send_email
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.exceptions import DepartmentNotFoundError, TimeCorrectionNotFoundError, AttendanceRecordNotFoundError, UserNotFoundError, ValidationError, DatabaseError
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_department_exists, validate_user_exists, validate_attendance_record_exists
@@ -54,7 +54,7 @@ async def create_time_correction(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_TIME_CORRECTION]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Create a new time correction request with validation, logging, and cache clearing."""
     try:
@@ -145,7 +145,7 @@ async def get_time_correction(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Retrieve a time correction by ID with authorization check."""
     try:
@@ -211,7 +211,7 @@ async def get_user_time_corrections(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_TIME_CORRECTION]))
 ) -> List[TimeCorrectionOut]:
     """Retrieve all time corrections for a specific user with pagination and optional status filter."""
     try:
@@ -283,7 +283,7 @@ async def get_department_time_corrections(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_TIME_CORRECTION]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_TIME_CORRECTION]))
 ) -> List[TimeCorrectionOut]:
     """Retrieve all time corrections for a specific department with pagination and optional status filter."""
     try:
@@ -354,7 +354,7 @@ async def update_time_correction(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_TIME_CORRECTION]))
+    _ = Depends(require_permissions_dependency([Permission.UPDATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Update an existing time correction with validation, logging, and cache clearing."""
     try:
@@ -473,7 +473,7 @@ async def approve_time_correction(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_TIME_CORRECTION]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_TIME_CORRECTION]))
 ) -> TimeCorrectionOut:
     """Approve or reject a time correction with validation, logging, and cache clearing."""
     try:
@@ -575,7 +575,7 @@ async def delete_time_correction(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_TIME_CORRECTION]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_TIME_CORRECTION]))
 ) -> None:
     """Soft delete a time correction with logging and cache clearing."""
     try:

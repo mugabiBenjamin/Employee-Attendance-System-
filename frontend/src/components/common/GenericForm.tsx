@@ -1,3 +1,5 @@
+"use client";
+
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   useForm,
@@ -11,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -35,11 +38,17 @@ interface FormFieldConfig<T extends FieldValues> {
     | "date"
     | "datetime-local"
     | "time"
+    | "number"
     | "select";
   placeholder?: string;
   description?: string;
   multiple?: boolean;
   options?: { value: string; label: string }[];
+  disabled?: boolean;
+  transform?: {
+    toInput?: (value: unknown) => string;
+    fromInput?: (value: string | string[]) => unknown;
+  };
 }
 
 interface GenericFormProps<T extends FieldValues> {
@@ -48,6 +57,10 @@ interface GenericFormProps<T extends FieldValues> {
   fields: FormFieldConfig<T>[];
   onSubmit: SubmitHandler<T>;
   submitButtonText: string;
+  cancelButtonText?: string;
+  onCancel?: () => void;
+  disabled?: boolean;
+  className?: string;
 }
 
 function GenericForm<T extends FieldValues>({
@@ -56,6 +69,10 @@ function GenericForm<T extends FieldValues>({
   fields,
   onSubmit,
   submitButtonText,
+  cancelButtonText,
+  onCancel,
+  disabled = false,
+  className = "grid gap-4",
 }: GenericFormProps<T>) {
   const form = useForm({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,46 +81,69 @@ function GenericForm<T extends FieldValues>({
     defaultValues: defaultValues as any,
   }) as UseFormReturn<T>;
 
+  const handleSelectChange = (
+    field: { value: unknown; onChange: (value: unknown) => void },
+    fieldConfig: FormFieldConfig<T>,
+    value: string
+  ) => {
+    if (fieldConfig.multiple) {
+      const current = Array.isArray(field.value) ? field.value : [];
+      const newValues = current.includes(value)
+        ? current.filter((v: string) => v !== value)
+        : [...current, value];
+      field.onChange(
+        fieldConfig.transform?.fromInput
+          ? fieldConfig.transform.fromInput(newValues)
+          : newValues
+      );
+    } else {
+      field.onChange(
+        fieldConfig.transform?.fromInput
+          ? fieldConfig.transform.fromInput(value)
+          : value
+      );
+    }
+  };
+
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4">
-        {fields.map((field) => (
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className={className}
+        aria-disabled={disabled}
+      >
+        {fields.map((fieldConfig) => (
           <FormField
-            key={field.name}
+            key={fieldConfig.name}
             control={form.control}
-            name={field.name}
-            render={({ field: formField }) => (
+            name={fieldConfig.name}
+            render={({ field }) => (
               <FormItem>
-                <FormLabel>{field.label}</FormLabel>
+                <FormLabel>{fieldConfig.label}</FormLabel>
                 <FormControl>
-                  {field.type === "select" ? (
+                  {fieldConfig.type === "select" ? (
                     <Select
-                      onValueChange={(value) => {
-                        if (field.multiple) {
-                          const current = Array.isArray(formField.value)
-                            ? formField.value
-                            : [];
-                          formField.onChange([...current, value]);
-                        } else {
-                          formField.onChange(value);
-                        }
-                      }}
+                      onValueChange={(value) =>
+                        handleSelectChange(field, fieldConfig, value)
+                      }
                       value={
-                        field.multiple && Array.isArray(formField.value)
+                        fieldConfig.multiple
                           ? undefined
-                          : formField.value
+                          : fieldConfig.transform?.toInput
+                          ? fieldConfig.transform.toInput(field.value)
+                          : (field.value as string)
                       }
-                      defaultValue={
-                        field.multiple ? undefined : formField.value
-                      }
+                      disabled={fieldConfig.disabled || disabled}
                     >
                       <SelectTrigger>
                         <SelectValue
-                          placeholder={field.placeholder || "Select an option"}
+                          placeholder={
+                            fieldConfig.placeholder || "Select an option"
+                          }
                         />
                       </SelectTrigger>
                       <SelectContent>
-                        {field.options?.map((option) => (
+                        {fieldConfig.options?.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>
@@ -112,24 +152,51 @@ function GenericForm<T extends FieldValues>({
                     </Select>
                   ) : (
                     <Input
-                      type={field.type}
-                      placeholder={field.placeholder}
-                      {...formField}
-                      value={formField.value ?? ""}
+                      type={fieldConfig.type}
+                      placeholder={fieldConfig.placeholder}
+                      {...field}
+                      value={
+                        fieldConfig.transform?.toInput
+                          ? fieldConfig.transform.toInput(field.value)
+                          : field.value ?? ""
+                      }
+                      onChange={(e) =>
+                        field.onChange(
+                          fieldConfig.transform?.fromInput
+                            ? fieldConfig.transform.fromInput(e.target.value)
+                            : e.target.value
+                        )
+                      }
+                      disabled={fieldConfig.disabled || disabled}
                     />
                   )}
                 </FormControl>
-                {field.description && (
-                  <p className="text-muted-foreground text-sm">
-                    {field.description}
-                  </p>
+                {fieldConfig.description && (
+                  <FormDescription>{fieldConfig.description}</FormDescription>
                 )}
                 <FormMessage />
               </FormItem>
             )}
           />
         ))}
-        <Button type="submit">{submitButtonText}</Button>
+        <div className="flex gap-2">
+          <Button
+            type="submit"
+            disabled={disabled || form.formState.isSubmitting}
+          >
+            {form.formState.isSubmitting ? "Submitting..." : submitButtonText}
+          </Button>
+          {cancelButtonText && onCancel && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={disabled || form.formState.isSubmitting}
+            >
+              {cancelButtonText}
+            </Button>
+          )}
+        </div>
       </form>
     </Form>
   );

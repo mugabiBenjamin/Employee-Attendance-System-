@@ -19,7 +19,7 @@ from app.schemas.employee_emergency_contact import (
     EmployeeEmergencyContactOut
 )
 from app.core.enums import Permission
-from app.core.permissions import require_permissions, require_any_permissions
+from app.core.permissions import require_permissions_dependency, require_any_permissions_dependency
 import logging
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ async def create_emergency_contact_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.CREATE_EMERGENCY_CONTACT]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Create an emergency contact for the current user."""
     request_id = None
@@ -64,7 +64,7 @@ async def get_emergency_contact_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    _=Depends(require_any_permissions_dependency([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Retrieve an emergency contact by ID."""
     try:
@@ -93,7 +93,7 @@ async def list_emergency_contacts_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_any_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    _=Depends(require_any_permissions_dependency([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> List[EmployeeEmergencyContactOut]:
     """List emergency contacts with pagination and optional filters."""
     try:
@@ -119,7 +119,7 @@ async def update_emergency_contact_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_any_permissions([Permission.UPDATE_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    _=Depends(require_any_permissions_dependency([Permission.UPDATE_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Update an emergency contact."""
     try:
@@ -144,7 +144,7 @@ async def delete_emergency_contact_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.DELETE_EMERGENCY_CONTACT]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_EMERGENCY_CONTACT]))
 ) -> None:
     """Soft delete an emergency contact."""
     try:

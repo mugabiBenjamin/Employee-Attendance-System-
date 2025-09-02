@@ -11,7 +11,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission, RoleName, validate_permissions_list
 from app.core.exceptions import RoleNotFoundError, ValidationError, BusinessLogicError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_role_cache, invalidate_user_cache
+from app.core.permissions import require_permissions_dependency, invalidate_role_cache, invalidate_user_cache
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix, validate_enum_value
 from app.core.validators import validate_role_not_assigned
 from app.services.system_log_service import create_system_log
@@ -25,7 +25,7 @@ async def create_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.CREATE_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_ROLE]))
 ) -> RoleOut:
     """Create a new role with validation, logging, and cache clearing."""
     try:
@@ -101,7 +101,7 @@ async def get_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_ROLE]))
 ) -> RoleOut:
     """Retrieve a role by ID."""
     try:
@@ -125,7 +125,8 @@ async def get_role(
         if not role:
             raise RoleNotFoundError(role_id=role_id)
 
-        role_dict = RoleOut.model_validate(role).model_dump()
+        role_object = RoleOut.model_validate(role)
+        role_dict = role_object.model_dump(mode='json')  # Use mode='json' for proper serialization
         await set_cache(cache_key, role_dict, ttl=300)
         logger.info(f"Cache set for role_id: {role_id}", extra={"request_id": request_id})
 
@@ -133,7 +134,7 @@ async def get_role(
             f"Retrieved role, role_id: {role_id}, user_id: {current_user.user_id}",
             extra={"request_id": request_id}
         )
-        return RoleOut.model_validate(role)
+        return role_object
 
     except ValidationError as e:
         logger.error(f"Validation error retrieving role {role_id}: {str(e)}", extra={"request_id": request_id})
@@ -155,7 +156,7 @@ async def list_roles(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_ROLE]))
 ) -> List[RoleOut]:
     """Retrieve a list of active roles with pagination."""
     try:
@@ -176,7 +177,8 @@ async def list_roles(
         result = await db.execute(query)
         roles = result.scalars().all()
 
-        roles_dict = [RoleOut.model_validate(role).model_dump() for role in roles]
+        role_objects = [RoleOut.model_validate(role) for role in roles]
+        roles_dict = [role.model_dump(mode='json') for role in role_objects]  # Use mode='json' for proper serialization
         await set_cache(cache_key, roles_dict, ttl=300)
         logger.info(f"Cache set for roles list, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
 
@@ -184,7 +186,7 @@ async def list_roles(
             f"Retrieved {len(roles)} roles for user_id: {current_user.user_id}",
             extra={"request_id": request_id}
         )
-        return [RoleOut.model_validate(role) for role in roles]
+        return role_objects
 
     except ValidationError as e:
         logger.error(f"Validation error retrieving roles: {str(e)}", extra={"request_id": request_id})
@@ -203,7 +205,7 @@ async def update_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.UPDATE_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_ROLE]))
 ) -> RoleOut:
     """Update a role with validation, logging, and cache clearing."""
     try:
@@ -297,7 +299,7 @@ async def delete_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.DELETE_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_ROLE]))
 ) -> None:
     """Soft delete a role with validation, logging, and cache clearing."""
     try:

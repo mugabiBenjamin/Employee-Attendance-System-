@@ -13,7 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserNotFoundError, EmployeeEmergencyContactNotFoundError, ValidationError, DepartmentNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_department_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -57,12 +57,15 @@ async def create_emergency_contact(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_EMERGENCY_CONTACT]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Create a new emergency contact for the current user with validation, logging, and cache clearing."""
+    # Cache user_id to avoid session access in exception handlers
+    user_id = current_user.user_id
+    
     try:
         # Validate current user
-        await validate_user_exists(db, current_user.user_id, request_id)
+        await validate_user_exists(db, user_id, request_id)
 
         # Validate phone numbers
         if not validate_phone_number(contact.phone):
@@ -74,7 +77,7 @@ async def create_emergency_contact(
 
         # Check for duplicate phone numbers for the user
         query = select(EmployeeEmergencyContacts).where(
-            EmployeeEmergencyContacts.user_id == current_user.user_id,
+            EmployeeEmergencyContacts.user_id == user_id,
             EmployeeEmergencyContacts.is_active.is_(True),
             EmployeeEmergencyContacts.deleted_at.is_(None),
             or_(
@@ -90,7 +93,7 @@ async def create_emergency_contact(
 
         # Check maximum emergency contacts limit
         query_count = select(EmployeeEmergencyContacts).where(
-            EmployeeEmergencyContacts.user_id == current_user.user_id,
+            EmployeeEmergencyContacts.user_id == user_id,
             EmployeeEmergencyContacts.is_active.is_(True),
             EmployeeEmergencyContacts.deleted_at.is_(None)
         )
@@ -99,7 +102,7 @@ async def create_emergency_contact(
             raise ValidationError(detail=f"Maximum emergency contacts ({settings.MAX_EMERGENCY_CONTACTS}) reached")
 
         db_contact = EmployeeEmergencyContacts(
-            user_id=current_user.user_id,
+            user_id=user_id,
             **contact.model_dump(),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -110,22 +113,22 @@ async def create_emergency_contact(
         await db.refresh(db_contact)
 
         # Invalidate cache
-        invalidate_user_cache(current_user.user_id)
+        invalidate_user_cache(user_id)
         await invalidate_cache_prefix("emergency_contact")
-        await invalidate_cache_prefix(f"user:{current_user.user_id}")
-        logger.info(f"Cache invalidated for emergency_contact and user:{current_user.user_id}", extra={"request_id": request_id})
+        await invalidate_cache_prefix(f"user:{user_id}")
+        logger.info(f"Cache invalidated for emergency_contact and user:{user_id}", extra={"request_id": request_id})
 
         # Notify admins
         await _notify_admins_of_contact_change(db, db_contact, current_user, request_id, settings, "created")
 
-        # Log the action
+        # Log the action - use proper serialization
+        new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json')
         log = SystemLogCreate(
-            user_id=current_user.user_id,
+            user_id=user_id,
             action=SystemAction.CREATE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=db_contact.contact_id,
-            old_values=None,
-            new_values=db_contact.__dict__,
+            old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -133,8 +136,8 @@ async def create_emergency_contact(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         logger.info(
-            f"Emergency contact created, contact_id: {db_contact.contact_id}, user_id: {current_user.user_id}",
-            extra={"request_id": request_id, "user_id": current_user.user_id}
+            f"Emergency contact created, contact_id: {db_contact.contact_id}, user_id: {user_id}",
+            extra={"request_id": request_id, "user_id": user_id}
         )
         return EmployeeEmergencyContactOut.model_validate(db_contact)
 
@@ -148,15 +151,16 @@ async def create_emergency_contact(
         logger.error(f"Authorization error: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error creating emergency contact for user_id {current_user.user_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error creating emergency contact for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating emergency contact")
+
 
 async def get_emergency_contact(
     contact_id: int,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Retrieve an emergency contact by ID with authorization check."""
     try:
@@ -190,7 +194,7 @@ async def get_emergency_contact(
                     detail="Not authorized to view this emergency contact"
                 )
 
-        contact_dict = EmployeeEmergencyContactOut.model_validate(contact).model_dump()
+        contact_dict = EmployeeEmergencyContactOut.model_validate(contact).model_dump(mode='json')
         await set_cache(cache_key, contact_dict, ttl=300)
         logger.info(f"Cache set for emergency_contact:{contact_id}", extra={"request_id": request_id})
 
@@ -223,7 +227,7 @@ async def list_emergency_contacts(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> List[EmployeeEmergencyContactOut]:
     """Retrieve a list of emergency contacts for an employee or department with pagination."""
     try:
@@ -276,7 +280,7 @@ async def list_emergency_contacts(
         result = await db.execute(query)
         contacts = result.scalars().all()
 
-        contacts_dict = [EmployeeEmergencyContactOut.model_validate(c).model_dump() for c in contacts]
+        contacts_dict = [EmployeeEmergencyContactOut.model_validate(c).model_dump(mode='json') for c in contacts]
         await set_cache(cache_key, contacts_dict, ttl=300)
         logger.info(f"Cache set for emergency_contacts:{target_user_id or 'all'}:{department_id or 'all'}:{is_active or 'all'}:{skip}:{limit}", extra={"request_id": request_id})
 
@@ -307,9 +311,12 @@ async def update_emergency_contact(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_EMERGENCY_CONTACT, Permission.VIEW_OWN_EMERGENCY_CONTACT]))
 ) -> EmployeeEmergencyContactOut:
     """Update an emergency contact with validation, logging, and cache clearing."""
+    # Cache user_id to avoid session access in exception handlers
+    user_id = current_user.user_id
+    
     try:
         if contact_id <= 0:
             raise ValidationError(detail="Invalid contact_id")
@@ -327,7 +334,7 @@ async def update_emergency_contact(
 
         # Authorization check
         if not await _check_user_authorization(db, current_user, db_contact.user_id, [Permission.UPDATE_EMERGENCY_CONTACT, Permission.MANAGE_EMPLOYEES], request_id):
-            if db_contact.user_id == current_user.user_id and Permission.VIEW_OWN_EMERGENCY_CONTACT.value in (await get_user_permissions(current_user.user_id, db)):
+            if db_contact.user_id == user_id and Permission.VIEW_OWN_EMERGENCY_CONTACT.value in (await get_user_permissions(user_id, db)):
                 pass  # Allow if user owns the contact and has VIEW_OWN_EMERGENCY_CONTACT
             else:
                 raise HTTPException(
@@ -367,7 +374,9 @@ async def update_emergency_contact(
             if result.scalar_one_or_none():
                 raise ValidationError(detail="Phone number already used for another emergency contact")
 
-        old_values = db_contact.__dict__.copy()
+        # Serialize old values properly before modification
+        old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json')
+        
         for key, value in update_data.items():
             setattr(db_contact, key, value)
 
@@ -385,14 +394,14 @@ async def update_emergency_contact(
         # Notify admins
         await _notify_admins_of_contact_change(db, db_contact, current_user, request_id, settings, "updated")
 
-        # Log the action
+        # Log the action - use proper serialization
+        new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json')
         log = SystemLogCreate(
-            user_id=current_user.user_id,
+            user_id=user_id,
             action=SystemAction.UPDATE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
-            old_values=old_values,
-            new_values=db_contact.__dict__,
+            old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -400,8 +409,8 @@ async def update_emergency_contact(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         logger.info(
-            f"Emergency contact updated, contact_id: {contact_id}, user_id: {current_user.user_id}",
-            extra={"request_id": request_id, "user_id": current_user.user_id}
+            f"Emergency contact updated, contact_id: {contact_id}, user_id: {user_id}",
+            extra={"request_id": request_id, "user_id": user_id}
         )
         return EmployeeEmergencyContactOut.model_validate(db_contact)
 
@@ -415,7 +424,7 @@ async def update_emergency_contact(
         logger.error(f"Authorization error updating emergency contact {contact_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error updating emergency contact {contact_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error updating emergency contact {contact_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error updating emergency contact")
 
 async def delete_emergency_contact(
@@ -425,9 +434,12 @@ async def delete_emergency_contact(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_EMERGENCY_CONTACT]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_EMERGENCY_CONTACT]))
 ) -> None:
     """Soft delete an emergency contact with logging and cache clearing."""
+    # Cache user_id to avoid session access in exception handlers
+    user_id = current_user.user_id
+    
     try:
         if contact_id <= 0:
             raise ValidationError(detail="Invalid contact_id")
@@ -444,14 +456,16 @@ async def delete_emergency_contact(
             raise EmployeeEmergencyContactNotFoundError(contact_id=contact_id)
 
         # Authorization check
-        user_permissions = await get_user_permissions(current_user.user_id, db)
+        user_permissions = await get_user_permissions(user_id, db)
         if not any(p == Permission.DELETE_EMERGENCY_CONTACT.value or p == Permission.MANAGE_EMPLOYEES.value for p in user_permissions):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to delete this emergency contact"
             )
 
-        old_values = db_contact.__dict__.copy()
+        # Serialize old values properly before deletion
+        old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json')
+        
         db_contact.is_active = False
         db_contact.deleted_at = datetime.now(timezone.utc)
         db_contact.updated_at = datetime.now(timezone.utc)
@@ -466,12 +480,11 @@ async def delete_emergency_contact(
 
         # Log the action
         log = SystemLogCreate(
-            user_id=current_user.user_id,
+            user_id=user_id,
             action=SystemAction.DELETE_EMERGENCY_CONTACT,
             table_affected="employee_emergency_contacts",
             record_id=contact_id,
-            old_values=old_values,
-            new_values=None,
+            old_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),new_values_dict = EmployeeEmergencyContactOut.model_validate(db_contact).model_dump(mode='json'),
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -479,8 +492,8 @@ async def delete_emergency_contact(
         await create_system_log(log, request, current_user, db, settings, request_id)
 
         logger.info(
-            f"Emergency contact soft deleted, contact_id: {contact_id}, user_id: {current_user.user_id}",
-            extra={"request_id": request_id, "user_id": current_user.user_id}
+            f"Emergency contact soft deleted, contact_id: {contact_id}, user_id: {user_id}",
+            extra={"request_id": request_id, "user_id": user_id}
         )
 
     except ValidationError as e:
@@ -493,7 +506,7 @@ async def delete_emergency_contact(
         logger.error(f"Authorization error deleting emergency contact {contact_id}: {str(e)}", extra={"request_id": request_id})
         raise
     except Exception as e:
-        logger.error(f"Unexpected error deleting emergency contact {contact_id}: {str(e)}", extra={"request_id": request_id})
+        logger.error(f"Unexpected error deleting emergency contact {contact_id}: {str(e)}", extra={"request_id": request_id, "user_id": user_id})
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error deleting emergency contact")
 
 async def _notify_admins_of_contact_change(

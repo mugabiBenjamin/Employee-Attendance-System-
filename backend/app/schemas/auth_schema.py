@@ -1,3 +1,4 @@
+from typing import List, Optional
 from pydantic import BaseModel, EmailStr, ConfigDict
 
 class LoginCredentials(BaseModel):
@@ -20,8 +21,10 @@ class UserProfile(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
-    employee_id: str | None = None
-    department_id: int | None = None
+    employee_id: Optional[str] = None
+    department_id: Optional[int] = None
     is_active: bool
+    roles: Optional[List[str]] = None
+    permissions: Optional[List[str]] = None
     
     model_config = ConfigDict(from_attributes=True)

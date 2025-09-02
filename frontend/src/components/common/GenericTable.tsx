@@ -31,11 +31,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface GenericTableProps<T> {
   data: T[];
   columns: ColumnDef<T>[];
   filterColumn?: string;
+  globalFilter?: string;
   enableSelection?: boolean;
   enableColumnVisibility?: boolean;
   onSelectionChange?: (selectedRows: T[]) => void;
@@ -47,6 +55,7 @@ function GenericTable<T>({
   data,
   columns,
   filterColumn,
+  globalFilter,
   enableSelection = false,
   enableColumnVisibility = false,
   onSelectionChange,
@@ -54,15 +63,17 @@ function GenericTable<T>({
   actionItems,
 }: GenericTableProps<T>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
+    []
+  );
+  const [columnVisibility, setColumnVisibility] =
+    React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
+  const [pageSize, setPageSize] = React.useState(10);
 
-  // Create enhanced columns with selection and actions
   const enhancedColumns = React.useMemo(() => {
     const cols: ColumnDef<T>[] = [];
 
-    // Add selection column if enabled
     if (enableSelection) {
       cols.push({
         id: "select",
@@ -72,15 +83,17 @@ function GenericTable<T>({
               table.getIsAllPageRowsSelected() ||
               (table.getIsSomePageRowsSelected() && "indeterminate")
             }
-            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-            aria-label="Select all"
+            onCheckedChange={(value) =>
+              table.toggleAllPageRowsSelected(!!value)
+            }
+            aria-label="Select all rows"
           />
         ),
         cell: ({ row }) => (
           <Checkbox
             checked={row.getIsSelected()}
             onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label="Select row"
+            aria-label={`Select row ${row.id}`}
           />
         ),
         enableSorting: false,
@@ -88,10 +101,8 @@ function GenericTable<T>({
       });
     }
 
-    // Add original columns
     cols.push(...columns);
 
-    // Add actions column if enabled
     if (enableActions && actionItems) {
       cols.push({
         id: "actions",
@@ -101,7 +112,11 @@ function GenericTable<T>({
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-8 w-8 p-0">
+                <Button
+                  variant="ghost"
+                  className="h-8 w-8 p-0"
+                  aria-label="Open actions menu"
+                >
                   <span className="sr-only">Open menu</span>
                   <MoreHorizontal />
                 </Button>
@@ -135,36 +150,63 @@ function GenericTable<T>({
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
-    state: { 
-      sorting, 
-      columnFilters, 
-      columnVisibility, 
-      rowSelection 
+    state: {
+      sorting,
+      columnFilters,
+      columnVisibility,
+      rowSelection,
+      pagination: { pageIndex: 0, pageSize },
+      globalFilter,
     },
   });
 
-  // Handle selection changes
   React.useEffect(() => {
     if (enableSelection && onSelectionChange) {
-      const selectedRows = table.getFilteredSelectedRowModel().rows.map(row => row.original);
+      const selectedRows = table
+        .getFilteredSelectedRowModel()
+        .rows.map((row) => row.original);
       onSelectionChange(selectedRows);
     }
   }, [rowSelection, enableSelection, onSelectionChange, table]);
 
+  React.useEffect(() => {
+    table.setGlobalFilter(globalFilter);
+  }, [globalFilter, table]);
+
   return (
-    <div className="w-full">
-      <div className="flex items-center py-4">
+    <div className="w-full" aria-label="Data table">
+      <div className="flex items-center py-4 gap-4">
         {filterColumn && (
           <Input
             placeholder={`Filter ${filterColumn}...`}
-            value={(table.getColumn(filterColumn)?.getFilterValue() as string) ?? ""}
+            value={
+              (table.getColumn(filterColumn)?.getFilterValue() as string) ?? ""
+            }
             onChange={(event) =>
               table.getColumn(filterColumn)?.setFilterValue(event.target.value)
             }
             className="max-w-sm"
+            aria-label={`Filter by ${filterColumn}`}
           />
         )}
-        
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Rows per page:</span>
+          <Select
+            value={pageSize.toString()}
+            onValueChange={(value) => setPageSize(Number(value))}
+          >
+            <SelectTrigger className="w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[5, 10, 20, 50].map((size) => (
+                <SelectItem key={size} value={size.toString()}>
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {enableColumnVisibility && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -181,9 +223,11 @@ function GenericTable<T>({
                     key={column.id}
                     className="capitalize"
                     checked={column.getIsVisible()}
-                    onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                    onCheckedChange={(value) =>
+                      column.toggleVisibility(!!value)
+                    }
                   >
-                    {column.id}
+                    {column.columnDef.header?.toString() || column.id}
                   </DropdownMenuCheckboxItem>
                 ))}
             </DropdownMenuContent>
@@ -207,6 +251,9 @@ function GenericTable<T>({
                           )
                         }
                         className="h-auto p-0 font-semibold"
+                        aria-label={`Sort by ${
+                          header.column.columnDef.header || header.id
+                        }`}
                       >
                         {flexRender(
                           header.column.columnDef.header,
@@ -245,7 +292,7 @@ function GenericTable<T>({
                   colSpan={enhancedColumns.length}
                   className="h-24 text-center"
                 >
-                  No results.
+                  No data available.
                 </TableCell>
               </TableRow>
             )}
@@ -253,9 +300,9 @@ function GenericTable<T>({
         </Table>
       </div>
 
-      <div className="flex items-center justify-end space-x-2 py-4">
+      <div className="flex items-center justify-between py-4">
         {enableSelection && (
-          <div className="text-muted-foreground flex-1 text-sm">
+          <div className="text-muted-foreground text-sm">
             {table.getFilteredSelectedRowModel().rows.length} of{" "}
             {table.getFilteredRowModel().rows.length} row(s) selected.
           </div>
@@ -266,6 +313,7 @@ function GenericTable<T>({
             size="sm"
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
+            aria-label="Previous page"
           >
             Previous
           </Button>
@@ -274,6 +322,7 @@ function GenericTable<T>({
             size="sm"
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
+            aria-label="Next page"
           >
             Next
           </Button>

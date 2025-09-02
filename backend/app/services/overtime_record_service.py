@@ -15,7 +15,7 @@ from app.core.enums import SystemAction, Permission, OvertimeStatus
 from app.core.mail import send_email
 from app.core.exceptions import UserNotFoundError, OvertimeRecordNotFoundError, ValidationError, AttendanceRecordNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -44,7 +44,7 @@ async def create_overtime_record(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_OVERTIME_RECORD]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """Create an overtime record with validation, holiday checks, logging, and notifications."""
     try:
@@ -207,7 +207,7 @@ async def get_overtime_record(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
     """Retrieve an overtime record by ID with caching and authorization."""
     try:
@@ -276,7 +276,7 @@ async def get_user_overtime_records(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> List[OvertimeRecordOut]:
     """Retrieve a list of overtime records for a user with optional filters and pagination."""
     try:
@@ -355,7 +355,7 @@ async def get_team_overtime_records(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
 ) -> List[OvertimeRecordOut]:
     """Retrieve overtime records for a manager's team with optional filters and pagination."""
     try:
@@ -424,7 +424,7 @@ async def update_overtime_record(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_OVERTIME]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_OVERTIME]))
 ) -> OvertimeRecordOut:
     """Update an overtime record with validation, logging, and notifications."""
     try:
@@ -588,7 +588,7 @@ async def approve_overtime_record(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.APPROVE_OVERTIME]))
+    _= Depends(require_permissions_dependency([Permission.APPROVE_OVERTIME]))
 ) -> OvertimeRecordOut:
     """Approve or reject an overtime record with validation, logging, and notifications."""
     try:
@@ -708,7 +708,7 @@ async def delete_overtime_record(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_OVERTIME]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_OVERTIME]))
 ) -> None:
     """Soft delete an overtime record with validation, logging, and notifications."""
     try:

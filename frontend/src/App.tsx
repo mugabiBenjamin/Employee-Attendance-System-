@@ -1,12 +1,12 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Provider } from "react-redux";
-import store from "./store";
+import { store } from "./store";
 import MainLayout from "./components/layout/MainLayout";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import { ThemeProvider } from "./components/theme-provider";
 import { ROUTES } from "./routes/paths";
 import { Suspense, lazy } from "react";
-import { Permission } from "./api/enums";
+import type { Permission } from "./api/types";
 
 // Lazy load pages
 const Login = lazy(() => import("./pages/Login"));
@@ -26,6 +26,14 @@ const ShiftPatternsList = lazy(() => import("./pages/ShiftPatternsList"));
 const ShiftPatternForm = lazy(() => import("./pages/ShiftPatternForm"));
 const SystemLogs = lazy(() => import("./pages/SystemLogs"));
 const UserManagement = lazy(() => import("./pages/UserManagement"));
+const OvertimeRecords = lazy(() => import("./pages/OvertimeRecords"));
+const OvertimeForm = lazy(() => import("./pages/OvertimeForm"));
+const LeaveRequestForm = lazy(() => import("./pages/LeaveRequestForm"));
+const LeaveRequests = lazy(() => import("./pages/LeaveRequests"));
+const LeaveBalances = lazy(() => import("./pages/LeaveBalances"));
+const LeavePolicies = lazy(() => import("./pages/LeavePolicies"));
+const HolidayList = lazy(() => import("./pages/HolidayList"));
+const HolidayForm = lazy(() => import("./pages/HolidayForm"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function App() {
@@ -49,10 +57,9 @@ function App() {
                   path={ROUTES.ATTENDANCE_CLOCK}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[
-                        Permission.CLOCK_IN,
-                        Permission.CLOCK_OUT,
-                      ]}
+                      requiredPermissions={
+                        ["clock_in", "clock_out"] as Permission[]
+                      }
                     >
                       <AttendanceClock />
                     </ProtectedRoute>
@@ -62,7 +69,9 @@ function App() {
                   path={ROUTES.ATTENDANCE_HISTORY}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.VIEW_OWN_ATTENDANCE]}
+                      requiredPermissions={
+                        ["view_own_attendance"] as Permission[]
+                      }
                     >
                       <AttendanceHistory />
                     </ProtectedRoute>
@@ -72,7 +81,9 @@ function App() {
                   path={ROUTES.TIME_CORRECTION}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.VIEW_OWN_ATTENDANCE]}
+                      requiredPermissions={
+                        ["view_own_attendance"] as Permission[]
+                      }
                     >
                       <TimeCorrection />
                     </ProtectedRoute>
@@ -82,7 +93,9 @@ function App() {
                   path={ROUTES.ATTENDANCE_SUMMARY}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.VIEW_OWN_ATTENDANCE]}
+                      requiredPermissions={
+                        ["view_own_attendance"] as Permission[]
+                      }
                     >
                       <AttendanceSummary />
                     </ProtectedRoute>
@@ -92,7 +105,9 @@ function App() {
                   path={ROUTES.DEPARTMENTS}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.MANAGE_DEPARTMENTS]}
+                      requiredPermissions={
+                        ["manage_departments"] as Permission[]
+                      }
                     >
                       <DepartmentsList />
                     </ProtectedRoute>
@@ -102,7 +117,9 @@ function App() {
                   path={ROUTES.DEPARTMENT_EDIT}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.MANAGE_DEPARTMENTS]}
+                      requiredPermissions={
+                        ["manage_departments"] as Permission[]
+                      }
                     >
                       <DepartmentForm />
                     </ProtectedRoute>
@@ -112,10 +129,12 @@ function App() {
                   path={ROUTES.EMERGENCY_CONTACTS}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[
-                        Permission.VIEW_OWN_ATTENDANCE,
-                        Permission.MANAGE_EMPLOYEES,
-                      ]}
+                      requiredPermissions={
+                        [
+                          "view_own_attendance",
+                          "manage_employees",
+                        ] as Permission[]
+                      }
                     >
                       <EmergencyContactsList />
                     </ProtectedRoute>
@@ -125,10 +144,12 @@ function App() {
                   path={ROUTES.EMERGENCY_CONTACT_EDIT}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[
-                        Permission.VIEW_OWN_ATTENDANCE,
-                        Permission.MANAGE_EMPLOYEES,
-                      ]}
+                      requiredPermissions={
+                        [
+                          "view_own_attendance",
+                          "manage_employees",
+                        ] as Permission[]
+                      }
                     >
                       <EmergencyContactForm />
                     </ProtectedRoute>
@@ -138,10 +159,12 @@ function App() {
                   path={ROUTES.EMPLOYEE_HIERARCHY}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[
-                        Permission.VIEW_TEAM_ATTENDANCE,
-                        Permission.MANAGE_EMPLOYEES,
-                      ]}
+                      requiredPermissions={
+                        [
+                          "view_team_attendance",
+                          "manage_employees",
+                        ] as Permission[]
+                      }
                     >
                       <EmployeeHierarchy />
                     </ProtectedRoute>
@@ -151,7 +174,7 @@ function App() {
                   path={ROUTES.SHIFT_PATTERNS}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.MANAGE_EMPLOYEES]}
+                      requiredPermissions={["manage_employees"] as Permission[]}
                     >
                       <ShiftPatternsList />
                     </ProtectedRoute>
@@ -161,7 +184,7 @@ function App() {
                   path={ROUTES.SHIFT_PATTERN_EDIT}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.MANAGE_EMPLOYEES]}
+                      requiredPermissions={["manage_employees"] as Permission[]}
                     >
                       <ShiftPatternForm />
                     </ProtectedRoute>
@@ -171,7 +194,7 @@ function App() {
                   path={ROUTES.SYSTEM_LOGS}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[Permission.VIEW_LOGS]}
+                      requiredPermissions={["view_logs"] as Permission[]}
                     >
                       <SystemLogs />
                     </ProtectedRoute>
@@ -181,13 +204,112 @@ function App() {
                   path={ROUTES.USER_MANAGEMENT}
                   element={
                     <ProtectedRoute
-                      requiredPermissions={[
-                        Permission.MANAGE_USERS,
-                        Permission.MANAGE_ROLES,
-                        Permission.MANAGE_DEPARTMENTS,
-                      ]}
+                      requiredPermissions={
+                        [
+                          "manage_users",
+                          "manage_roles",
+                          "manage_departments",
+                        ] as Permission[]
+                      }
                     >
                       <UserManagement />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.OVERTIME_RECORDS}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        [
+                          "view_own_attendance",
+                          "manage_overtime",
+                        ] as Permission[]
+                      }
+                    >
+                      <OvertimeRecords />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.OVERTIME_FORM}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["manage_overtime"] as Permission[]}
+                    >
+                      <OvertimeForm />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_REQUEST}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["request_leave"] as Permission[]}
+                    >
+                      <LeaveRequestForm />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_REQUESTS}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        [
+                          "manage_employees",
+                          "manage_leave_policies",
+                        ] as Permission[]
+                      }
+                    >
+                      <LeaveRequests />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_BALANCES}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        [
+                          "view_own_attendance",
+                          "manage_employees",
+                        ] as Permission[]
+                      }
+                    >
+                      <LeaveBalances />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.LEAVE_POLICIES}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={
+                        ["manage_leave_policies"] as Permission[]
+                      }
+                    >
+                      <LeavePolicies />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.HOLIDAYS}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["manage_employees"] as Permission[]}
+                    >
+                      <HolidayList />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path={ROUTES.HOLIDAY_FORM}
+                  element={
+                    <ProtectedRoute
+                      requiredPermissions={["manage_employees"] as Permission[]}
+                    >
+                      <HolidayForm />
                     </ProtectedRoute>
                   }
                 />

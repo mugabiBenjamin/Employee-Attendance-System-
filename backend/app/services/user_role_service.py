@@ -10,7 +10,7 @@ from app.schemas.user_role import UserRoleCreate, UserRoleUpdate, UserRoleOut
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import UserRoleNotFoundError, ValidationError, DatabaseError, ResourceConflictError, UserNotFoundError, RoleNotFoundError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, invalidate_role_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, invalidate_role_cache, get_user_permissions
 from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists, validate_role_exists
@@ -26,7 +26,7 @@ async def create_user_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.CREATE_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_USER_ROLE]))
 ) -> UserRoleOut:
     """Assign a role to a user with validation, logging, and cache clearing."""
     try:
@@ -65,8 +65,20 @@ async def create_user_role(
         await invalidate_cache_prefix(f"user:{user_role.user_id}")
         invalidate_user_cache(user_role.user_id)
         invalidate_role_cache(user_role.role_id)
-        invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
+        invalidate_user_cache(current_user.user_id)
         logger.info(f"Cache invalidated for user_role, user:{user_role.user_id}, role:{user_role.role_id}, current_user:{current_user.user_id}", extra={"request_id": request_id})
+
+        # Prepare serializable values for logging
+        new_values = {
+            "user_role_id": db_user_role.user_role_id,
+            "user_id": db_user_role.user_id,
+            "role_id": db_user_role.role_id,
+            "assigned_by": db_user_role.assigned_by,
+            "is_active": db_user_role.is_active,
+            "assigned_at": db_user_role.assigned_at.isoformat() if db_user_role.assigned_at else None,
+            "updated_at": db_user_role.updated_at.isoformat() if db_user_role.updated_at else None,
+            "deleted_at": db_user_role.deleted_at.isoformat() if db_user_role.deleted_at else None
+        }
 
         # Log action using SystemAction.INSERT
         log = SystemLogCreate(
@@ -75,7 +87,7 @@ async def create_user_role(
             table_affected="user_roles",
             record_id=db_user_role.user_role_id,
             old_values=None,
-            new_values=db_user_role.__dict__,
+            new_values=new_values,
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -108,7 +120,7 @@ async def read_user_role(
     user_role_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> UserRoleOut:
     """Retrieve a user-role assignment by ID."""
     try:
@@ -132,7 +144,8 @@ async def read_user_role(
         if not user_role:
             raise UserRoleNotFoundError(user_role_id=user_role_id)
 
-        user_role_dict = UserRoleOut.model_validate(user_role).model_dump()
+        user_role_out = UserRoleOut.model_validate(user_role)
+        user_role_dict = user_role_out.model_dump(mode='json')
         await set_cache(cache_key, user_role_dict, ttl=300)
         logger.info(f"Cache set for user_role_id: {user_role_id}", extra={"request_id": request_id})
 
@@ -140,7 +153,7 @@ async def read_user_role(
             f"Retrieved user role, user_role_id: {user_role_id}",
             extra={"request_id": request_id}
         )
-        return UserRoleOut.model_validate(user_role)
+        return user_role_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -163,7 +176,7 @@ async def read_user_roles(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """Retrieve a list of user-role assignments with optional filters and pagination."""
     try:
@@ -194,7 +207,8 @@ async def read_user_roles(
         result = await db.execute(query)
         user_roles = result.scalars().all()
 
-        user_roles_dict = [UserRoleOut.model_validate(ur).model_dump() for ur in user_roles]
+        user_roles_out = [UserRoleOut.model_validate(ur) for ur in user_roles]
+        user_roles_dict = [ur.model_dump(mode='json') for ur in user_roles_out]
         await set_cache(cache_key, user_roles_dict, ttl=300)
         logger.info(f"Cache set for user_roles, user_id: {user_id or 'all'}, role_id: {role_id or 'all'}", extra={"request_id": request_id})
 
@@ -202,7 +216,7 @@ async def read_user_roles(
             f"Retrieved {len(user_roles)} user roles",
             extra={"request_id": request_id, "user_id": user_id, "role_id": role_id}
         )
-        return [UserRoleOut.model_validate(ur) for ur in user_roles]
+        return user_roles_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -227,7 +241,7 @@ async def update_user_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.UPDATE_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_USER_ROLE]))
 ) -> UserRoleOut:
     """Update a user-role assignment with validation, logging, and cache clearing."""
     try:
@@ -340,7 +354,7 @@ async def delete_user_role(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.DELETE_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_USER_ROLE]))
 ) -> None:
     """Soft delete a user-role assignment with validation, logging, and cache clearing."""
     try:
@@ -383,6 +397,18 @@ async def delete_user_role(
         invalidate_user_cache(current_user.user_id)  # Invalidate current user's cache for permission updates
         logger.info(f"Cache invalidated for user_role, user:{db_user_role.user_id}, role:{db_user_role.role_id}, current_user:{current_user.user_id}", extra={"request_id": request_id})
 
+        # Prepare serializable values for logging
+        new_values = {
+            "user_role_id": db_user_role.user_role_id,
+            "user_id": db_user_role.user_id,
+            "role_id": db_user_role.role_id,
+            "assigned_by": db_user_role.assigned_by,
+            "is_active": db_user_role.is_active,
+            "assigned_at": db_user_role.assigned_at.isoformat() if db_user_role.assigned_at else None,
+            "updated_at": db_user_role.updated_at.isoformat() if db_user_role.updated_at else None,
+            "deleted_at": db_user_role.deleted_at.isoformat() if db_user_role.deleted_at else None
+        }
+
         # Log action using SystemAction.DELETE
         log = SystemLogCreate(
             user_id=current_user.user_id,
@@ -390,7 +416,7 @@ async def delete_user_role(
             table_affected="user_roles",
             record_id=user_role_id,
             old_values=db_user_role.__dict__,
-            new_values=None,
+            new_values=new_values,
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -422,7 +448,7 @@ async def get_user_roles(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> List[UserRoleOut]:
     """Retrieve a list of role assignments for a user with pagination."""
     try:
@@ -445,7 +471,8 @@ async def get_user_roles(
         result = await db.execute(query)
         user_roles = result.scalars().all()
 
-        user_roles_dict = [UserRoleOut.model_validate(ur).model_dump() for ur in user_roles]
+        user_roles_out = [UserRoleOut.model_validate(ur) for ur in user_roles]
+        user_roles_dict = [ur.model_dump(mode='json') for ur in user_roles_out]
         await set_cache(cache_key, user_roles_dict, ttl=300)
         logger.info(f"Cache set for user_roles, user_id: {user_id}", extra={"request_id": request_id})
 
@@ -453,7 +480,7 @@ async def get_user_roles(
             f"Retrieved {len(user_roles)} roles for user_id: {user_id}",
             extra={"request_id": request_id}
         )
-        return [UserRoleOut.model_validate(ur) for ur in user_roles]
+        return user_roles_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -472,7 +499,7 @@ async def get_user_permissions(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER_ROLE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_USER_ROLE]))
 ) -> dict:
     """Retrieve the permissions assigned to a user based on their roles."""
     try:

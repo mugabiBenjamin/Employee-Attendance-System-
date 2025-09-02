@@ -68,4 +68,7 @@ class HolidayCalendarOut(HolidayCalendarBase):
             raise ValidationError(detail=f"{info.field_name} must include timezone")
         return value
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )

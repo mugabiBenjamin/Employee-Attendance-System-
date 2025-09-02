@@ -11,7 +11,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission
 from app.core.exceptions import DepartmentNotFoundError, ValidationError, UserNotFoundError, BusinessLogicError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_department_not_assigned
 from app.services.system_log_service import create_system_log
@@ -25,7 +25,7 @@ async def create_department(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.CREATE_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """Create a new department with validation, logging, and cache clearing."""
     try:
@@ -93,7 +93,7 @@ async def get_department(
     department_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_DEPARTMENT]))
 ) -> DepartmentOut:
     """Retrieve a department by ID."""
     try:
@@ -117,7 +117,8 @@ async def get_department(
         if not department:
             raise DepartmentNotFoundError(dept_id=department_id)
 
-        department_dict = DepartmentOut.model_validate(department).model_dump()
+        department_object = DepartmentOut.model_validate(department)
+        department_dict = department_object.model_dump(mode='json')
         await set_cache(cache_key, department_dict, ttl=300)
         logger.info(f"Cache set for department_id: {department_id}", extra={"request_id": request_id})
 
@@ -125,7 +126,7 @@ async def get_department(
             f"Retrieved department, department_id: {department_id}",
             extra={"request_id": request_id}
         )
-        return DepartmentOut.model_validate(department)
+        return department_object
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -143,7 +144,7 @@ async def list_departments(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_DEPARTMENT]))
 ) -> List[DepartmentOut]:
     """Retrieve a list of active departments with pagination."""
     try:
@@ -164,7 +165,8 @@ async def list_departments(
         result = await db.execute(query)
         departments = result.scalars().all()
 
-        departments_dict = [DepartmentOut.model_validate(dept).model_dump() for dept in departments]
+        department_objects = [DepartmentOut.model_validate(dept) for dept in departments]
+        departments_dict = [dept.model_dump(mode='json') for dept in department_objects]
         await set_cache(cache_key, departments_dict, ttl=300)
         logger.info(f"Cache set for departments, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
 
@@ -172,7 +174,7 @@ async def list_departments(
             f"Retrieved {len(departments)} departments",
             extra={"request_id": request_id}
         )
-        return [DepartmentOut.model_validate(dept) for dept in departments]
+        return department_objects
 
     except ValidationError as e:
         logger.error(f"Validation error retrieving departments: {str(e)}", extra={"request_id": request_id})
@@ -188,7 +190,7 @@ async def update_department(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.UPDATE_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_DEPARTMENT]))
 ) -> DepartmentOut:
     """Update a department with validation, logging, and cache clearing."""
     try:
@@ -284,7 +286,7 @@ async def delete_department(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.DELETE_DEPARTMENT]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_DEPARTMENT]))
 ) -> None:
     """Soft delete a department with validation, logging, and cache clearing."""
     try:

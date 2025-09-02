@@ -90,4 +90,11 @@ class LeavePolicyOut(LeavePolicyBase):
             raise ValidationError(detail=f"{info.field_name.capitalize()} must include timezone")
         return value
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={
+            datetime: lambda v: v.isoformat() if v else None,
+            date: lambda v: v.isoformat() if v else None,
+        },
+        arbitrary_types_allowed=True,
+    )

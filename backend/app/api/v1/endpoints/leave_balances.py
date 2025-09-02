@@ -13,7 +13,7 @@ from app.services.leave_balance_service import (
     update_leave_balance
 )
 from app.schemas.leave_balance import LeaveBalanceOut
-from app.core.permissions import require_any_permissions, require_permissions
+from app.core.permissions import require_any_permissions_dependency, require_permissions_dependency
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ async def get_leave_balances_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_any_permissions([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
+    _=Depends(require_any_permissions_dependency([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
 ) -> List[LeaveBalanceOut]:
     """Retrieve leave balances for a user."""
     request_id = get_request_id(request)
@@ -66,7 +66,7 @@ async def update_leave_balance_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_BALANCE]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_BALANCE]))
 ) -> LeaveBalanceOut:
     """Update a leave balance."""
     request_id = get_request_id(request)

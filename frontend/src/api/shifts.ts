@@ -1,5 +1,5 @@
 import { api } from './index';
-import type { PaginatedResponse, ShiftPattern } from './types';
+import type { PaginatedResponse, ShiftPattern, ShiftAssignment } from './types';
 
 interface ShiftQuery {
   page?: number;
@@ -11,6 +11,13 @@ interface ShiftPatternData {
   start_time: string;
   end_time: string;
   days: string[];
+}
+
+interface ShiftAssignmentData {
+  shift_pattern_id: number;
+  user_id: number;
+  start_date: string;
+  end_date?: string;
 }
 
 export const shiftsApi = {
@@ -31,5 +38,24 @@ export const shiftsApi = {
 
   deleteShiftPattern: async (id: number): Promise<void> => {
     await api.delete(`/shift-patterns/${id}`);
+  },
+
+  getShiftAssignments: async (query: ShiftQuery): Promise<PaginatedResponse<ShiftAssignment>> => {
+    const response = await api.get<PaginatedResponse<ShiftAssignment>>('/shift-assignments', { params: query });
+    return response.data;
+  },
+
+  createShiftAssignment: async (data: ShiftAssignmentData): Promise<ShiftAssignment> => {
+    const response = await api.post<ShiftAssignment>('/shift-assignments', data);
+    return response.data;
+  },
+
+  updateShiftAssignment: async (id: number, data: ShiftAssignmentData): Promise<ShiftAssignment> => {
+    const response = await api.put<ShiftAssignment>(`/shift-assignments/${id}`, data);
+    return response.data;
+  },
+
+  deleteShiftAssignment: async (id: number): Promise<void> => {
+    await api.delete(`/shift-assignments/${id}`);
   },
 };

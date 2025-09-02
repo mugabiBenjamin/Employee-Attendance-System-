@@ -16,10 +16,10 @@ from app.core.enums import LeaveType, SystemAction, Permission, LeaveRequestStat
 from app.core.mail import send_email
 from app.core.exceptions import LeaveBalanceNotFoundError, UserNotFoundError, LeavePolicyNotFoundError, ValidationError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_user_exists, validate_leave_policy_exists
-from app.core.utils import get_request_id
+from app.core.utils import get_request_id, get_users_with_permission
 from app.services.system_log_service import create_system_log
 import logging
 
@@ -32,7 +32,7 @@ async def get_leave_balances_by_user_and_type(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_LEAVE_BALANCE, Permission.VIEW_OWN_LEAVE_BALANCE]))
 ) -> List[LeaveBalanceOut]:
     """Retrieve leave balances for a user with optional leave type filter and caching."""
     try:
@@ -41,7 +41,7 @@ async def get_leave_balances_by_user_and_type(
 
         await validate_user_exists(db, user_id, request_id)
 
-        user_permissions = await get_user_permissions(current_user.user_id, db, request_id)
+        user_permissions = await get_user_permissions(current_user.user_id, db)
         if not any(p in [Permission.VIEW_LEAVE_BALANCE.value, Permission.MANAGE_LEAVE.value] for p in user_permissions) and user_id != current_user.user_id:
             query_hierarchy = select(EmployeeHierarchy).where(
                 EmployeeHierarchy.employee_id == user_id,
@@ -84,7 +84,7 @@ async def get_leave_balances_by_user_and_type(
                 LeavePolicies.deleted_at.is_(None)
             )
             result_policy = await db.execute(query_policy)
-            policy = result_policy.scalar_one_or_none()
+            policy = result_policy.first()
             
             query_requests = select(LeaveRequests).where(
                 LeaveRequests.user_id == user_id,
@@ -135,7 +135,7 @@ async def update_leave_balance(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_BALANCE]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_BALANCE]))
 ) -> LeaveBalanceOut:
     """Update leave balance for a user with validation, version control, and logging."""
     try:
@@ -178,8 +178,8 @@ async def update_leave_balance(
             raise LeavePolicyNotFoundError(leave_type=leave_type)
         if balance_change > 0:
             total_allocated = float(db_balance.allocated_days) + float(db_balance.carried_forward)
-            if total_allocated + balance_change > policy.max_days:
-                raise ValidationError(detail=f"Balance change would exceed policy limit of {policy.max_days} days for {leave_type.value}")
+            if total_allocated + balance_change > policy.max_consecutive_days:
+                raise ValidationError(detail=f"Balance change would exceed policy limit of {policy.max_consecutive_days} days for {leave_type.value}")
 
         # Check for pending and approved leave requests
         query_requests = select(LeaveRequests).where(
@@ -245,7 +245,7 @@ async def update_leave_balance(
         manager = result_manager.scalar_one_or_none()
         if manager:
             recipients.append((manager.email, manager.first_name))
-        admins = await get_user_permissions(Permission.MANAGE_LEAVE, db)
+        admins = await get_users_with_permission(Permission.MANAGE_LEAVE, db)
         recipients.extend([(admin.email, admin.first_name) for admin in admins])
         for email, first_name in recipients:
             await send_email(

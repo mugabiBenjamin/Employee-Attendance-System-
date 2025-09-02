@@ -14,7 +14,7 @@ from app.services.leave_policy_service import (
     delete_leave_policy
 )
 from app.schemas.leave_policy import LeavePolicyCreate, LeavePolicyUpdate, LeavePolicyOut
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions_dependency
 from app.core.utils import get_request_id
 from app.core.enums import Permission
 import logging
@@ -36,7 +36,7 @@ async def create_leave_policy_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.CREATE_LEAVE_POLICY]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
     """Create a new leave policy.
 
@@ -75,7 +75,7 @@ async def get_leave_policy_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
     """Retrieve a leave policy by ID.
 
@@ -117,7 +117,7 @@ async def list_leave_policies_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_POLICY, Permission.VIEW_OWN_LEAVE_POLICY]))
 ) -> List[LeavePolicyOut]:
     """List all active leave policies with optional filters and pagination.
 
@@ -160,7 +160,7 @@ async def update_leave_policy_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.UPDATE_LEAVE_POLICY]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_LEAVE_POLICY]))
 ) -> LeavePolicyOut:
     """Update a leave policy.
 
@@ -200,7 +200,7 @@ async def delete_leave_policy_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.DELETE_LEAVE_POLICY]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_LEAVE_POLICY]))
 ) -> None:
     """Soft delete a leave policy.
 

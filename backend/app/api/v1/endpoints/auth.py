@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.models.users import Users
 from app.core.security import get_current_user, oauth2_scheme
 from app.core.config import Settings, get_settings
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions_dependency
 from app.core.enums import Permission
 from app.services.auth_service import (
     login_user,
@@ -61,12 +61,12 @@ async def login_endpoint(
     summary="Refresh access token",
     description="Generate new access token using a valid refresh token."
 )
-@require_permissions([Permission.REFRESH_TOKEN])
 async def refresh_token_endpoint(
     request: Request,
     token_request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.REFRESH_TOKEN]))
 ) -> Token:
     """Handle token refresh.
 
@@ -158,11 +158,11 @@ async def get_profile_endpoint(
     summary="Validate access token",
     description="Validate if the current access token is valid and user is active."
 )
-@require_permissions([Permission.VIEW_OWN_PROFILE])
 async def validate_token_endpoint(
     request: Request,
     current_user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permissions_dependency([Permission.VIEW_OWN_PROFILE]))
 ) -> dict:
     """Validate access token.
 

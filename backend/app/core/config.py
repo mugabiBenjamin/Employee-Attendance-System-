@@ -102,8 +102,9 @@ class Settings(BaseSettings):
     MATERIALIZED_VIEW_REFRESH_INTERVAL: int = Field(default=3600, env="MATERIALIZED_VIEW_REFRESH_INTERVAL")
 
     REQUIRE_ATTENDANCE_LOCATION: bool = Field(default=False, env="REQUIRE_ATTENDANCE_LOCATION")
+    REQUIRE_ATTENDANCE_IP: bool = Field(default=False, env="REQUIRE_ATTENDANCE_IP")  # Added setting
     CHECK_HOLIDAYS_ON_ATTENDANCE: bool = Field(default=True, env="CHECK_HOLIDAYS_ON_ATTENDANCE")
-    NOTIFY_ON_ATTENDANCE: bool = Field(default=True, env="NOTIFY_ON_ATTENDANCE")
+    NOTIFY_ON_ATTENDANCE: bool = Field(default=False, env="NOTIFY_ON_ATTENDANCE")
     MINIMUM_SHIFT_DURATION: float = Field(default=4.0, env="MINIMUM_SHIFT_DURATION")
     MAX_EMERGENCY_CONTACTS: int = Field(default=3, env="MAX_EMERGENCY_CONTACTS")
     MAX_WORKFLOW_LEVELS: int = Field(default=5, env="MAX_WORKFLOW_LEVELS")

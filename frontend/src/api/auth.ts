@@ -1,6 +1,8 @@
-import type { Permission } from './enums';
 import { api } from './index';
-import type { User } from './types';
+import { store } from '@/store';
+import { clearAuth, setAuth } from '@/store/slices/authSlice';
+import type { Permission, User } from './types';
+import { enumsApi } from '@/api/enums';
 
 // Define request payload interfaces
 interface LoginCredentials {
@@ -40,7 +42,7 @@ export const authApi = {
       },
     });
 
-    const { access_token, refresh_token } = response.data;
+    const { access_token, refresh_token, token_type } = response.data;
 
     // Store tokens in localStorage
     localStorage.setItem('access_token', access_token);
@@ -52,21 +54,52 @@ export const authApi = {
     // Get user profile
     const user = await authApi.getCurrentUser();
 
-    return { ...response.data, user };
+    // Dispatch setAuth to update Redux store
+    const loginResponse: LoginResponse = { access_token, refresh_token, token_type, user };
+    store.dispatch(setAuth(loginResponse));
+
+    // Log for debugging
+    console.log("Login - User Permissions:", user.permissions);
+
+    return loginResponse;
   },
 
   getCurrentUser: async (): Promise<User> => {
-    const response = await api.get<UserResponse>('/auth/me');
+    try {
+      const response = await api.get<UserResponse>('/auth/me');
+      let permissions: Permission[] = response.data.permissions as Permission[] ?? [];
 
-    return {
-      id: response.data.user_id,
-      email: response.data.email,
-      first_name: response.data.first_name,
-      last_name: response.data.last_name,
-      roles: response.data.roles,
-      permissions: response.data.permissions as Permission[],
-      is_active: true,
-    };
+      // Check if permissions include 'all_permissions' and expand if necessary
+      if (permissions.includes('all_permissions')) {
+        try {
+          const allPermissions = await enumsApi.getPermissions();
+          console.log("Expanding 'all_permissions' to:", allPermissions);
+          permissions = allPermissions;
+        } catch (error) {
+          console.error("Failed to fetch all permissions for 'all_permissions' expansion:", error);
+          // Fallback to original permissions to avoid breaking the app
+          permissions = response.data.permissions as Permission[] ?? [];
+        }
+      }
+
+      const user: User = {
+        id: response.data.user_id,
+        email: response.data.email,
+        first_name: response.data.first_name,
+        last_name: response.data.last_name,
+        roles: response.data.roles,
+        permissions,
+        is_active: true,
+      };
+
+      // Log for debugging
+      console.log("getCurrentUser - User Permissions:", user.permissions);
+
+      return user;
+    } catch (error) {
+      console.error("Failed to fetch current user:", error);
+      throw new Error("Unable to fetch current user");
+    }
   },
 
   refreshToken: async (refreshToken: string): Promise<AuthResponse> => {
@@ -90,10 +123,11 @@ export const authApi = {
     try {
       await api.post('/auth/logout');
     } finally {
-      // Always clear tokens, even if logout request fails
+      // Always clear tokens and Redux state
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       delete api.defaults.headers.common['Authorization'];
+      store.dispatch(clearAuth()); // Clear Redux auth state
     }
   },
 };

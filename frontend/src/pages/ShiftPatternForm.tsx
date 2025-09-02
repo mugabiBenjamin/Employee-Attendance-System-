@@ -3,11 +3,14 @@ import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { shiftsApi } from "@/api/shifts";
 import { z } from "zod";
-import { useParams, useNavigate, Navigate } from "react-router-dom";
-import GenericForm from "@/components/common/GenericForm";
+import { useParams, useNavigate } from "react-router-dom";
+import GenericForm, {
+  type FormFieldConfig,
+} from "@/components/common/GenericForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const shiftPatternSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -16,35 +19,53 @@ const shiftPatternSchema = z.object({
   days: z.array(z.string()).min(1, "At least one day is required"),
 });
 
+type ShiftPatternFormData = z.infer<typeof shiftPatternSchema>;
+
 function ShiftPatternForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [defaultValues, setDefaultValues] = useState({
+  const [defaultValues, setDefaultValues] = useState<ShiftPatternFormData>({
     name: "",
     start_time: "",
     end_time: "",
-    days: [] as string[],
+    days: [],
   });
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [fetchLoading, setFetchLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (id && user?.permissions.includes("manage_employees")) {
-      shiftsApi.getShiftPatterns({}).then((data) => {
-        const shift = data.items.find((s) => s.shift_pattern_id === parseInt(id));
-        if (shift) {
-          setDefaultValues({
-            name: shift.name,
-            start_time: shift.start_time,
-            end_time: shift.end_time,
-            days: shift.days,
-          });
-        }
-      });
+      setFetchLoading(true);
+      shiftsApi
+        .getShiftPatterns({ limit: 1, page: 1 })
+        .then((response) => {
+          const shift = response.items.find(
+            (item) => item.shift_pattern_id === parseInt(id)
+          );
+          if (shift) {
+            setDefaultValues({
+              name: shift.name,
+              start_time: shift.start_time,
+              end_time: shift.end_time,
+              days: shift.days,
+            });
+            setError(null);
+          } else {
+            setError("Shift pattern not found");
+          }
+        })
+        .catch(() => {
+          setError("Failed to load shift pattern data");
+        })
+        .finally(() => setFetchLoading(false));
     }
   }, [id, user]);
 
-  const onSubmit = async (data: z.infer<typeof shiftPatternSchema>) => {
+  const onSubmit = async (data: ShiftPatternFormData) => {
+    setLoading(true);
+    setError(null);
     try {
       if (id) {
         await shiftsApi.updateShiftPattern(parseInt(id), data);
@@ -53,55 +74,52 @@ function ShiftPatternForm() {
       }
       navigate("/shift-patterns");
     } catch {
-      setError("Failed to save shift pattern");
+      setError(`Failed to ${id ? "update" : "create"} shift pattern`);
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (!user?.permissions.includes("manage_employees")) {
-    return <Navigate to="/" replace />;
-  }
+  const dayOptions = [
+    { value: "Monday", label: "Monday" },
+    { value: "Tuesday", label: "Tuesday" },
+    { value: "Wednesday", label: "Wednesday" },
+    { value: "Thursday", label: "Thursday" },
+    { value: "Friday", label: "Friday" },
+    { value: "Saturday", label: "Saturday" },
+    { value: "Sunday", label: "Sunday" },
+  ];
 
-  const fields = [
+  const fields: FormFieldConfig<ShiftPatternFormData>[] = [
     {
-      name: "name" as const,
+      name: "name",
       label: "Name",
-      type: "text" as const,
+      type: "text",
       placeholder: "Enter shift name",
       description: "Shift pattern name",
     },
     {
-      name: "start_time" as const,
+      name: "start_time",
       label: "Start Time",
-      type: "time" as const,
+      type: "time",
       placeholder: "Select start time",
       description: "Shift start time",
     },
     {
-      name: "end_time" as const,
+      name: "end_time",
       label: "End Time",
-      type: "time" as const,
+      type: "time",
       placeholder: "Select end time",
       description: "Shift end time",
     },
     {
-      name: "days" as const,
+      name: "days",
       label: "Days",
-      type: "select" as const,
+      type: "select",
       placeholder: "Select days",
       description: "Days the shift applies to",
       multiple: true,
-      options: [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-      ].map((day) => ({
-        value: day,
-        label: day,
-      })),
+      options: dayOptions,
     },
   ];
 
@@ -109,7 +127,7 @@ function ShiftPatternForm() {
     <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
       {error && (
         <Alert variant="destructive">
-          <AlertCircleIcon />
+          <AlertCircleIcon className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -121,15 +139,24 @@ function ShiftPatternForm() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <GenericForm
-            schema={shiftPatternSchema}
-            defaultValues={defaultValues}
-            fields={fields}
-            onSubmit={onSubmit}
-            submitButtonText={
-              id ? "Update Shift Pattern" : "Create Shift Pattern"
-            }
-          />
+          {fetchLoading ? (
+            <div className="space-y-4">
+              {[...Array(4)].map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : (
+            <GenericForm
+              schema={shiftPatternSchema}
+              defaultValues={defaultValues}
+              fields={fields}
+              onSubmit={onSubmit}
+              submitButtonText={
+                id ? "Update Shift Pattern" : "Create Shift Pattern"
+              }
+              disabled={loading}
+            />
+          )}
         </CardContent>
       </Card>
     </div>

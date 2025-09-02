@@ -1,11 +1,10 @@
 from fastapi import FastAPI, Request
-from app.core.database import ensure_session_factory
 from app.core.enums import SystemAction
-from app.models.system_logs import SystemLogs
 from app.core.config import settings
 import logging
 import uuid
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,6 @@ def determine_system_action(path: str, method: str) -> str | None:
         "DELETE": SystemAction.DELETE.value,
     }
     return METHOD_FALLBACK.get(method)
-
 
 def get_table_affected(path: str) -> str | None:
     """Determine the affected table based on the route path."""
@@ -60,77 +58,53 @@ def get_table_affected(path: str) -> str | None:
 
     return None
 
+def _sanitize_params(params_dict: dict) -> dict:
+    """Sanitize sensitive parameters by masking their values."""
+    sensitive_keys = {
+        'password', 'token', 'secret', 'ssn', 'auth', 'key', 'pass', 
+        'credential', 'authorization', 'jwt', 'session', 'api_key',
+        'access_token', 'refresh_token', 'reset_token', 'csrf_token'
+    }
+    
+    sanitized = {}
+    for key, value in params_dict.items():
+        # Check if key contains any sensitive terms (case insensitive)
+        is_sensitive = any(sensitive_term in key.lower() for sensitive_term in sensitive_keys)
+        sanitized[key] = "***" if is_sensitive else value
+    
+    return sanitized
 
 def setup_middleware(app: FastAPI) -> None:
     """Setup middleware for logging system actions."""
 
     @app.middleware("http")
     async def log_system_actions(request: Request, call_next):
-        print(f"Request query params: {dict(request.query_params)}")
-        print(f"Request path params: {request.path_params}")
+        # Only log debug info in development environment
+        if os.environ.get("NODE_ENV") == "development":
+            # Sanitize sensitive data before logging
+            sanitized_query_params = _sanitize_params(dict(request.query_params))
+            sanitized_path_params = _sanitize_params(request.path_params)
+            
+            logger.debug(f"Request query params: {sanitized_query_params}")
+            logger.debug(f"Request path params: {sanitized_path_params}")
         
-        logger.info(f"Middleware processing: {request.method} {request.url.path}")
         request_id = str(uuid.uuid4())
+        logger.info(f"Middleware processing: {request.method} {request.url.path}", extra={"request_id": request_id})
         
         # Safe way to set request_id on request state
         if not hasattr(request, 'state'):
             request.state = type('State', (), {})()
         request.state.request_id = request_id
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            # Use logger.exception to capture the full stack trace
+            logger.exception(f"Error during call_next", extra={"request_id": request_id})
+            raise
 
-        path = request.url.path
-        method = request.method
-
-        # Skip logging for /api/v1/auth/token to prevent duplicate SystemLogs entries
-        if path.endswith(f"{settings.API_V1_STR}/auth/token"):
-            logger.debug(f"Skipping system log for endpoint: {path}", extra={"request_id": request_id})
-            return response
-
-        action = determine_system_action(path, method)
-
-        if action:
-            try:
-                session_factory = ensure_session_factory()
-            except RuntimeError:
-                # Database not initialized yet, skip logging
-                logger.warning("Database not initialized, skipping system logging", extra={"request_id": request_id})
-                return response
-
-            # Safe way to get user from request state
-            user = getattr(request.state, "user", None)
-            user_id = getattr(user, 'user_id', None) if user else None
-
-            ip_address = None
-            try:
-                ip_address = str(request.client.host) if request.client else None
-            except Exception as e:
-                logger.warning(f"Failed to get client IP: {str(e)}", extra={"request_id": request_id})
-
-            async with session_factory() as session:
-                try:
-                    system_log = SystemLogs(
-                        user_id=user_id,
-                        action=action,
-                        table_affected=get_table_affected(path),
-                        record_id=None,
-                        old_values=None,
-                        new_values=None,
-                        ip_address=ip_address,
-                        user_agent=request.headers.get("user-agent"),
-                        request_id=request_id
-                    )
-                    session.add(system_log)
-                    await session.commit()
-                    logger.info(
-                        f"Logged system action: {action} for user_id: {user_id}",
-                        extra={"request_id": request_id}
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to log system action: {str(e)}",
-                        extra={"request_id": request_id}
-                    )
-                    await session.rollback()
-
+        # REMOVED DATABASE LOGGING TO FIX GREENLET ERROR
+        # The SystemLogs creation should be handled in individual service methods, not middleware
+        logger.info(f"Request completed: {request.method} {request.url.path}", extra={"request_id": request_id})
+        
         return response

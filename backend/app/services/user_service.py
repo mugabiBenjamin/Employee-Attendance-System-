@@ -9,7 +9,7 @@ from app.core.security import get_password_hash
 from app.core.enums import SystemAction, Permission, EmployeeType
 from app.core.exceptions import ValidationError, DatabaseError, UserNotFoundError, ResourceConflictError, BusinessLogicError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache
 from app.services.system_log_service import create_system_log
 from app.schemas.system_log import SystemLogCreate
 from app.core.validators import validate_user_exists
@@ -25,7 +25,7 @@ async def create_user(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.CREATE_USER]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_USER]))
 ) -> UserOut:
     """Create a new user with validation and logging."""
     try:
@@ -45,7 +45,7 @@ async def create_user(
 
         # Validate supervisor_id if provided
         if user.supervisor_id:
-            await validate_user_exists(user.supervisor_id, db)
+            await validate_user_exists(db, user.supervisor_id)
 
         # Validate required fields
         if not user.email or not user.password:
@@ -73,7 +73,7 @@ async def create_user(
 
         # Invalidate cache for users list and user
         await invalidate_cache_prefix("users")
-        invalidate_user_cache(db_user.user_id)
+        await invalidate_user_cache(db_user.user_id)
         logger.info(f"Cache invalidated for user_id: {db_user.user_id} and users list")
 
         # Log action using SystemAction.INSERT
@@ -83,7 +83,20 @@ async def create_user(
             table_affected="users",
             record_id=db_user.user_id,
             old_values=None,
-            new_values=db_user.__dict__,
+            new_values={
+                "user_id": db_user.user_id,
+                "employee_id": db_user.employee_id,
+                "email": db_user.email,
+                "first_name": db_user.first_name,
+                "last_name": db_user.last_name,
+                "phone": db_user.phone,
+                "job_title": db_user.job_title,
+                "hire_date": db_user.hire_date.isoformat() if db_user.hire_date else None,
+                "employee_type": db_user.employee_type.value if hasattr(db_user.employee_type, 'value') else str(db_user.employee_type),
+                "salary": float(db_user.salary) if db_user.salary else None,
+                "supervisor_id": db_user.supervisor_id,
+                "is_active": db_user.is_active
+            },
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -116,7 +129,7 @@ async def read_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_USER]))
 ) -> UserOut:
     """Retrieve a user by ID."""
     try:
@@ -140,15 +153,15 @@ async def read_user(
         if not user:
             raise UserNotFoundError(user_id=user_id)
 
-        user_dict = UserOut.model_validate(user).model_dump()
-        await set_cache(cache_key, user_dict, ttl=300)
-        logger.info(f"Cache set for user_id inaccurately {user_id}", extra={"request_id": request_id})
+        user_out = UserOut.model_validate(user)
+        await set_cache(cache_key, user_out.model_dump(mode='json'), ttl=300)
+        logger.info(f"Cache set for user_id: {user_id}", extra={"request_id": request_id})
 
         logger.info(
             f"Retrieved user, user_id: {user_id}",
             extra={"request_id": request_id}
         )
-        return UserOut.model_validate(user)
+        return user_out
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}", extra={"request_id": request_id})
@@ -169,7 +182,7 @@ async def read_users(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_USER]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_USER]))
 ) -> List[UserOut]:
     """Retrieve a list of active users with pagination."""
     try:
@@ -190,7 +203,7 @@ async def read_users(
         result = await db.execute(query)
         users = result.scalars().all()
 
-        users_dict = [UserOut.model_validate(user).model_dump() for user in users]
+        users_dict = [UserOut.model_validate(user).model_dump(mode='json') for user in users]
         await set_cache(cache_key, users_dict, ttl=300)
         logger.info(f"Cache set for users list, skip: {skip}, limit: {limit}", extra={"request_id": request_id})
 
@@ -217,7 +230,7 @@ async def update_user(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.UPDATE_USER]))
+    _=Depends(require_permissions_dependency([Permission.UPDATE_USER]))
 ) -> UserOut:
     """Update a user with validation and logging."""
     try:
@@ -251,7 +264,7 @@ async def update_user(
                 raise ResourceConflictError(detail="Email already registered")
 
         if "supervisor_id" in update_data and update_data["supervisor_id"] is not None:
-            await validate_user_exists(update_data["supervisor_id"], db)
+            await validate_user_exists(db, update_data["supervisor_id"])
 
         if "employee_type" in update_data and update_data["employee_type"]:
             if not await validate_enum_value(EmployeeType, update_data["employee_type"]):
@@ -279,11 +292,24 @@ async def update_user(
         # Log action using SystemAction.UPDATE
         log = SystemLogCreate(
             user_id=current_user.user_id,
-            action=SystemAction.UPDATE,
+            action=SystemAction.INSERT,
             table_affected="users",
-            record_id=user_id,
-            old_values=old_values,
-            new_values=db_user.__dict__,
+            record_id=db_user.user_id,
+            old_values=None,
+            new_values={
+                "user_id": db_user.user_id,
+                "employee_id": db_user.employee_id,
+                "email": db_user.email,
+                "first_name": db_user.first_name,
+                "last_name": db_user.last_name,
+                "phone": db_user.phone,
+                "job_title": db_user.job_title,
+                "hire_date": db_user.hire_date.isoformat() if db_user.hire_date else None,
+                "employee_type": db_user.employee_type.value if hasattr(db_user.employee_type, 'value') else str(db_user.employee_type),
+                "salary": float(db_user.salary) if db_user.salary else None,
+                "supervisor_id": db_user.supervisor_id,
+                "is_active": db_user.is_active
+            },
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -318,7 +344,7 @@ async def delete_user(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.DELETE_USER]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_USER]))
 ) -> None:
     """Soft delete a user with validation and logging."""
     try:
@@ -356,13 +382,27 @@ async def delete_user(
         logger.info(f"Cache invalidated for user_id: {user_id} and users list")
 
         # Log action using SystemAction.DELETE
+        # Around line ~67, replace the entire log creation:
         log = SystemLogCreate(
             user_id=current_user.user_id,
-            action=SystemAction.DELETE,
+            action=SystemAction.INSERT,
             table_affected="users",
-            record_id=user_id,
-            old_values=db_user.__dict__,
-            new_values=None,
+            record_id=db_user.user_id,
+            old_values=None,
+            new_values={
+                "user_id": db_user.user_id,
+                "employee_id": db_user.employee_id,
+                "email": db_user.email,
+                "first_name": db_user.first_name,
+                "last_name": db_user.last_name,
+                "phone": db_user.phone,
+                "job_title": db_user.job_title,
+                "hire_date": db_user.hire_date.isoformat() if db_user.hire_date else None,
+                "employee_type": db_user.employee_type.value if hasattr(db_user.employee_type, 'value') else str(db_user.employee_type),
+                "salary": float(db_user.salary) if db_user.salary else None,
+                "supervisor_id": db_user.supervisor_id,
+                "is_active": db_user.is_active
+            },
             ip_address=str(request.client.host) if request else None,
             user_agent=request.headers.get("user-agent") if request else None,
             request_id=request_id
@@ -394,7 +434,7 @@ async def get_current_user_profile(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request_id: Optional[str] = None,
-    _: bool = Depends(require_permissions([Permission.VIEW_OWN_PROFILE]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_OWN_PROFILE]))
 ) -> UserOut:
     """Retrieve the current authenticated user's profile."""
     try:

@@ -117,7 +117,8 @@ async def shutdown():
 
 # Database dependency for FastAPI
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
+    session_factory = ensure_session_factory()
+    async with session_factory() as session:
         logger.debug(f"New database session created: {id(session)}")
         try:
             yield session
@@ -194,41 +195,9 @@ ENUM_CLASSES = {
     for (enum_class, name) in ENUM_CLASS_LIST
 }
 
-# Materialized view and index creation SQL statements - split into individual commands
+# Materialized view and table creation SQL statements
 MATERIALIZED_VIEW_SQLS = [
-    # Drop and create attendance_summary view
-    "DROP MATERIALIZED VIEW IF EXISTS attendance_summary;",
-    """
-    CREATE MATERIALIZED VIEW attendance_summary AS
-    SELECT 
-        u.user_id,
-        u.employee_id,
-        CONCAT(u.first_name, ' ', u.last_name) AS full_name,
-        d.department_name,
-        ar.date AS attendance_summary_date,
-        ar.status::attendance_status,
-        ar.total_hours,
-        ar.overtime_hours,
-        ar.clock_in_time,
-        ar.clock_out_time,
-        u.supervisor_id,
-        CONCAT(s.first_name, ' ', s.last_name) AS supervisor_name,
-        ar.is_active,
-        ar.created_at,
-        ar.updated_at
-    FROM users u
-        JOIN user_departments ud ON u.user_id = ud.user_id AND ud.is_primary = TRUE
-        JOIN departments d ON ud.department_id = d.department_id
-        LEFT JOIN attendance_records ar ON u.user_id = ar.user_id
-        LEFT JOIN users s ON u.supervisor_id = s.user_id
-    WHERE u.is_active = TRUE AND u.deleted_at IS NULL
-    WITH DATA;
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, attendance_summary_date);",
-    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name);",
-    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_status ON attendance_summary(status);",
-    
-    # Drop and create leave_request_summary view
+    # Drop and create leave_request_summary materialized view
     "DROP MATERIALIZED VIEW IF EXISTS leave_request_summary;",
     """
     CREATE MATERIALIZED VIEW leave_request_summary AS
@@ -255,7 +224,185 @@ MATERIALIZED_VIEW_SQLS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_leave_request_summary_user ON leave_request_summary(user_id);",
     "CREATE INDEX IF NOT EXISTS idx_leave_request_summary_status ON leave_request_summary(status);",
-    "CREATE INDEX IF NOT EXISTS idx_leave_request_summary_dates ON leave_request_summary(start_date, end_date);"
+    "CREATE INDEX IF NOT EXISTS idx_leave_request_summary_dates ON leave_request_summary(start_date, end_date);",
+    # Ensure attendance_summary table exists
+    """
+    CREATE TABLE IF NOT EXISTS attendance_summary (
+        user_id INTEGER NOT NULL,
+        employee_id VARCHAR(20),
+        full_name TEXT,
+        department_name VARCHAR(100),
+        attendance_summary_date DATE NOT NULL,
+        status attendance_status,
+        total_hours NUMERIC(4,2),
+        overtime_hours NUMERIC(4,2),
+        clock_in_time TIMESTAMP WITH TIME ZONE,
+        clock_out_time TIMESTAMP WITH TIME ZONE,
+        supervisor_id INTEGER,
+        supervisor_name TEXT,
+        is_active BOOLEAN DEFAULT TRUE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE,
+        updated_at TIMESTAMP WITH TIME ZONE,
+        CONSTRAINT pk_attendance_summary PRIMARY KEY (user_id, attendance_summary_date),
+        CONSTRAINT unique_user_summary_date UNIQUE (user_id, attendance_summary_date)
+    );
+    """,
+    # Ensure all required columns exist in attendance_summary
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'employee_id'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN employee_id VARCHAR(20);
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'full_name'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN full_name TEXT;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'department_name'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN department_name VARCHAR(100);
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'status'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN status attendance_status;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'total_hours'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN total_hours NUMERIC(4,2);
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'overtime_hours'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN overtime_hours NUMERIC(4,2);
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'clock_in_time'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN clock_in_time TIMESTAMP WITH TIME ZONE;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'clock_out_time'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN clock_out_time TIMESTAMP WITH TIME ZONE;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'supervisor_id'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN supervisor_id INTEGER;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'supervisor_name'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN supervisor_name TEXT;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'is_active'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN is_active BOOLEAN DEFAULT TRUE NOT NULL;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'created_at'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN created_at TIMESTAMP WITH TIME ZONE;
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'attendance_summary' AND column_name = 'updated_at'
+        ) THEN
+            ALTER TABLE attendance_summary ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE;
+        END IF;
+    END $$;
+    """,
+    # Ensure constraints exist
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name = 'pk_attendance_summary'
+        ) THEN
+            ALTER TABLE attendance_summary ADD CONSTRAINT pk_attendance_summary PRIMARY KEY (user_id, attendance_summary_date);
+        END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name = 'unique_user_summary_date'
+        ) THEN
+            ALTER TABLE attendance_summary ADD CONSTRAINT unique_user_summary_date UNIQUE (user_id, attendance_summary_date);
+        END IF;
+    END $$;
+    """,
+    # Create indexes for attendance_summary
+    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_user_date ON attendance_summary(user_id, attendance_summary_date);",
+    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_department ON attendance_summary(department_name);",
+    "CREATE INDEX IF NOT EXISTS idx_attendance_summary_status ON attendance_summary(status);"
 ]
 
 # Initialize database tables, enums, and views
@@ -350,13 +497,13 @@ async def init_db():
                 logger.error(f"Error adding column {column_name} to {table_name}: {str(e)}")
                 raise
 
-        # Create materialized views and indexes AFTER all tables exist
+        # Create materialized views, tables, and indexes
         for view_sql in MATERIALIZED_VIEW_SQLS:
             try:
                 await conn.execute(text(view_sql))
                 logger.info(f"Successfully executed: {view_sql.splitlines()[0]}")
             except Exception as e:
-                logger.error(f"Error creating materialized view/index: {str(e)}")
+                logger.error(f"Error creating materialized view/table/index: {str(e)}")
                 raise
 
         # Create indexes for better performance
@@ -389,7 +536,7 @@ async def init_db():
 )
 async def background_refresh_materialized_views():
     """Refresh all materialized views."""
-    materialized_views = ["attendance_summary", "leave_request_summary"]
+    materialized_views = ["leave_request_summary"]  # Only refresh leave_request_summary
     
     if AsyncSessionLocal is None:
         logger.warning("Database not initialized, skipping materialized view refresh")

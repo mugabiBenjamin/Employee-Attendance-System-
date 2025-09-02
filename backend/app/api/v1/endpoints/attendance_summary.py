@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import date
 from app.core.database import get_db
 from app.models.users import Users
-from app.core.permissions import require_permissions, require_attendance_view
+from app.core.permissions import require_permissions_dependency, require_attendance_view_dependency
 from app.core.security import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.utils import get_request_id
@@ -27,7 +27,6 @@ router = APIRouter(prefix="/attendance-summary", tags=["Attendance Summary"])
     summary="Get attendance summary by user and date range",
     description="Retrieve attendance summaries for a specific user within a date range, with optional department and active status filters."
 )
-@require_permissions([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE])
 async def get_attendance_summary_endpoint(
     request: Request,
     user_id: int,
@@ -39,7 +38,11 @@ async def get_attendance_summary_endpoint(
     limit: Optional[int] = None,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    # Minimal change: Keep original permissions
+    _=Depends(require_permissions_dependency([Permission.VIEW_OWN_ATTENDANCE, Permission.VIEW_ALL_ATTENDANCE]))
+    # Optional: Use require_attendance_view_dependency for broader access
+    # _=Depends(require_attendance_view_dependency())
 ) -> List[AttendanceSummaryOut]:
     """Retrieve attendance summaries for a user within a date range.
 
@@ -90,7 +93,6 @@ async def get_attendance_summary_endpoint(
     summary="Get all attendance summaries",
     description="Retrieve all attendance summaries with optional date range, department, and active status filters."
 )
-@require_permissions([Permission.VIEW_ALL_ATTENDANCE])
 async def get_all_attendance_summaries_endpoint(
     request: Request,
     department_id: Optional[int] = None,
@@ -100,7 +102,11 @@ async def get_all_attendance_summaries_endpoint(
     skip: int = 0,
     limit: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    # Minimal change: Keep original permissions
+    _=Depends(require_permissions_dependency([Permission.VIEW_ALL_ATTENDANCE]))
+    # Optional: Use require_attendance_view_dependency for broader access
+    # _=Depends(require_attendance_view_dependency())
 ) -> List[AttendanceSummaryOut]:
     """Retrieve all attendance summaries with optional filters and pagination.
 
@@ -148,14 +154,14 @@ async def get_all_attendance_summaries_endpoint(
     summary="Generate attendance summary",
     description="Generate an attendance summary for a specific user and date."
 )
-@require_permissions([Permission.GENERATE_REPORTS])
 async def generate_attendance_summary_endpoint(
     user_id: int,
     attendance_summary_date: date,
     request: Request,
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    _=Depends(require_permissions_dependency([Permission.GENERATE_REPORTS]))
 ) -> AttendanceSummaryOut:
     """Generate an attendance summary for a specific user and date.
 

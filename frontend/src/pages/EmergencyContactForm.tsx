@@ -3,27 +3,34 @@ import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { emergencyApi } from "@/api/emergency";
 import { z } from "zod";
-import { useParams, useNavigate, Navigate } from "react-router-dom";
-import GenericForm from "@/components/common/GenericForm";
+import { useParams, useNavigate } from "react-router-dom";
+import GenericForm, {
+  type FormFieldConfig,
+} from "@/components/common/GenericForm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { EmergencyContact } from "@/api/types";
+import type { EmergencyQuery } from "@/api/emergency";
 
 const emergencyContactSchema = z.object({
+  user_id: z.number().min(1, "User ID is required"),
   name: z.string().min(1, "Name is required"),
   relationship: z.string().min(1, "Relationship is required"),
   phone: z.string().min(1, "Phone is required"),
-  email: z.string().email().optional(),
+  email: z.string().email("Invalid email").optional(),
   address: z.string().optional(),
 });
 
-type EmergencyContactForm = z.infer<typeof emergencyContactSchema>;
+type EmergencyContactFormData = z.infer<typeof emergencyContactSchema>;
 
 function EmergencyContactForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [defaultValues, setDefaultValues] = useState<EmergencyContactForm>({
+  const [defaultValues, setDefaultValues] = useState<EmergencyContactFormData>({
+    user_id: user?.id || 0,
     name: "",
     relationship: "",
     phone: "",
@@ -31,25 +38,41 @@ function EmergencyContactForm() {
     address: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [fetchLoading, setFetchLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (id && user?.permissions.includes("manage_employees")) {
-      emergencyApi.getEmergencyContacts({}).then((data) => {
-        const contact = data.items.find((c) => c.emergency_contact_id === parseInt(id));
-        if (contact) {
+      setFetchLoading(true);
+      emergencyApi
+        .getEmergencyContacts({ id: parseInt(id) } as EmergencyQuery)
+        .then((response) => {
+          const contact: EmergencyContact = response.items[0];
+          if (!contact) {
+            throw new Error("Emergency contact not found");
+          }
           setDefaultValues({
+            user_id: contact.user_id,
             name: contact.name,
             relationship: contact.relationship,
             phone: contact.phone,
             email: contact.email || "",
             address: contact.address || "",
           });
-        }
-      });
+          setError(null);
+        })
+        .catch(() => {
+          setError("Failed to load emergency contact data");
+        })
+        .finally(() => setFetchLoading(false));
+    } else if (user) {
+      setDefaultValues((prev) => ({ ...prev, user_id: user.id }));
     }
   }, [id, user]);
 
-  const onSubmit = async (data: EmergencyContactForm) => {
+  const onSubmit = async (data: EmergencyContactFormData) => {
+    setLoading(true);
+    setError(null);
     try {
       if (id) {
         await emergencyApi.updateEmergencyContact(parseInt(id), data);
@@ -58,60 +81,70 @@ function EmergencyContactForm() {
       }
       navigate("/emergency-contacts");
     } catch {
-      setError("Failed to save emergency contact");
+      setError(`Failed to ${id ? "update" : "create"} emergency contact`);
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (
-    !user?.permissions.includes("view_own_attendance") &&
-    !user?.permissions.includes("manage_employees")
-  ) {
-    return <Navigate to="/" replace />;
-  }
-
-  const fields = [
+  const fields: FormFieldConfig<EmergencyContactFormData>[] = [
     {
-      name: "name" as const,
+      name: "user_id",
+      label: "User ID",
+      type: "number",
+      placeholder: "Enter user ID",
+      description: "The ID of the employee this contact is for",
+      disabled: !user?.permissions.includes("manage_employees"),
+    },
+    {
+      name: "name",
       label: "Name",
-      type: "text" as const,
+      type: "text",
       placeholder: "Enter name",
       description: "Contact name",
     },
     {
-      name: "relationship" as const,
+      name: "relationship",
       label: "Relationship",
-      type: "text" as const,
+      type: "text",
       placeholder: "Enter relationship",
       description: "Relationship to employee",
     },
     {
-      name: "phone" as const,
+      name: "phone",
       label: "Phone",
-      type: "text" as const,
+      type: "text",
       placeholder: "Enter phone number",
       description: "Contact phone number",
     },
     {
-      name: "email" as const,
+      name: "email",
       label: "Email",
-      type: "email" as const,
+      type: "email",
       placeholder: "Enter email",
       description: "Optional contact email",
     },
     {
-      name: "address" as const,
+      name: "address",
       label: "Address",
-      type: "text" as const,
+      type: "text",
       placeholder: "Enter address",
       description: "Optional contact address",
     },
   ];
 
+  if (
+    !user?.permissions.includes("view_own_attendance") &&
+    !user?.permissions.includes("manage_employees")
+  ) {
+    return null; // ProtectedRoute handles navigation
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
       {error && (
         <Alert variant="destructive">
-          <AlertCircleIcon />
+          <AlertCircleIcon className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -123,13 +156,22 @@ function EmergencyContactForm() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <GenericForm<EmergencyContactForm>
-            schema={emergencyContactSchema}
-            defaultValues={defaultValues}
-            fields={fields}
-            onSubmit={onSubmit}
-            submitButtonText={id ? "Update Contact" : "Create Contact"}
-          />
+          {fetchLoading ? (
+            <div className="space-y-4">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : (
+            <GenericForm<EmergencyContactFormData>
+              schema={emergencyContactSchema}
+              defaultValues={defaultValues}
+              fields={fields}
+              onSubmit={onSubmit}
+              submitButtonText={id ? "Update Contact" : "Create Contact"}
+              disabled={loading}
+            />
+          )}
         </CardContent>
       </Card>
     </div>

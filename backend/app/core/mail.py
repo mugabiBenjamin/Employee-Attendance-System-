@@ -3,6 +3,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional, List, Dict, Any
 import anyio
+import logging
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -10,7 +11,8 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.models.users import Users
 from app.core.exceptions import DatabaseError, ResourceNotFoundError
-import anyio
+
+logger = logging.getLogger(__name__)
 
 class EmailSchema(BaseModel):
     to_email: EmailStr
@@ -33,39 +35,83 @@ async def get_user_email(user_id: int, db: AsyncSession) -> Optional[str]:
     except Exception as e:
         raise DatabaseError(f"Failed to retrieve user email: {str(e)}")
 
-async def send_email(email_data: EmailSchema) -> None:
+async def send_email(
+    to_email: str,
+    subject: str, 
+    body: str,
+    cc_emails: Optional[List[str]] = None,
+    bcc_emails: Optional[List[str]] = None,
+    request_id: Optional[str] = None
+) -> None:
     """Send email using SMTP configuration from settings, running blocking SMTP in a thread."""
     def _send_email_blocking():
         try:
+            # Log the email send attempt with request_id for tracking
+            log_msg = f"Sending email to {to_email}, subject: {subject}"
+            if request_id:
+                log_msg += f" [Request ID: {request_id}]"
+            logger.info(log_msg)
+            
             msg = MIMEMultipart()
             msg['From'] = settings.MAIL_FROM
-            msg['To'] = email_data.to_email
-            msg['Subject'] = email_data.subject
-            if email_data.cc_emails:
-                msg['Cc'] = ", ".join(email_data.cc_emails)
-            if email_data.bcc_emails:
-                msg['Bcc'] = ", ".join(email_data.bcc_emails)
+            msg['To'] = to_email
+            msg['Subject'] = subject
+            
+            # Add CC recipients to header (visible to all recipients)
+            if cc_emails:
+                msg['Cc'] = ", ".join(cc_emails)
+            
+            # Add request_id as custom header if provided
+            if request_id:
+                msg['X-Request-ID'] = request_id
+            
+            # DO NOT add BCC to headers - they should remain "blind"
+            # BCC recipients will only be added to the SMTP envelope below
+            
+            msg.attach(MIMEText(body, 'plain'))
 
-            msg.attach(MIMEText(email_data.body, 'plain'))
+            # Build the complete recipient list for SMTP envelope
+            all_recipients = [to_email]
+            if cc_emails:
+                all_recipients.extend(cc_emails)
+            if bcc_emails:
+                all_recipients.extend(bcc_emails)
 
             with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT) as server:
                 if settings.MAIL_STARTTLS:
                     server.starttls()
                 server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
-                server.send_message(msg)
+                # Send to all recipients (including BCC) but BCC won't see each other
+                server.send_message(msg, to_addrs=all_recipients)
+                
+            # Log successful send
+            success_msg = f"Email sent successfully to {to_email}"
+            if cc_emails:
+                success_msg += f", CC: {', '.join(cc_emails)}"
+            if bcc_emails:
+                success_msg += f", BCC: {len(bcc_emails)} recipient(s)"
+            if request_id:
+                success_msg += f" [Request ID: {request_id}]"
+            logger.info(success_msg)
+            
         except Exception as e:
+            error_msg = f"Failed to send email to {to_email}: {str(e)}"
+            if request_id:
+                error_msg += f" [Request ID: {request_id}]"
+            logger.error(error_msg)
             raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
     await anyio.to_thread.run_sync(_send_email_blocking)
 
 async def send_email_notification(notification_type: str, context: Dict[str, Any], db: AsyncSession) -> None:
     """Unified function to construct and send email notifications based on type."""
-    email = await get_user_email(context.get("user_id"), db)
-    
+    email = context.get("email")
+    first_name = context.get("first_name", "User")
+
     if notification_type == "leave_notification":
         subject = f"Leave Request {context['status'].capitalize()} (ID: {context['leave_id']})"
         body = (
-            f"Dear User,\n\n"
+            f"Dear {first_name},\n\n"
             f"Your leave request (ID: {context['leave_id']}) has been {context['status']}.\n"
             f"Details:\n"
             f"Leave Type: {context['leave_type'].capitalize()}\n"
@@ -99,11 +145,11 @@ async def send_email_notification(notification_type: str, context: Dict[str, Any
     else:
         raise HTTPException(status_code=400, detail=f"Unknown notification type: {notification_type}")
 
-    email_data = EmailSchema(
+    await send_email(
         to_email=email,
         subject=subject,
         body=body,
         cc_emails=context.get("cc_emails"),
-        bcc_emails=context.get("bcc_emails")
+        bcc_emails=context.get("bcc_emails"),
+        request_id=context.get("request_id")
     )
-    await send_email(email_data)

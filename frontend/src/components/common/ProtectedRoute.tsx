@@ -4,10 +4,10 @@ import { useSelector } from "react-redux";
 import { AuthContext } from "@/context/AuthContext";
 import type { RootState } from "@/store";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Permission } from "@/api/enums"; // ✅ Import the backend-enum-mapped Permission type
+import type { Permission } from "@/api/types";
 
 interface ProtectedRouteProps {
-  requiredPermissions: Permission[]; // ✅ Strongly typed with Permission
+  requiredPermissions: Permission[];
   children?: ReactNode;
 }
 
@@ -46,13 +46,15 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/login" replace />;
   }
 
-  // ✅ Permission check is now type-safe
+  // ✅ Safe permissions handling
+  const userPermissions = authUser?.permissions ?? [];
+
   const hasPermission =
     requiredPermissions.length === 0 ||
     requiredPermissions.every(
       (perm) =>
-        authUser.permissions.includes(perm) ||
-        authUser.permissions.includes("all_permissions")
+        userPermissions.includes(perm) ||
+        userPermissions.includes("all_permissions")
     );
 
   if (!hasPermission) {

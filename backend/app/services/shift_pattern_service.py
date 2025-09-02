@@ -13,7 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.enums import SystemAction, Permission, ShiftType
 from app.core.exceptions import ShiftPatternNotFoundError, ValidationError, DatabaseError
 from app.core.security import get_current_user
-from app.core.permissions import require_permissions, invalidate_user_cache, get_user_permissions
+from app.core.permissions import require_permissions_dependency, invalidate_user_cache, get_user_permissions
 from app.core.database import get_db, get_cache, set_cache, invalidate_cache_prefix
 from app.core.validators import validate_shift_pattern_exists
 from app.core.utils import get_request_id, get_users_with_permission
@@ -30,7 +30,7 @@ async def create_shift_pattern(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.CREATE_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.CREATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """Create a new shift pattern with validation, logging, and notification."""
     try:
@@ -127,7 +127,7 @@ async def get_shift_pattern(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """Retrieve a shift pattern by ID with caching."""
     try:
@@ -185,7 +185,7 @@ async def list_shift_patterns(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.VIEW_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.VIEW_SHIFT_PATTERN]))
 ) -> List[ShiftPatternOut]:
     """Retrieve a list of active shift patterns with pagination and filtering."""
     try:
@@ -265,7 +265,7 @@ async def update_shift_pattern(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.UPDATE_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.UPDATE_SHIFT_PATTERN]))
 ) -> ShiftPatternOut:
     """Update a shift pattern with validation, logging, and notification."""
     try:
@@ -396,7 +396,7 @@ async def delete_shift_pattern(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     request_id: Optional[str] = Depends(get_request_id),
-    _: bool = Depends(require_permissions([Permission.DELETE_SHIFT_PATTERN]))
+    _= Depends(require_permissions_dependency([Permission.DELETE_SHIFT_PATTERN]))
 ) -> None:
     """Soft delete a shift pattern with validation, logging, and notification."""
     try:

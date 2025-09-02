@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
+import { toast } from "sonner";
 
-// Define interface for props
 interface ExportButtonsProps {
   onExportCSV: () => Promise<void>;
   onExportPDF: () => Promise<void>;
@@ -19,6 +19,10 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     setIsCSVLoading(true);
     try {
       await onExportCSV();
+      toast.success("CSV exported successfully");
+    } catch (error) {
+      toast.error("Failed to export CSV");
+      console.error("CSV export error:", error);
     } finally {
       setIsCSVLoading(false);
     }
@@ -28,6 +32,10 @@ const ExportButtons: React.FC<ExportButtonsProps> = ({
     setIsPDFLoading(true);
     try {
       await onExportPDF();
+      toast.success("PDF exported successfully");
+    } catch (error) {
+      toast.error("Failed to export PDF");
+      console.error("PDF export error:", error);
     } finally {
       setIsPDFLoading(false);
     }

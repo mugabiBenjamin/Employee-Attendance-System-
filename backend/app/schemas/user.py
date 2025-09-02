@@ -9,7 +9,7 @@ class UserCreate(BaseModel):
     password: str = Field(..., description="User password")
     first_name: str = Field(..., max_length=100, description="User first name")
     last_name: str = Field(..., max_length=100, description="User last name")
-    phone: Optional[str] = Field(None, pattern=r'^[\+]?[0-9\s\-\(\)]+$', description="User phone number")
+    phone: Optional[str] = Field(None, max_length=25, pattern=r'^[\+]?[0-9\s\-\(\)]+$', description="User phone number")
     job_title: Optional[str] = Field(None, max_length=100, description="User job title")
     hire_date: date = Field(..., description="User hire date")
     employee_type: str = Field('full_time', description="User employee type")
@@ -35,7 +35,7 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = Field(None, pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$', description="User email address")
     first_name: Optional[str] = Field(None, max_length=100, description="User first name")
     last_name: Optional[str] = Field(None, max_length=100, description="User last name")
-    phone: Optional[str] = Field(None, pattern=r'^[\+]?[0-9\s\-\(\)]+$', description="User phone number")
+    phone: Optional[str] = Field(None, max_length=25, pattern=r'^[\+]?[0-9\s\-\(\)]+$', description="User phone number")
     job_title: Optional[str] = Field(None, max_length=100, description="User job title")
     employee_type: Optional[str] = Field(None, description="User employee type")
     salary: Optional[float] = Field(None, ge=0, description="User salary")
@@ -74,4 +74,10 @@ class UserOut(BaseModel):
     created_at: datetime = Field(..., description="User creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="User update timestamp")
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_encoders={
+            date: lambda v: v.isoformat(),
+            datetime: lambda v: v.isoformat()
+        }
+    )

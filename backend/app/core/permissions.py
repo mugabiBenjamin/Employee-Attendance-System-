@@ -1,17 +1,18 @@
 from typing import List
-from functools import wraps
-from fastapi import HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
-from app.core.database import validate_enum_value
+from app.core.database import validate_enum_value, get_db
 from app.core.enums import Permission, PermissionGroup, PERMISSION_GROUPS
+from app.core.security import get_current_user
 from app.models.users import Users
 from app.models.user_roles import UserRoles
 from app.models.roles import Roles
 from app.core.exceptions import AuthorizationError
 import cachetools
 import logging
+import anyio
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,6 @@ async def get_role_permissions(role_id: int, db: AsyncSession) -> List[str]:
                 role_permissions = [perm.value for perm in Permission]
             else:
                 valid_permissions = [key for key, value in permissions.items() if value is True]
-                # Validate permissions against Permission enum
                 role_permissions = []
                 for perm in valid_permissions:
                     if await validate_enum_value(Permission, perm):
@@ -125,42 +125,25 @@ async def check_permissions(
             detail="Permission check failed"
         )
 
-def require_permissions(required_permissions: List[Permission]):
-    """Decorator to enforce permission checks for FastAPI routes."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if current_user and db:
-                await check_permissions(required_permissions, current_user, db)
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+def require_permissions_dependency(required_permissions: List[Permission]):
+    """Dependency to enforce permission checks for FastAPI routes."""
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        await check_permissions(required_permissions, current_user, db)
+    return inner
 
-def require_any_permissions(required_permissions: List[Permission]):
-    """Decorator that allows access if user has ANY of the required permissions."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if current_user and db:
-                user_permissions = await get_user_permissions(current_user.user_id, db)
-                required_perms_str = [perm.value for perm in required_permissions]
-                
-                if Permission.ALL_PERMISSIONS.value not in user_permissions:
-                    if not any(perm in user_permissions for perm in required_perms_str):
-                        raise AuthorizationError(
-                            detail=f"Missing any of required permissions: {required_perms_str}"
-                        )
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+def require_any_permissions_dependency(required_permissions: List[Permission]):
+    """Dependency that allows access if user has ANY of the required permissions."""
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        required_perms_str = [perm.value for perm in required_permissions]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_perms_str):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_perms_str}"
+                )
+    return inner
 
 async def get_user_permissions(user_id: int, db: AsyncSession) -> List[str]:
     """Get all permissions for a specific user."""
@@ -222,235 +205,268 @@ async def has_role_level_access(user_id: int, required_level: PermissionGroup, d
     except Exception:
         return False
 
-def invalidate_user_cache(user_id: int):
-    """Invalidate cached permissions for a user."""
-    cache_key = f"user_{user_id}_permissions"
-    user_permission_cache.pop(cache_key, None)
+def require_employee_access_dependency():
+    """Dependency to check if user has employee-level access."""
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        if not await has_role_level_access(current_user.user_id, PermissionGroup.EMPLOYEE, db):
+            raise AuthorizationError(detail="Employee access required")
+    return inner
 
-def invalidate_role_cache(role_id: int):
-    """Invalidate cached permissions for a role."""
-    cache_key = f"role_{role_id}_permissions"
-    role_permission_cache.pop(cache_key, None)
+def require_manager_access_dependency():
+    """Dependency to check if user has manager-level access."""
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        if not await has_role_level_access(current_user.user_id, PermissionGroup.MANAGER, db):
+            raise AuthorizationError(detail="Manager access required")
+    return inner
 
-def invalidate_department_cache(department_id: int):
-    """Invalidate cached permissions for a department."""
-    cache_key = f"department_{department_id}_permissions"
-    department_permission_cache.pop(cache_key, None)
-    
-async def invalidate_cache_prefix(prefix: str):
-    """Invalidate all cached entries that start with the given prefix."""
-    try:
-        # Get all cache keys that match the prefix
-        keys_to_remove = []
+def require_hr_access_dependency():
+    """Dependency to check if user has HR-level access."""
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        if not await has_role_level_access(current_user.user_id, PermissionGroup.HR, db):
+            raise AuthorizationError(detail="HR access required")
+    return inner
+
+def require_admin_access_dependency():
+    """Dependency to check if user has admin-level access."""
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        if not await has_role_level_access(current_user.user_id, PermissionGroup.ADMIN, db):
+            raise AuthorizationError(detail="Admin access required")
+    return inner
+
+def require_super_admin_access_dependency():
+    """Dependency to check if user has super admin access."""
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        if not await has_role_level_access(current_user.user_id, PermissionGroup.SUPER_ADMIN, db):
+            raise AuthorizationError(detail="Super admin access required")
+    return inner
+
+# Specific permission dependencies
+def require_leave_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
         
-        # Check user permission cache
-        for key in list(user_permission_cache.keys()):
-            if str(key).startswith(prefix):
-                keys_to_remove.append(('user', key))
+        required_permissions = [
+            Permission.VIEW_LEAVE_REQUEST.value,
+            Permission.VIEW_TEAM_LEAVE_REQUESTS.value,
+            Permission.VIEW_ALL_LEAVE_REQUESTS.value,
+            Permission.CREATE_ALL_LEAVE_REQUESTS.value,
+            Permission.APPROVE_LEAVE.value,
+            Permission.MANAGE_LEAVE.value
+        ]
         
-        # Check role permission cache  
-        for key in list(role_permission_cache.keys()):
-            if str(key).startswith(prefix):
-                keys_to_remove.append(('role', key))
-                
-        # Check department permission cache
-        for key in list(department_permission_cache.keys()):
-            if str(key).startswith(prefix):
-                keys_to_remove.append(('dept', key))
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
+
+def require_attendance_view_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
         
-        # Remove the keys
-        for cache_type, key in keys_to_remove:
-            if cache_type == 'user':
-                user_permission_cache.pop(key, None)
-            elif cache_type == 'role':
-                role_permission_cache.pop(key, None)
-            elif cache_type == 'dept':
-                department_permission_cache.pop(key, None)
-                
-        logger.debug(f"Invalidated {len(keys_to_remove)} cache entries with prefix: {prefix}")
+        required_permissions = [
+            Permission.VIEW_OWN_ATTENDANCE.value,
+            Permission.VIEW_TEAM_ATTENDANCE.value,
+            Permission.VIEW_ALL_ATTENDANCE.value,
+            Permission.VIEW_ATTENDANCE.value
+        ]
         
-    except Exception as e:
-        logger.error(f"Error invalidating cache with prefix {prefix}: {str(e)}")
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-# Role-based decorators
-def require_employee_access():
-    """Check if user has employee-level access."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if current_user and db:
-                if not await has_role_level_access(current_user.user_id, PermissionGroup.EMPLOYEE, db):
-                    raise AuthorizationError(detail="Employee access required")
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+def require_user_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.CREATE_USER.value,
+            Permission.VIEW_USER.value,
+            Permission.UPDATE_USER.value,
+            Permission.DELETE_USER.value,
+            Permission.MANAGE_USERS.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_manager_access():
-    """Check if user has manager-level access."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if current_user and db:
-                if not await has_role_level_access(current_user.user_id, PermissionGroup.MANAGER, db):
-                    raise AuthorizationError(detail="Manager access required")
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+def require_workflow_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        await require_permissions_dependency([Permission.DEFINE_WORKFLOW, Permission.VIEW_WORKFLOWS])(current_user, db)
+    return inner
 
-def require_hr_access():
-    """Check if user has HR-level access."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if current_user and db:
-                if not await has_role_level_access(current_user.user_id, PermissionGroup.HR, db):
-                    raise AuthorizationError(detail="HR access required")
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+def require_leave_approval_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        await require_permissions_dependency([Permission.APPROVE_LEAVE_REQUEST])(current_user, db)
+    return inner
 
-def require_admin_access():
-    """Check if user has admin-level access."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if current_user and db:
-                if not await has_role_level_access(current_user.user_id, PermissionGroup.ADMIN, db):
-                    raise AuthorizationError(detail="Admin access required")
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+def require_overtime_approval_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        await require_permissions_dependency([Permission.APPROVE_OVERTIME_RECORD])(current_user, db)
+    return inner
 
-def require_super_admin_access():
-    """Check if user has super admin access."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            current_user = kwargs.get('current_user')
-            db = kwargs.get('db')
-            
-            if current_user and db:
-                if not await has_role_level_access(current_user.user_id, PermissionGroup.SUPER_ADMIN, db):
-                    raise AuthorizationError(detail="Super admin access required")
-            
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+def require_department_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        await require_permissions_dependency([Permission.UPDATE_DEPARTMENT, Permission.CREATE_DEPARTMENT])(current_user, db)
+    return inner
 
-# Specific permission decorators
-def require_leave_management():
-    return require_any_permissions([
-        Permission.VIEW_LEAVE_REQUEST,
-        Permission.VIEW_TEAM_LEAVE_REQUESTS,
-        Permission.VIEW_ALL_LEAVE_REQUESTS,
-        Permission.CREATE_ALL_LEAVE_REQUESTS,
-        Permission.APPROVE_LEAVE,
-        Permission.MANAGE_LEAVE
-    ])
+def require_overtime_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.APPROVE_OVERTIME.value,
+            Permission.APPROVE_OVERTIME_RECORD.value,
+            Permission.MANAGE_OVERTIME.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_attendance_view():
-    return require_any_permissions([
-        Permission.VIEW_OWN_ATTENDANCE,
-        Permission.VIEW_TEAM_ATTENDANCE,
-        Permission.VIEW_ALL_ATTENDANCE,
-        Permission.VIEW_ATTENDANCE
-    ])
+def require_shift_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.MANAGE_SHIFT_PATTERNS.value,
+            Permission.MANAGE_SHIFT_ASSIGNMENTS.value,
+            Permission.CREATE_SHIFT_PATTERN.value,
+            Permission.UPDATE_SHIFT_PATTERN.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_user_management():
-    return require_any_permissions([
-        Permission.CREATE_USER,
-        Permission.VIEW_USER,
-        Permission.UPDATE_USER,
-        Permission.DELETE_USER,
-        Permission.MANAGE_USERS
-    ])
+def require_emergency_contact_access_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_OWN_EMERGENCY_CONTACT.value,
+            Permission.VIEW_EMERGENCY_CONTACT.value,
+            Permission.UPDATE_EMERGENCY_CONTACT.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_workflow_management():
-    return require_permissions([Permission.DEFINE_WORKFLOW, Permission.VIEW_WORKFLOWS])
+def require_hierarchy_access_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_OWN_HIERARCHY.value,
+            Permission.VIEW_HIERARCHY.value,
+            Permission.UPDATE_HIERARCHY.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_leave_approval():
-    return require_permissions([Permission.APPROVE_LEAVE_REQUEST])
+def require_attendance_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.MANAGE_ATTENDANCE.value,
+            Permission.VIEW_ATTENDANCE.value,
+            Permission.VIEW_ALL_ATTENDANCE.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_overtime_approval():
-    return require_permissions([Permission.APPROVE_OVERTIME_RECORD])
+def require_time_correction_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.MANAGE_TIME_CORRECTION.value,
+            Permission.CREATE_TIME_CORRECTION.value,
+            Permission.UPDATE_TIME_CORRECTION.value,
+            Permission.DELETE_TIME_CORRECTION.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_department_management():
-    return require_permissions([Permission.UPDATE_DEPARTMENT, Permission.CREATE_DEPARTMENT])
+def require_comprehensive_leave_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.CREATE_ALL_LEAVE_REQUESTS.value,
+            Permission.VIEW_ALL_LEAVE_REQUESTS.value,
+            Permission.APPROVE_LEAVE_REQUEST.value,
+            Permission.MANAGE_LEAVE.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
-def require_overtime_management():
-    return require_any_permissions([
-        Permission.APPROVE_OVERTIME,
-        Permission.APPROVE_OVERTIME_RECORD,
-        Permission.MANAGE_OVERTIME
-    ])
-
-def require_shift_management():
-    return require_any_permissions([
-        Permission.MANAGE_SHIFT_PATTERNS,
-        Permission.MANAGE_SHIFT_ASSIGNMENTS,
-        Permission.CREATE_SHIFT_PATTERN,
-        Permission.UPDATE_SHIFT_PATTERN
-    ])
-
-def require_emergency_contact_access():
-    return require_any_permissions([
-        Permission.VIEW_OWN_EMERGENCY_CONTACT,
-        Permission.VIEW_EMERGENCY_CONTACT,
-        Permission.UPDATE_EMERGENCY_CONTACT
-    ])
-
-def require_hierarchy_access():
-    return require_any_permissions([
-        Permission.VIEW_OWN_HIERARCHY,
-        Permission.VIEW_HIERARCHY,
-        Permission.UPDATE_HIERARCHY
-    ])
-    
-def require_attendance_management():
-    return require_any_permissions([
-        Permission.MANAGE_ATTENDANCE,
-        Permission.VIEW_ATTENDANCE,
-        Permission.VIEW_ALL_ATTENDANCE
-    ])
-
-def require_time_correction_management():
-    return require_any_permissions([
-        Permission.MANAGE_TIME_CORRECTION,
-        Permission.CREATE_TIME_CORRECTION,
-        Permission.UPDATE_TIME_CORRECTION,
-        Permission.DELETE_TIME_CORRECTION
-    ])
-
-def require_comprehensive_leave_management():
-    return require_any_permissions([
-        Permission.CREATE_ALL_LEAVE_REQUESTS,
-        Permission.VIEW_ALL_LEAVE_REQUESTS,
-        Permission.APPROVE_LEAVE_REQUEST,
-        Permission.MANAGE_LEAVE
-    ])
-
-def require_system_log_management():
-    return require_any_permissions([
-        Permission.VIEW_LOGS,
-        Permission.DELETE_LOGS,
-        Permission.CREATE_LOGS
-    ])
+def require_system_log_management_dependency():
+    async def inner(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+        user_permissions_raw = await get_user_permissions(current_user.user_id, db)
+        user_permissions = set(user_permissions_raw) if user_permissions_raw else set()
+        
+        required_permissions = [
+            Permission.VIEW_LOGS.value,
+            Permission.DELETE_LOGS.value,
+            Permission.CREATE_LOGS.value
+        ]
+        
+        if Permission.ALL_PERMISSIONS.value not in user_permissions:
+            if not any(perm in user_permissions for perm in required_permissions):
+                raise AuthorizationError(
+                    detail=f"Missing any of required permissions: {required_permissions}"
+                )
+    return inner
 
 async def validate_role_permissions(role_permissions: dict, db: AsyncSession) -> tuple[bool, list[str]]:
     """Validate that all permissions in a role exist in the Permission enum."""
@@ -502,3 +518,57 @@ async def get_effective_permissions(user_id: int, db: AsyncSession) -> dict:
             "has_all_permissions": False,
             "error": str(e)
         }
+
+async def invalidate_user_cache(user_id: int):
+    """Invalidate cached permissions for a user."""
+    cache_key = f"user_{user_id}_permissions"
+    await anyio.to_thread.run_sync(lambda: user_permission_cache.pop(cache_key, None))
+
+def invalidate_role_cache(role_id: int):
+    """Invalidate cached permissions for a role."""
+    cache_key = f"role_{role_id}_permissions"
+    role_permission_cache.pop(cache_key, None)
+
+def invalidate_department_cache(department_id: int):
+    """Invalidate cached permissions for a department."""
+    cache_key = f"department_{department_id}_permissions"
+    department_permission_cache.pop(cache_key, None)
+
+async def invalidate_in_memory_cache_prefix(prefix: str):
+    """
+    Invalidate all in-memory cached entries (TTLCache) that start with the given prefix.
+
+    This function clears cache entries in user_permission_cache, role_permission_cache,
+    and department_permission_cache that match the specified prefix. It is distinct from
+    the Redis-based `invalidate_cache_prefix` in `database.py`, which handles Redis cache keys.
+
+    Args:
+        prefix (str): The prefix to match cache keys against.
+    """
+    try:
+        keys_to_remove = []
+        
+        for key in list(user_permission_cache.keys()):
+            if str(key).startswith(prefix):
+                keys_to_remove.append(('user', key))
+        
+        for key in list(role_permission_cache.keys()):
+            if str(key).startswith(prefix):
+                keys_to_remove.append(('role', key))
+                
+        for key in list(department_permission_cache.keys()):
+            if str(key).startswith(prefix):
+                keys_to_remove.append(('dept', key))
+        
+        for cache_type, key in keys_to_remove:
+            if cache_type == 'user':
+                await anyio.to_thread.run_sync(lambda: user_permission_cache.pop(key, None))
+            elif cache_type == 'role':
+                await anyio.to_thread.run_sync(lambda: role_permission_cache.pop(key, None))
+            elif cache_type == 'dept':
+                await anyio.to_thread.run_sync(lambda: department_permission_cache.pop(key, None))
+                
+        logger.debug(f"Invalidated {len(keys_to_remove)} cache entries with prefix: {prefix}")
+        
+    except Exception as e:
+        logger.error(f"Error invalidating cache with prefix {prefix}: {str(e)}")

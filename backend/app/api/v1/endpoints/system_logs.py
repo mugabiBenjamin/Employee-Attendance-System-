@@ -17,7 +17,7 @@ from app.services.system_log_service import (
 )
 from app.schemas.system_log import SystemLogCreate, SystemLogOut, SystemLogActionSummary
 from app.core.enums import Permission
-from app.core.permissions import require_permissions
+from app.core.permissions import require_permissions_dependency
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ async def create_system_log_endpoint(
     current_user: Optional[Users] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.CREATE_LOGS]))
+    _=Depends(require_permissions_dependency([Permission.CREATE_LOGS]))
 ) -> SystemLogOut:
     """Create a new system log entry."""
     try:
@@ -60,7 +60,7 @@ async def read_system_log_endpoint(
     log_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> SystemLogOut:
     """Retrieve a system log by ID."""
     try:
@@ -93,7 +93,7 @@ async def read_system_logs_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
     """List system logs with optional filters and pagination."""
     try:
@@ -121,7 +121,7 @@ async def get_user_logs_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> List[SystemLogOut]:
     """Retrieve logs for a specific user."""
     try:
@@ -148,7 +148,7 @@ async def get_log_actions_summary_endpoint(
     request: Request = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    # _: bool = Depends(require_permissions([Permission.VIEW_LOGS]))
+    _=Depends(require_permissions_dependency([Permission.VIEW_LOGS]))
 ) -> List[SystemLogActionSummary]:
     """Retrieve a summary of system actions with occurrence counts."""
     try:
@@ -173,7 +173,7 @@ async def delete_system_log_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_permissions([Permission.DELETE_LOGS]))
+    _=Depends(require_permissions_dependency([Permission.DELETE_LOGS]))
 ) -> None:
     """Soft delete a system log."""
     try:

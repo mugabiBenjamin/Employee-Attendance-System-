@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "@/store";
 import { emergencyApi } from "@/api/emergency";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import GenericTable from "@/components/common/GenericTable";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,30 +16,86 @@ import {
 import type { EmergencyContact, PaginatedResponse } from "@/api/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircleIcon } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function EmergencyContactsList() {
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [contacts, setContacts] =
-    useState<PaginatedResponse<EmergencyContact> | null>(null);
+  const [contacts, setContacts] = useState<PaginatedResponse<EmergencyContact>>(
+    {
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 10,
+    }
+  );
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [search, setSearch] = useState<string>("");
+
+  const fetchContacts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await emergencyApi.getEmergencyContacts({
+        user_id: user?.permissions.includes("manage_employees")
+          ? undefined
+          : user?.id,
+        page,
+        limit,
+        search,
+      });
+      setContacts(
+        data ?? {
+          items: [],
+          total: 0,
+          page,
+          limit,
+        }
+      );
+    } catch {
+      setError("Failed to load emergency contacts");
+      setContacts({
+        items: [],
+        total: 0,
+        page,
+        limit,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [user, page, limit, search]);
 
   useEffect(() => {
     if (user) {
-      emergencyApi
-        .getEmergencyContacts({
-          user_id: user.permissions.includes("manage_employees")
-            ? undefined
-            : user.id,
-          page,
-          limit,
-        })
-        .then(setContacts)
-        .catch(() => setError("Failed to load emergency contacts"));
+      fetchContacts();
     }
-  }, [user, page, limit]);
+  }, [user, fetchContacts]);
+
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    try {
+      await emergencyApi.deleteEmergencyContact(deleteId);
+      await fetchContacts();
+      setDeleteId(null);
+    } catch {
+      setError("Failed to delete emergency contact");
+    }
+  };
 
   const columns: ColumnDef<EmergencyContact>[] = [
     {
@@ -62,61 +118,103 @@ function EmergencyContactsList() {
     {
       id: "actions",
       cell: ({ row }) => (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            navigate(`/emergency-contacts/edit/${row.original.emergency_contact_id}`)
-          }
-        >
-          Edit
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              navigate(
+                `/emergency-contacts/edit/${row.original.emergency_contact_id}`
+              )
+            }
+          >
+            Edit
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteId(row.original.emergency_contact_id)}
+          >
+            Delete
+          </Button>
+        </div>
       ),
     },
   ];
-
-  if (
-    !user?.permissions.includes("view_own_attendance") &&
-    !user?.permissions.includes("manage_employees")
-  ) {
-    return <Navigate to="/" replace />;
-  }
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
       {error && (
         <Alert variant="destructive">
-          <AlertCircleIcon />
+          <AlertCircleIcon className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <Button
-        onClick={() => navigate("/emergency-contacts/edit")}
-        className="self-start"
-      >
-        Add Emergency Contact
-      </Button>
-      <GenericTable
-        data={contacts?.items || []}
-        columns={columns}
-        filterColumn="name"
-      />
-      <Pagination>
-        <PaginationContent>
-          <PaginationItem>
-            <PaginationPrevious
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            />
-          </PaginationItem>
-          <PaginationItem>
-            <PaginationNext
-              onClick={() => setPage((p) => p + 1)}
-              disabled={!contacts?.total || page * limit >= contacts.total}
-            />
-          </PaginationItem>
-        </PaginationContent>
-      </Pagination>
+      <div className="flex gap-4">
+        <Button
+          onClick={() => navigate("/emergency-contacts/edit")}
+          className="self-start"
+        >
+          Add Emergency Contact
+        </Button>
+        <Input
+          placeholder="Search by name..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs"
+        />
+      </div>
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : !contacts?.items || contacts.items.length === 0 ? (
+        <div className="text-center text-sm text-muted-foreground">
+          No emergency contacts found
+        </div>
+      ) : (
+        <>
+          <GenericTable
+            data={contacts?.items || []}
+            columns={columns}
+            filterColumn="name"
+          />
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={contacts.total <= page * limit}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </>
+      )}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this emergency contact? This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
