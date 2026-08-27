@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status, Request, HTTPException
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import date
@@ -19,18 +19,14 @@ from app.services.overtime_record_service import (
 )
 from app.schemas.overtime_record import OvertimeRecordCreate, OvertimeRecordUpdate, OvertimeRecordOut, OvertimeRecordApproval
 from app.core.permissions import require_permissions_dependency
-import logging
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/overtime-records", tags=["Overtime Records"])
 
 @router.post(
     "/",
     response_model=OvertimeRecordOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create an overtime record",
-    description="Create a new overtime record with validation and notifications."
+    status_code=201,
+    summary="Create an overtime record"
 )
 async def create_overtime_record_endpoint(
     overtime: OvertimeRecordCreate,
@@ -40,36 +36,14 @@ async def create_overtime_record_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.CREATE_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
-    """Create a new overtime record.
-
-    Args:
-        overtime: The overtime record data to create.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        OvertimeRecordOut: The created overtime record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), database errors (500), or unexpected errors (500).
-    """
-    try:
-        request_id = get_request_id(request)
-        return await create_overtime_record(overtime, request, current_user, db, settings, request_id)
-    except HTTPException as e:
-        logger.error(f"Error creating overtime record: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error creating overtime record: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    """Create a new overtime record."""
+    request_id = get_request_id(request)
+    return await create_overtime_record(overtime, request, current_user, db, settings, request_id)
 
 @router.get(
     "/{overtime_id}",
     response_model=OvertimeRecordOut,
-    summary="Get overtime record by ID",
-    description="Retrieve a specific overtime record by its ID."
+    summary="Get overtime record by ID"
 )
 async def get_overtime_record_endpoint(
     overtime_id: int,
@@ -78,35 +52,14 @@ async def get_overtime_record_endpoint(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_permissions_dependency([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> OvertimeRecordOut:
-    """Retrieve an overtime record by ID.
-
-    Args:
-        overtime_id: The ID of the overtime record to retrieve.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-
-    Returns:
-        OvertimeRecordOut: The retrieved overtime record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
-    try:
-        request_id = get_request_id(request)
-        return await get_overtime_record(overtime_id, current_user, db, request_id)
-    except HTTPException as e:
-        logger.error(f"Error retrieving overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error retrieving overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    """Retrieve an overtime record by ID."""
+    request_id = get_request_id(request)
+    return await get_overtime_record(overtime_id, current_user, db, request_id)
 
 @router.get(
     "/user/{user_id}",
     response_model=List[OvertimeRecordOut],
-    summary="List user overtime records",
-    description="List overtime records for a specific user with optional status, date range, and pagination."
+    summary="List user overtime records"
 )
 async def get_user_overtime_records_endpoint(
     request: Request,
@@ -121,41 +74,14 @@ async def get_user_overtime_records_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.VIEW_OVERTIME_RECORD, Permission.VIEW_OWN_OVERTIME_RECORD]))
 ) -> List[OvertimeRecordOut]:
-    """List overtime records for a specific user.
-
-    Args:
-        user_id: The ID of the user whose overtime records are to be retrieved.
-        status: Optional filter for overtime record status (e.g., PENDING, APPROVED, REJECTED).
-        start_date: Optional start date for filtering records.
-        end_date: Optional end date for filtering records.
-        skip: Number of records to skip for pagination (default: 0).
-        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[OvertimeRecordOut]: List of overtime records.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
-    try:
-        request_id = get_request_id(request)
-        return await get_user_overtime_records(user_id, status, start_date, end_date, skip, limit, current_user, db, settings, request_id)
-    except HTTPException as e:
-        logger.error(f"Error listing user overtime records for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error listing user overtime records for user_id {user_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    """List overtime records for a specific user."""
+    request_id = get_request_id(request)
+    return await get_user_overtime_records(user_id, status, start_date, end_date, skip, limit, current_user, db, settings, request_id)
 
 @router.get(
     "/team",
     response_model=List[OvertimeRecordOut],
-    summary="List team overtime records",
-    description="List overtime records for a manager's team with optional status, date range, and pagination."
+    summary="List team overtime records"
 )
 async def get_team_overtime_records_endpoint(
     request: Request,
@@ -169,40 +95,14 @@ async def get_team_overtime_records_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.VIEW_TEAM_OVERTIME_RECORDS]))
 ) -> List[OvertimeRecordOut]:
-    """List overtime records for a manager's team.
-
-    Args:
-        status: Optional filter for overtime record status (e.g., PENDING, APPROVED, REJECTED).
-        start_date: Optional start date for filtering records.
-        end_date: Optional end date for filtering records.
-        skip: Number of records to skip for pagination (default: 0).
-        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[OvertimeRecordOut]: List of overtime records for the manager's team.
-
-    Raises:
-        HTTPException: For validation errors (422), database errors (500), or unexpected errors (500).
-    """
-    try:
-        request_id = get_request_id(request)
-        return await get_team_overtime_records(status, start_date, end_date, skip, limit, current_user, db, settings, request_id)
-    except HTTPException as e:
-        logger.error(f"Error listing team overtime records: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error listing team overtime records: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    """List overtime records for a manager's team."""
+    request_id = get_request_id(request)
+    return await get_team_overtime_records(status, start_date, end_date, skip, limit, current_user, db, settings, request_id)
 
 @router.put(
     "/{overtime_id}",
     response_model=OvertimeRecordOut,
-    summary="Update an overtime record",
-    description="Update an existing overtime record with new details."
+    summary="Update an overtime record"
 )
 async def update_overtime_record_endpoint(
     overtime_id: int,
@@ -213,37 +113,14 @@ async def update_overtime_record_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.UPDATE_OVERTIME]))
 ) -> OvertimeRecordOut:
-    """Update an overtime record.
-
-    Args:
-        overtime_id: The ID of the overtime record to update.
-        overtime_update: The updated overtime record data.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        OvertimeRecordOut: The updated overtime record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), database errors (500), or unexpected errors (500).
-    """
-    try:
-        request_id = get_request_id(request)
-        return await update_overtime_record(overtime_id, overtime_update, request, current_user, db, settings, request_id)
-    except HTTPException as e:
-        logger.error(f"Error updating overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error updating overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    """Update an overtime record."""
+    request_id = get_request_id(request)
+    return await update_overtime_record(overtime_id, overtime_update, request, current_user, db, settings, request_id)
 
 @router.put(
     "/{record_id}/approve",
     response_model=OvertimeRecordOut,
-    summary="Approve or reject an overtime record",
-    description="Approve or reject an overtime record with status update and notifications."
+    summary="Approve or reject an overtime record"
 )
 async def approve_overtime_record_endpoint(
     record_id: int,
@@ -254,37 +131,14 @@ async def approve_overtime_record_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.APPROVE_OVERTIME]))
 ) -> OvertimeRecordOut:
-    """Approve or reject an overtime record.
-
-    Args:
-        record_id: The ID of the overtime record to approve or reject.
-        approval: The approval data including status and comments.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        OvertimeRecordOut: The updated overtime record.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
-    try:
-        request_id = get_request_id(request)
-        return await approve_overtime_record(record_id, approval, request, current_user, db, settings, request_id)
-    except HTTPException as e:
-        logger.error(f"Error approving overtime record {record_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error approving overtime record {record_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    """Approve or reject an overtime record."""
+    request_id = get_request_id(request)
+    return await approve_overtime_record(record_id, approval, request, current_user, db, settings, request_id)
 
 @router.delete(
     "/{overtime_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete an overtime record",
-    description="Soft delete an overtime record with notifications."
+    status_code=204,
+    summary="Delete an overtime record"
 )
 async def delete_overtime_record_endpoint(
     overtime_id: int,
@@ -294,27 +148,6 @@ async def delete_overtime_record_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.DELETE_OVERTIME]))
 ) -> None:
-    """Soft delete an overtime record.
-
-    Args:
-        overtime_id: The ID of the overtime record to delete.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        None: No content returned on successful deletion.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), business logic errors (422), database errors (500), or unexpected errors (500).
-    """
-    try:
-        request_id = get_request_id(request)
-        await delete_overtime_record(overtime_id, request, current_user, db, settings, request_id)
-    except HTTPException as e:
-        logger.error(f"Error deleting overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error deleting overtime record {overtime_id}: {str(e)}", extra={"request_id": request_id, "user_id": current_user.user_id})
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
+    """Soft delete an overtime record."""
+    request_id = get_request_id(request)
+    await delete_overtime_record(overtime_id, request, current_user, db, settings, request_id)

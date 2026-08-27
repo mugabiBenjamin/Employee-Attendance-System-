@@ -34,25 +34,16 @@ async def login_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> Token:
-    """Handle user login.
-
-    Args:
-        request: The incoming HTTP request.
-        form_data: OAuth2 form data with username (email) and password.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        Token: JWT access and refresh tokens.
-    """
+    """Handle user login."""
     request_id = request.state.request_id
-    return await login_user(
+    result = await login_user(
         request=request,
         credentials={"username": form_data.username, "password": form_data.password},
         db=db,
         settings=settings,
         request_id=request_id
     )
+    return Token(**result)
 
 @router.post(
     "/refresh",
@@ -68,25 +59,16 @@ async def refresh_token_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.REFRESH_TOKEN]))
 ) -> Token:
-    """Handle token refresh.
-
-    Args:
-        request: The incoming HTTP request.
-        token_request: Refresh token data.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        Token: New JWT access and refresh tokens.
-    """
+    """Handle token refresh."""
     request_id = request.state.request_id
-    return await refresh_token(
+    result = await refresh_token(
         request=request,
         token_request=token_request.dict(),
         db=db,
         settings=settings,
         request_id=request_id
     )
+    return Token(**result)
 
 @router.post(
     "/logout",
@@ -101,18 +83,7 @@ async def logout_endpoint(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings)
 ) -> dict:
-    """Handle user logout.
-
-    Args:
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        token: The JWT token.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        dict: Logout confirmation message.
-    """
+    """Handle user logout."""
     request_id = request.state.request_id
     await logout_user(
         request=request,
@@ -135,22 +106,14 @@ async def get_profile_endpoint(
     current_user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
-    """Retrieve current user profile.
-
-    Args:
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        UserProfile: User profile data.
-    """
+    """Retrieve current user profile."""
     request_id = request.state.request_id
-    return await get_current_user_profile(
+    result = await get_current_user_profile(
         user=current_user,
         db=db,
         request_id=request_id
     )
+    return UserProfile(**result)
 
 @router.post(
     "/validate-token",
@@ -164,16 +127,7 @@ async def validate_token_endpoint(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_permissions_dependency([Permission.VIEW_OWN_PROFILE]))
 ) -> dict:
-    """Validate access token.
-
-    Args:
-        request: The incoming HTTP request.
-        current_user: The authenticated user.
-        db: Database session dependency.
-
-    Returns:
-        dict: Token validation result.
-    """
+    """Validate access token."""
     request_id = request.state.request_id
     return await validate_token(
         user=current_user,
