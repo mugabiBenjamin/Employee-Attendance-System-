@@ -175,115 +175,96 @@ class BusinessLogicError(BaseCustomException):
 
 # Business Logic Errors
 class LeavePolicyError(BusinessLogicError):
-    """Leave policy specific errors."""
     def __init__(self, detail: str = "Invalid leave policy"):
         super().__init__(detail, "LeavePolicy")
         self.error_code = "LEAVE_POLICY_INVALID"
 
 class OvertimePolicyError(BusinessLogicError):
-    """Overtime policy specific errors."""
     def __init__(self, detail: str = "Invalid overtime policy"):
         super().__init__(detail, "OvertimePolicy")
         self.error_code = "OVERTIME_POLICY_INVALID"
 
 class LeaveRequestError(BusinessLogicError):
-    """Leave request specific errors."""
     def __init__(self, detail: str = "Invalid leave request"):
         super().__init__(detail, "LeaveRequest")
         self.error_code = "LEAVE_REQUEST_INVALID"
 
 class AttendanceError(BusinessLogicError):
-    """Attendance operation errors."""
     def __init__(self, detail: str = "Invalid attendance operation"):
         super().__init__(detail, "Attendance")
         self.error_code = "ATTENDANCE_INVALID"
 
 class AttendanceOperationError(BusinessLogicError):
-    """Attendance clock-in or clock-out operation errors."""
     def __init__(self, detail: str = "Attendance operation failed", operation: Optional[str] = None):
         super().__init__(detail, f"AttendanceOperation_{operation}" if operation else "AttendanceOperation")
         self.error_code = f"ATTENDANCE_{operation.upper()}_INVALID" if operation else "ATTENDANCE_OPERATION_INVALID"
 
 class DuplicateAttendanceError(ResourceConflictError):
-    """Duplicate attendance record errors."""
     def __init__(self, detail: str = "Duplicate attendance record"):
         super().__init__(detail, "Attendance")
         self.error_code = "ATTENDANCE_DUPLICATE"
 
 class ShiftAssignmentError(BusinessLogicError):
-    """Shift assignment specific errors."""
     def __init__(self, detail: str = "Invalid shift assignment"):
         super().__init__(detail, "ShiftAssignment")
         self.error_code = "SHIFT_ASSIGNMENT_INVALID"
 
 class ShiftPatternError(BusinessLogicError):
-    """Shift pattern configuration errors."""
     def __init__(self, detail: str = "Invalid shift pattern"):
         super().__init__(detail, "ShiftPattern")
         self.error_code = "SHIFT_PATTERN_INVALID"
 
 class OvertimeRecordError(BusinessLogicError):
-    """Overtime record specific errors."""
     def __init__(self, detail: str = "Invalid overtime record"):
         super().__init__(detail, "OvertimeRecord")
         self.error_code = "OVERTIME_RECORD_INVALID"
 
 class LeaveBalanceError(BusinessLogicError):
-    """Leave balance specific errors."""
     def __init__(self, detail: str = "Leave balance error"):
         super().__init__(detail, "LeaveBalance")
         self.error_code = "LEAVE_BALANCE_INVALID"
 
 class InsufficientLeaveBalanceError(LeaveBalanceError):
-    """Insufficient leave balance errors."""
     def __init__(self, detail: str = "Insufficient leave balance"):
         super().__init__(detail)
         self.error_code = "LEAVE_BALANCE_INSUFFICIENT"
 
 class NegativeBalanceError(LeaveBalanceError):
-    """Negative balance errors."""
     def __init__(self, detail: str = "Negative balance not allowed"):
         super().__init__(detail)
         self.error_code = "LEAVE_BALANCE_NEGATIVE"
 
 class EmployeeHierarchyError(BusinessLogicError):
-    """Employee hierarchy specific errors (e.g., circular reporting)."""
     def __init__(self, detail: str = "Invalid employee hierarchy"):
         super().__init__(detail, "EmployeeHierarchy")
         self.error_code = "EMPLOYEE_HIERARCHY_INVALID"
 
 class HolidayCalendarError(BusinessLogicError):
-    """Holiday calendar specific errors."""
     def __init__(self, detail: str = "Invalid holiday calendar operation"):
         super().__init__(detail, "HolidayCalendar")
         self.error_code = "HOLIDAY_CALENDAR_INVALID"
 
 class LeaveApprovalWorkflowError(BusinessLogicError):
-    """Leave approval workflow specific errors."""
     def __init__(self, detail: str = "Invalid leave approval workflow"):
         super().__init__(detail, "LeaveApprovalWorkflow")
         self.error_code = "LEAVE_APPROVAL_WORKFLOW_INVALID"
 
 class TimeCorrectionError(BusinessLogicError):
-    """Time correction specific errors."""
     def __init__(self, detail: str = "Invalid time correction request"):
         super().__init__(detail, "TimeCorrection")
         self.error_code = "TIME_CORRECTION_INVALID"
 
 class EmployeeEmergencyContactError(BusinessLogicError):
-    """Employee emergency contact specific errors."""
     def __init__(self, detail: str = "Invalid emergency contact operation"):
         super().__init__(detail, "EmployeeEmergencyContact")
         self.error_code = "EMERGENCY_CONTACT_INVALID"
 
 class AttendanceSummaryError(BusinessLogicError):
-    """Attendance summary specific errors."""
     def __init__(self, detail: str = "Invalid attendance summary"):
         super().__init__(detail, "AttendanceSummary")
         self.error_code = "ATTENDANCE_SUMMARY_INVALID"
 
 class FileUploadError(BaseCustomException):
-    """File upload related errors."""
     def __init__(self, detail: str = "File upload error", status_override: Optional[int] = None):
         super().__init__(
             detail=detail,
@@ -292,7 +273,6 @@ class FileUploadError(BaseCustomException):
         )
 
 class WorkflowStateError(BusinessLogicError):
-    """Invalid workflow state transitions."""
     def __init__(self, detail: str = "Invalid state transition", from_state: Optional[str] = None, to_state: Optional[str] = None):
         if from_state and to_state:
             detail = f"Cannot transition from {from_state} to {to_state}: {detail}"
