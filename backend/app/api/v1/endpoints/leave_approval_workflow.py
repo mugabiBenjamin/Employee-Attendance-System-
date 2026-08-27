@@ -45,21 +45,7 @@ async def approve_leave_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.APPROVE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
-    """Approve or reject a leave request with workflow validation.
-
-    Args:
-        approval: The leave approval data including leave_id, approver_id, status, and comments.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        LeaveApprovalWorkflowOut: The created leave approval workflow entry.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
+    """Approve or reject a leave request with workflow validation."""
     request_id = get_request_id(request)
     return await approve_or_reject_leave(approval, request, current_user, db, settings, request_id)
 
@@ -77,21 +63,7 @@ async def get_leave_approval_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> LeaveApprovalWorkflowOut:
-    """Retrieve a leave approval by ID.
-
-    Args:
-        workflow_id: The ID of the leave approval workflow to retrieve.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        LeaveApprovalWorkflowOut: The retrieved leave approval workflow entry.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
+    """Retrieve a leave approval by ID."""
     request_id = get_request_id(request)
     return await get_leave_approval(workflow_id, current_user, db, settings, request_id)
 
@@ -111,23 +83,7 @@ async def get_leave_approvals_by_request_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.VIEW_LEAVE_APPROVAL]))
 ) -> List[LeaveApprovalWorkflowOut]:
-    """List leave approvals for a leave request with pagination.
-
-    Args:
-        leave_id: The ID of the leave request to retrieve approvals for.
-        skip: Number of records to skip for pagination (default: 0).
-        limit: Maximum number of records to return (default: DEFAULT_PAGE_SIZE).
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[LeaveApprovalWorkflowOut]: List of leave approval workflow entries.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
+    """List leave approvals for a leave request with pagination."""
     request_id = get_request_id(request)
     return await get_leave_approvals_by_request(leave_id, skip, limit, current_user, db, settings, request_id)
 
@@ -146,22 +102,7 @@ async def update_leave_approval_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.MANAGE_LEAVE]))
 ) -> LeaveApprovalWorkflowOut:
-    """Update a leave approval workflow entry.
-
-    Args:
-        workflow_id: The ID of the leave approval workflow to update.
-        update_data: The updated leave approval data.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        LeaveApprovalWorkflowOut: The updated leave approval workflow entry.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
+    """Update a leave approval workflow entry."""
     request_id = get_request_id(request)
     return await update_leave_approval(workflow_id, update_data, request, current_user, db, settings, request_id)
 
@@ -179,21 +120,7 @@ async def delete_leave_approval_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.MANAGE_LEAVE]))
 ) -> None:
-    """Soft delete a leave approval workflow entry.
-
-    Args:
-        workflow_id: The ID of the leave approval workflow to delete.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        None: No content returned on successful deletion.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), business logic errors (422), database errors (500), or unexpected errors (500).
-    """
+    """Soft delete a leave approval workflow entry."""
     request_id = get_request_id(request)
     await delete_leave_approval(workflow_id, request, current_user, db, settings, request_id)
 
@@ -212,21 +139,7 @@ async def define_workflow_steps_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.MANAGE_WORKFLOWS]))
 ) -> List[WorkflowStepOut]:
-    """Define leave approval workflow steps.
-
-    Args:
-        workflow_steps: List of workflow steps to create.
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[WorkflowStepOut]: List of created workflow steps.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
+    """Define leave approval workflow steps."""
     request_id = get_request_id(request)
     return await define_workflow_steps(workflow_steps, request, current_user, db, settings, request_id)
 
@@ -244,20 +157,6 @@ async def get_workflow_by_type_endpoint(
     settings: Settings = Depends(get_settings),
     _=Depends(require_permissions_dependency([Permission.VIEW_WORKFLOWS]))
 ) -> List[WorkflowStepOut]:
-    """Retrieve workflow steps by leave type.
-
-    Args:
-        leave_type: The leave type to filter workflows (e.g., ANNUAL, SICK).
-        request: The incoming HTTP request for logging client details.
-        current_user: The authenticated user performing the action.
-        db: Database session dependency.
-        settings: Application settings.
-
-    Returns:
-        List[WorkflowStepOut]: List of workflow steps for the specified leave type.
-
-    Raises:
-        HTTPException: For validation errors (422), not found (404), unauthorized (403), database errors (500), or unexpected errors (500).
-    """
+    """Retrieve workflow steps by leave type."""
     request_id = get_request_id(request)
     return await get_workflow_by_type(leave_type, current_user, db, settings, request_id)
