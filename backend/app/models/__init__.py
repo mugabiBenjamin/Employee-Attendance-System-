@@ -1,3 +1,4 @@
+from app.core.database import Base
 from app.models.attendance_records import AttendanceRecords
 from app.models.attendance_summary import AttendanceSummary
 from app.models.departments import Departments
@@ -19,6 +20,7 @@ from app.models.user_roles import UserRoles
 from app.models.users import Users
 
 __all__ = [
+    "Base",
     "AttendanceRecords",
     "AttendanceSummary",
     "Departments",
