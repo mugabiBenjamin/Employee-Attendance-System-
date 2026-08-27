@@ -1,49 +1,61 @@
 from fastapi import APIRouter
 
+# Import routers safely encapsulated by the endpoints package
 from app.api.v1.endpoints import (
-    attendance_records,
-    auth,
-    departments,
-    employee_emergency_contacts,
-    employee_hierarchy,
-    leave_requests,
-    roles,
-    shift_assignments,
-    shift_patterns,
-    system_logs,
-    user_departments,
-    user_roles,
-    users,
-    attendance_summary,
-    holiday_calendar,
-    leave_approval_workflow,
-    leave_balances,
-    leave_policies,
-    overtime_records,
-    time_corrections,
-    enums,
+    auth_router,
+    users_router,
+    roles_router,
+    user_roles_router,
+    departments_router,
+    user_departments_router,
+    attendance_records_router,
+    attendance_summary_router,
+    leave_requests_router,
+    leave_balances_router,
+    leave_policies_router,
+    workflows_router,
+    emergency_contacts_router,
+    hierarchy_router,
+    shift_patterns_router,
+    shift_assignments_router,
+    holidays_router,
+    overtime_router,
+    time_corrections_router,
+    system_logs_router,
+    enums_router,
 )
 
 api_router = APIRouter()
 
-api_router.include_router(auth.router)
-api_router.include_router(users.router)
-api_router.include_router(roles.router)
-api_router.include_router(user_roles.router)
-api_router.include_router(departments.router)
-api_router.include_router(user_departments.router)
-api_router.include_router(attendance_records.router)
-api_router.include_router(leave_requests.router)
-api_router.include_router(employee_emergency_contacts.router)
-api_router.include_router(employee_hierarchy.router)
-api_router.include_router(shift_patterns.router)
-api_router.include_router(shift_assignments.router)
-api_router.include_router(system_logs.router)
-api_router.include_router(attendance_summary.router)
-api_router.include_router(holiday_calendar.router)
-api_router.include_router(leave_approval_workflow.router)
-api_router.include_router(leave_balances.router)
-api_router.include_router(leave_policies.router)
-api_router.include_router(overtime_records.router)
-api_router.include_router(time_corrections.router)
-api_router.include_router(enums.router)
+# Authentication & Authorization
+api_router.include_router(auth_router)
+api_router.include_router(users_router)
+api_router.include_router(roles_router)
+api_router.include_router(user_roles_router)
+
+# Organization
+api_router.include_router(departments_router)
+api_router.include_router(user_departments_router)
+api_router.include_router(hierarchy_router)
+api_router.include_router(emergency_contacts_router)
+
+# Time & Attendance
+api_router.include_router(attendance_records_router)
+api_router.include_router(attendance_summary_router)
+api_router.include_router(time_corrections_router)
+api_router.include_router(overtime_router)
+api_router.include_router(holidays_router)
+
+# Leave Management
+api_router.include_router(leave_requests_router)
+api_router.include_router(leave_balances_router)
+api_router.include_router(leave_policies_router)
+api_router.include_router(workflows_router)
+
+# Shift Management
+api_router.include_router(shift_patterns_router)
+api_router.include_router(shift_assignments_router)
+
+# System Admin
+api_router.include_router(system_logs_router)
+api_router.include_router(enums_router)
