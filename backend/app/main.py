@@ -19,6 +19,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 from app.core.celery import app as celery_app
+from app.api.errors import setup_exception_handlers
 
 settings = get_settings()
 
@@ -113,6 +114,8 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan
 )
+
+setup_exception_handlers(app)
 
 # -----------------------
 # Middleware Configuration
