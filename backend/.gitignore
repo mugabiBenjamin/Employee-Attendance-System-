@@ -10,10 +10,18 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.egg
+*.egg-info/
+*.sage.py
+MANIFEST
 .Python
+.installed.cfg
+cython_debug/
+
+# Build & distribution 
 build/
-develop-eggs/
 dist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
@@ -24,26 +32,79 @@ sdist/
 var/
 wheels/
 share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# Virtual environments
+# Virtual environments 
 .venv/
 venv/
-ENV/
 env/
-.env/
+ENV/
 
-# IDE and editors
+# Testing
+.tox/
+.nox/
+.coverage
+.pytest_cache/
+.hypothesis/
+.cache
+htmlcov/
+cover/
+coverage.xml
+nosetests.xml
+*.cover
+*.py,cover
+
+# Type checkers 
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Database 
+*.db
+*.sqlite3
+
+# Logs 
+logs/
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Security
+*.pem
+*.key
+*.crt
+*.p12
+
+# Application specific 
+uploads/
+temp/
+backup/
+*.tmp
+*.temp
+
+# Scripts & tests (local only)
+scripts/
+tests/
+
+# Documentation 
+/site
+
+# Editor & IDE 
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.spyderproject
+.spyproject
+.ropeproject
 
-# OS generated files
+# OS generated
 .DS_Store
 .DS_Store?
 ._*
@@ -52,97 +113,8 @@ env/
 ehthumbs.db
 Thumbs.db
 
-# Logs
-logs/
-*.log
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Testing
-.tox/
-.nox/
-.coverage
-.pytest_cache/
-cover/
-htmlcov/
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-
-# Database
-*.db
-*.sqlite3
-
-# Jupyter Notebook
+# Jupyter
 .ipynb_checkpoints
 
-# pyenv
-# .python-version
-
-# pipenv
-Pipfile.lock
-
-# poetry
-poetry.lock
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# Application specific
-uploads/
-temp/
-*.tmp
-*.temp
-backup/
-
-# Security
-*.pem
-*.key
-*.crt
-*.p12
-
-# Lock files
-# uv.lock
-
-scripts/
-tests/
+# Repomix output
+*repomix-output.xml
