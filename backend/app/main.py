@@ -8,7 +8,6 @@ from app.core.config import get_settings
 from app.core.database import (
     get_db,
     initialize_engine_and_session,
-    init_db,
     start_background_refresh,
     shutdown
 )
@@ -29,7 +28,7 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 try:
     log_handler = logging.FileHandler(settings.LOG_FILE)
-    formatter = jsonlogger.JsonFormatter(
+    formatter = jsonlogger.JsonFormatter(  # type: ignore
         fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
         json_ensure_ascii=False
     )
@@ -79,7 +78,6 @@ async def lifespan(app: FastAPI):
     )
     try:
         await initialize_engine_and_session()
-        await init_db()
         await start_background_refresh()
 
         # Setup Celery periodic tasks if available
@@ -119,15 +117,10 @@ app = FastAPI(
 # -----------------------
 # Middleware Configuration
 # -----------------------
-# Set limiter on app state
-try:
-    if not hasattr(app, 'state'):
-        app.state = type('State', (), {})()
-    setattr(app.state, 'limiter', limiter)
-except Exception as e:
-    logger.warning(f"Could not set limiter on app state: {e}")
+# FastAPI guarantees app.state is initialized as a starlette.datastructures.State object.
+app.state.limiter = limiter
 
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
